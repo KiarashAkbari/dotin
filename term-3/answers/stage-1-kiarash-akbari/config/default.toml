@@ -41,3 +41,11 @@ url = "https://data.cityofnewyork.us/resource/pri4-ifjk.json"
 columns = ["modzcta", "label", "pop_est"]
 limit = 500
 path = "data/raw/reference/modzcta.json"
+
+[database]
+url = "postgresql+psycopg://kiarash@localhost:5432/olist_db"
+password_env = "OLIST_DB_PASSWORD"
+olist_csv_dir = "../stage-2-kiarash-akbari/data/raw/olist"
+stage1_curated_dir = "data/curated"
+batch_size = 5000
+sql_migrations_dir = "../stage-2-kiarash-akbari/sql"

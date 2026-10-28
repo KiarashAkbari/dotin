@@ -1,0 +1,27 @@
+-- REJECTED EXPERIMENT — DO NOT APPLY IN THE FINAL MIGRATION
+--
+-- Candidate: covering index for Q4 top-sellers order lookups.
+--
+-- Measured benefit:
+--   Q4 maximum fell from 347.81 ms to 276.87 ms.
+--   Q4 top-sellers CTE fell from about 233.34 ms to 77.60 ms.
+--   The plan used an Index Only Scan with heap_fetches = 0.
+--
+-- Reasons for rejection:
+--   Q4 median increased from 259.11 ms to 263.99 ms.
+--   Updating 1,000 orders rose from 30.53 ms to 45.29 ms median.
+--   Index size was 8,585,216 bytes, about 58% of the orders table size.
+--   The remaining Q4 cost was review aggregation, which this index cannot help.
+--
+-- Evidence files:
+--   data/curated/benchmark-q4-orders-cover-20261028-213050.json
+--   data/curated/write-overhead-orders-cover-20261028-213211.json
+--   data/curated/write-overhead-orders-no-cover-20261028-213358.json
+
+-- CREATE INDEX idx_orders_dashboard_cover
+-- ON olist.orders (order_id)
+-- INCLUDE (
+--     order_status,
+--     order_approved_at,
+--     order_delivered_carrier_date
+-- );
