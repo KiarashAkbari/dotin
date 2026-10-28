@@ -24,3 +24,7 @@ data/run_manifest*.json
 
 .ipynb_checkpoints/
 solution.before-fix.ipynb
+
+# Small, reviewed benchmark evidence (not raw datasets)
+!data/curated/benchmark-final-20261028-203102-777061.json
+!data/curated/q2-cte-comparison-20261028-202722-343310.json
