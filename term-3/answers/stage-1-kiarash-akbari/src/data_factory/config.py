@@ -59,12 +59,22 @@ class ReferenceConfig:
 
 
 @dataclass(frozen=True)
+class DatabaseConfig:
+    url: str
+    password_env: str
+    olist_csv_dir: Path
+    stage1_curated_dir: Path
+    batch_size: int
+
+
+@dataclass(frozen=True)
 class Config:
     source: SourceConfig
     http: HttpConfig
     paths: PathsConfig
     quality: QualityConfig
     reference: ReferenceConfig | None = None
+    database: DatabaseConfig | None = None
 
 
 def _section(data: dict, name: str) -> dict:
@@ -123,6 +133,20 @@ def _parse_reference(section: dict) -> ReferenceConfig:
     )
 
 
+def _parse_database(section: dict) -> DatabaseConfig:
+    batch_size = _get(section, "batch_size", "database")
+    if not _is_int(batch_size) or batch_size < 1:
+        raise ConfigError("database.batch_size must be an integer >= 1")
+
+    return DatabaseConfig(
+        url=str(_get(section, "url", "database")),
+        password_env=str(_get(section, "password_env", "database")),
+        olist_csv_dir=Path(_get(section, "olist_csv_dir", "database")),
+        stage1_curated_dir=Path(_get(section, "stage1_curated_dir", "database")),
+        batch_size=batch_size,
+    )
+
+
 def parse_config(data: dict) -> Config:
     s = _section(data, "source")
     h = _section(data, "http")
@@ -168,6 +192,7 @@ def parse_config(data: dict) -> Config:
         raise ConfigError("quality.min_rows_for_threshold must be an integer >= 1")
 
     reference = _parse_reference(_section(data, "reference")) if "reference" in data else None
+    database = _parse_database(_section(data, "database")) if "database" in data else None
 
     return Config(
         source=SourceConfig(
@@ -196,6 +221,7 @@ def parse_config(data: dict) -> Config:
         ),
         quality=QualityConfig(float(ratio), min_rows),
         reference=reference,
+        database=database,
     )
 
 

@@ -6,13 +6,21 @@ build-backend = "setuptools.build_meta"
 name = "data-factory"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["requests", "tzdata"]
+dependencies = [
+    "requests",
+    "tzdata",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+]
 
 [project.optional-dependencies]
-analysis = ["pandas", "matplotlib"]
+analysis = [
+    "pandas",
+    "matplotlib",
+]
 
 [project.scripts]
 data-factory = "data_factory.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src"] 

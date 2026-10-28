@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 
 from .config import Config, ReferenceConfig, load_config
+from .database import load_olist
 from .errors import ConfigError, DataError, PipelineError
 from .exit_codes import ExitCode
 from .fetch import SocrataSource, fetch_all, query_fingerprint
@@ -18,7 +19,7 @@ from .rolling import after_watermark, load_mark, load_watermark, rolling_config
 from .store import RawPageStore
 
 DEFAULT_CONFIG = "config/default.toml"
-COMMANDS = ("run", "fetch", "fetch-reference", "validate", "clean")
+COMMANDS = ("run", "fetch", "fetch-reference", "validate", "clean", "load-database")
 TOP_UNMATCHED_ZIPS = 5
 
 
@@ -138,6 +139,12 @@ def _run(cfg: Config, mark=None) -> None:
     _build(cfg, client.request_count, started_at, mark)
 
 
+def _load_database(cfg: Config) -> None:
+    results = load_olist(cfg)
+    for table, result in results.items():
+        print(f"table={table} loaded={result['loaded']}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -155,6 +162,8 @@ def main(argv: list[str] | None = None) -> int:
             _fetch_reference(cfg, HttpClient(cfg.http))
         elif args.command == "validate":
             _validate(cfg)
+        elif args.command == "load-database":
+            _load_database(cfg)
         else:
             _build(cfg, 0, utc_now_iso(), mark)
         return int(ExitCode.OK)
