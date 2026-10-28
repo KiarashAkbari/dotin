@@ -17,6 +17,10 @@ WIDE_FILENAME = "complaints_by_area_month.csv"
 TMP_SUFFIX = ".tmp"
 HASH_CHUNK_BYTES = 1 << 20
 UNKNOWN_AREA = "UNKNOWN"
+# The wide table's month columns are a contract: the database sink reads them
+# back by these prefixes, so neither side may spell them out separately.
+COUNT_PREFIX = "count_"
+RATE_PREFIX = "rate_per_10k_"
 MONTH_LENGTH = 7
 RATE_BASE = 10_000
 RATE_DECIMALS = 4
@@ -107,8 +111,8 @@ class AreaMonthAggregator:
             "modzcta",
             "population",
             "complaint_type",
-            *(f"count_{m}" for m in self._months),
-            *(f"rate_per_10k_{m}" for m in self._months),
+            *(f"{COUNT_PREFIX}{m}" for m in self._months),
+            *(f"{RATE_PREFIX}{m}" for m in self._months),
         )
 
     def add(self, row: Mapping[str, object]) -> None:
@@ -133,9 +137,9 @@ class AreaMonthAggregator:
             }
             counts = {m: self._counts.get((area, ctype, m), 0) for m in self._months}
             for month, count in counts.items():
-                out[f"count_{month}"] = count
+                out[f"{COUNT_PREFIX}{month}"] = count
             for month, count in counts.items():
-                out[f"rate_per_10k_{month}"] = _rate(count, population)
+                out[f"{RATE_PREFIX}{month}"] = _rate(count, population)
             yield out
 
 
