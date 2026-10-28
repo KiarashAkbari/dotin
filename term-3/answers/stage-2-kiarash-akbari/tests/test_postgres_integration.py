@@ -49,6 +49,15 @@ class PostgresIntegrationTests(unittest.TestCase):
         for filename in ("001_create_olist_schema.sql", "002_analytical_views.sql", "003_functions_and_snapshots.sql"):
             self.conn.execute(sa.text((SQL / filename).read_text(encoding="utf-8")))
         self.conn.execute(sa.text(FIXTURE))
+        for filename in (
+            "005_q4_seller_snapshot.sql",
+            "006_q5_payment_snapshot.sql",
+            "007_q1_monthly_category_snapshot.sql",
+            "008_q3_delay_satisfaction_snapshot.sql",
+        ):
+            self.conn.execute(
+                sa.text((SQL / filename).read_text(encoding="utf-8"))
+            )
 
     def query(self, filename):
         statement = sa.text((SQL / "queries" / filename).read_text(encoding="utf-8"))
