@@ -20,6 +20,9 @@
 -- sink converges instead of accumulating. A failure mid-load rolls the
 -- transaction back and the previously loaded rows stay exactly as they were.
 --
+-- Naming rule: every CHECK is a named constraint, so a violation says which
+-- rule broke instead of pointing at a line number.
+
 -- No performance indexes are created here. The five measured dashboard
 -- queries read the olist schema; indexes in this schema would be cost without
 -- a reader to justify it, which is the same rule 001 states for olist.
@@ -74,11 +77,12 @@ CREATE TABLE IF NOT EXISTS factory.complaint_area_month (
     modzcta         TEXT           NOT NULL,
     complaint_type  TEXT           NOT NULL,
     month_start     CHAR(7)        NOT NULL,
-    complaint_count INTEGER        NOT NULL CHECK (complaint_count >= 0),
+    complaint_count INTEGER        NOT NULL,
     rate_per_10k    NUMERIC(12, 4),
     population      BIGINT,
     CONSTRAINT pk_factory_complaint_area_month
         PRIMARY KEY (modzcta, complaint_type, month_start),
+    CONSTRAINT ck_factory_complaint_area_month_count CHECK (complaint_count >= 0),
     CONSTRAINT ck_factory_complaint_area_month_area CHECK (
         modzcta ~ '^([0-9]{5}|UNKNOWN)$'
     ),
@@ -98,18 +102,20 @@ CREATE TABLE IF NOT EXISTS factory.complaint_area_month (
 -- fail on structure it cannot flatten or quietly stringify the numbers.
 CREATE TABLE IF NOT EXISTS factory.column_quality (
     column_name     TEXT           NOT NULL,
-    rows_total      BIGINT         NOT NULL CHECK (rows_total >= 0),
-    null_count      BIGINT         NOT NULL CHECK (null_count >= 0),
+    rows_total      BIGINT         NOT NULL,
+    null_count      BIGINT         NOT NULL,
     null_percent    NUMERIC(8, 4)  NOT NULL,
     distinct_values INTEGER,
     distinct_capped BOOLEAN        NOT NULL,
     min_value       TEXT,
     max_value       TEXT,
     CONSTRAINT pk_factory_column_quality PRIMARY KEY (column_name),
+    CONSTRAINT ck_factory_column_quality_rows CHECK (rows_total >= 0),
+    CONSTRAINT ck_factory_column_quality_null_count CHECK (null_count >= 0),
     CONSTRAINT ck_factory_column_quality_share CHECK (
         null_percent >= 0 AND null_percent <= 100
     ),
-    CONSTRAINT ck_factory_column_quality_nulls CHECK (null_count <= rows_total)
+    CONSTRAINT ck_factory_column_quality_share_covers_rows CHECK (null_count <= rows_total)
 );
 
 -- One row: the report's scalars need a home that is not a column of every
@@ -139,9 +145,10 @@ CREATE TABLE IF NOT EXISTS factory.load_run (
     sink_table  TEXT        NOT NULL,
     file_name   TEXT        NOT NULL,
     sha256      VARCHAR(64) NOT NULL,
-    rows_loaded BIGINT      NOT NULL CHECK (rows_loaded >= 0),
+    rows_loaded BIGINT      NOT NULL,
     loaded_at   TIMESTAMPTZ NOT NULL,
     CONSTRAINT pk_factory_load_run PRIMARY KEY (sink_table),
+    CONSTRAINT ck_factory_load_run_rows CHECK (rows_loaded >= 0),
     CONSTRAINT ck_factory_load_run_hash CHECK (sha256 ~ '^[0-9a-f]{64}$')
 );
 
