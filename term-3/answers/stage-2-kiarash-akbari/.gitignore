@@ -21,3 +21,6 @@ data/curated/*
 !data/curated/.gitkeep
 data/run_manifest.json
 data/run_manifest*.json
+
+.ipynb_checkpoints/
+solution.before-fix.ipynb
