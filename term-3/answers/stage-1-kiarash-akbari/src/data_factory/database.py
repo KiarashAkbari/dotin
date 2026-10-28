@@ -164,3 +164,53 @@ def load_olist(cfg: Config) -> dict[str, dict[str, int]]:
             ) for table in OLIST_TABLES}
     finally:
         engine.dispose()
+
+
+def sql_migration_files(sql_dir: Path) -> list[Path]:
+    """Return direct, lexically ordered SQL migration files."""
+    sql_dir = Path(sql_dir)
+    if not sql_dir.is_dir():
+        raise DataError(
+            "SQL migrations directory not found",
+            context={"dir": str(sql_dir)},
+        )
+    return sorted(
+        path for path in sql_dir.glob("*.sql") if path.is_file()
+    )
+
+
+def reset_olist_schema(engine: sa.Engine) -> None:
+    """Drop the complete Olist schema so a rebuild starts from an empty database."""
+    with engine.begin() as connection:
+        connection.execute(sa.text("DROP SCHEMA IF EXISTS olist CASCADE"))
+
+def apply_sql_migrations(
+    engine: sa.Engine,
+    sql_dir: Path,
+    include=None,
+) -> list[str]:
+    """Apply selected direct SQL files in lexical order; each file is one transaction."""
+    files = sql_migration_files(sql_dir)
+    if include is not None:
+        files = [path for path in files if include(path)]
+
+    applied: list[str] = []
+
+    with engine.begin() as connection:
+        raw_connection = connection.connection.driver_connection
+        for path in files:
+            sql = path.read_text(encoding="utf-8")
+            try:
+                with raw_connection.cursor() as cursor:
+                    cursor.execute(sql)
+            except Exception as exc:
+                raise DataError(
+                    "SQL migration failed",
+                    context={
+                        "file": str(path),
+                        "error": str(exc),
+                    },
+                ) from exc
+            applied.append(path.name)
+
+    return applied

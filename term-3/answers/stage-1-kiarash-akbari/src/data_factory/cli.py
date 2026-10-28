@@ -2,9 +2,17 @@ import argparse
 import json
 import sys
 from datetime import datetime
+from pathlib import Path
+
+import sqlalchemy as sa
 
 from .config import Config, ReferenceConfig, load_config
-from .database import load_olist
+from .database import (
+    apply_sql_migrations,
+    build_database_url,
+    load_olist,
+    reset_olist_schema,
+)
 from .errors import ConfigError, DataError, PipelineError
 from .exit_codes import ExitCode
 from .fetch import SocrataSource, fetch_all, query_fingerprint
@@ -27,6 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="data-factory")
     parser.add_argument("command", nargs="?", default="run", choices=COMMANDS)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--skip-sql-migrations",
+        action="store_true",
+        help="load CSV data without applying configured SQL migrations",
+    )
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="drop and recreate the olist schema before loading data",
+    )
     parser.add_argument(
         "--since-last-run",
         action="store_true",
@@ -139,10 +157,63 @@ def _run(cfg: Config, mark=None) -> None:
     _build(cfg, client.request_count, started_at, mark)
 
 
-def _load_database(cfg: Config) -> None:
+def _is_base_migration(path: Path) -> bool:
+    return path.name[:3] in {"001", "002", "003"}
+
+
+def _is_snapshot_migration(path: Path) -> bool:
+    return path.name[:3] in {"005", "006", "007", "008"}
+
+
+def _load_database(
+    cfg: Config,
+    apply_migrations: bool = True,
+    reset: bool = False,
+) -> None:
+    if cfg.database is None:
+        raise DataError("Database destination is not configured")
+
+    engine = sa.create_engine(build_database_url(cfg))
+    try:
+        if reset:
+            reset_olist_schema(engine)
+            print("schema=reset")
+
+        if apply_migrations:
+            base_files = apply_sql_migrations(
+                engine,
+                cfg.database.sql_migrations_dir,
+                include=_is_base_migration,
+            )
+            print(
+                f"sql_migrations={len(base_files)} "
+                f"files={','.join(base_files)}"
+            )
+    finally:
+        engine.dispose()
+
     results = load_olist(cfg)
     for table, result in results.items():
         print(f"table={table} loaded={result['loaded']}")
+
+    if not apply_migrations:
+        print("sql_migrations=skipped")
+        return
+
+    engine = sa.create_engine(build_database_url(cfg))
+    try:
+        snapshot_files = apply_sql_migrations(
+            engine,
+            cfg.database.sql_migrations_dir,
+            include=_is_snapshot_migration,
+        )
+    finally:
+        engine.dispose()
+
+    print(
+        f"sql_snapshots={len(snapshot_files)} "
+        f"files={','.join(snapshot_files)}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -163,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "validate":
             _validate(cfg)
         elif args.command == "load-database":
-            _load_database(cfg)
+            _load_database(
+                cfg,
+                apply_migrations=not args.skip_sql_migrations,
+                reset=args.reset,
+            )
         else:
             _build(cfg, 0, utc_now_iso(), mark)
         return int(ExitCode.OK)
