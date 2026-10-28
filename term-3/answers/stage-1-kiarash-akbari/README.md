@@ -10,7 +10,7 @@
     python -m unittest discover -s tests      # تست‌ها، بدون اینترنت
     python -m data_factory run                # کل کارخانه با یک فرمان
 
-نیازمند Python 3.11 یا بالاتر است. برای اجرای نوت‌بوک بدون `requirements.txt` می‌شود از `pip install -e ".[analysis]"` استفاده کرد.
+نیازمند Python 3.12 یا بالاتر است (`requires-python` در `pyproject.toml`). علت، متادیتای خودِ قفل است: `numpy==2.5.4` در PyPI فقط روی `>=3.12` نصب می‌شود. برای اجرای نوت‌بوک بدون `requirements.txt` می‌شود از `pip install -e ".[analysis]"` استفاده کرد.
 
 اجرای کامل از پوشه‌ی خالی شامل دانلود حدود 1.08 میلیون رکورد است. اجرای دوباره روی همان بازه، بدون درخواست جدید (`requests=0`) و با hash یکسان خروجی‌ها انجام می‌شود. اجرای `--since-last-run` فقط داده‌ی بعد از آخرین اجرا را می‌گیرد و خروجی‌اش در `data/curated/rolling/` جدا ذخیره می‌شود. توکن Socrata اختیاری است: متغیر `SOCRATA_APP_TOKEN`.
 

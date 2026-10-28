@@ -1,3 +1,7 @@
+# Python floor: >=3.12. A requirements file cannot declare it, so it is stated here and
+# enforced in ../stage-1-kiarash-akbari/pyproject.toml (requires-python). Reason: this lock
+# pins numpy==2.5.4, whose PyPI metadata requires >=3.12; pandas 3.1.0 and SQLAlchemy 2.1.6
+# only ask for >=3.11.
 anyio==4.15.1
 argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
