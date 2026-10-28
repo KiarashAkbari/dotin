@@ -11,6 +11,8 @@ from .database import (
     apply_sql_migrations,
     build_database_url,
     load_olist,
+    load_stage1_sink,
+    reset_factory_schema,
     reset_olist_schema,
 )
 from .errors import ConfigError, DataError, PipelineError
@@ -43,7 +45,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="drop and recreate the olist schema before loading data",
+        help="drop the olist schema, and the factory sink schema unless "
+             "--skip-factory-sink is given, before loading data",
+    )
+    parser.add_argument(
+        "--skip-factory-sink",
+        action="store_true",
+        help="do not load the Stage 1 curated outputs into the factory schema",
     )
     parser.add_argument(
         "--since-last-run",
@@ -165,10 +173,20 @@ def _is_snapshot_migration(path: Path) -> bool:
     return path.name[:3] in {"005", "006", "007", "008"}
 
 
+def _is_sink_migration(path: Path) -> bool:
+    """The factory sink schema is its own group, applied right before its data.
+
+    It is deliberately not folded into the base group: the sink is a separate
+    destination, and a run that only rebuilds Olist must not need it.
+    """
+    return path.name[:3] in {"009"}
+
+
 def _load_database(
     cfg: Config,
     apply_migrations: bool = True,
     reset: bool = False,
+    with_sink: bool = True,
 ) -> None:
     if cfg.database is None:
         raise DataError("Database destination is not configured")
@@ -178,6 +196,9 @@ def _load_database(
         if reset:
             reset_olist_schema(engine)
             print("schema=reset")
+            if with_sink:
+                reset_factory_schema(engine)
+                print("factory_schema=reset")
 
         if apply_migrations:
             base_files = apply_sql_migrations(
@@ -198,10 +219,23 @@ def _load_database(
 
     if not apply_migrations:
         print("sql_migrations=skipped")
+        if with_sink:
+            print("factory_sink=skipped (the sink needs 009 to be applied)")
         return
 
     engine = sa.create_engine(build_database_url(cfg))
     try:
+        # The sink schema comes first: it is a destination for data, while the
+        # snapshot block derives objects from tables that are already loaded.
+        sink_files = (
+            apply_sql_migrations(
+                engine,
+                cfg.database.sql_migrations_dir,
+                include=_is_sink_migration,
+            )
+            if with_sink
+            else []
+        )
         snapshot_files = apply_sql_migrations(
             engine,
             cfg.database.sql_migrations_dir,
@@ -210,10 +244,31 @@ def _load_database(
     finally:
         engine.dispose()
 
+    if with_sink:
+        print(
+            f"factory_migrations={len(sink_files)} "
+            f"files={','.join(sink_files)}"
+        )
+    else:
+        print("factory_sink=skipped")
     print(
         f"sql_snapshots={len(snapshot_files)} "
         f"files={','.join(snapshot_files)}"
     )
+    if not with_sink:
+        return
+    if not sink_files:
+        raise DataError(
+            "Factory sink migration is missing",
+            context={
+                "dir": str(cfg.database.sql_migrations_dir),
+                "expected": "009_factory_sink_schema.sql",
+            },
+        )
+
+    sink = load_stage1_sink(cfg)
+    for table, result in sink.items():
+        print(f"factory_table={table} loaded={result['loaded']}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                 cfg,
                 apply_migrations=not args.skip_sql_migrations,
                 reset=args.reset,
+                with_sink=not args.skip_factory_sink,
             )
         else:
             _build(cfg, 0, utc_now_iso(), mark)
