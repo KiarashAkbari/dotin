@@ -23,4 +23,4 @@ analysis = [
 data-factory = "data_factory.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"] 
+where = ["src"]
