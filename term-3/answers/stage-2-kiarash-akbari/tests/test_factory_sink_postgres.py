@@ -129,7 +129,7 @@ class FactorySinkPostgresTests(unittest.TestCase):
 
         self._folder = tempfile.TemporaryDirectory()
         self.addCleanup(self._folder.cleanup)
-        self.curated = Path(self._folder.name)
+        self.curated = Path(self._folder.name) / "curated"
         self.curated.mkdir()
         self.cfg = dataclasses.replace(
             make_config(self.curated),
@@ -197,7 +197,9 @@ class FactorySinkPostgresTests(unittest.TestCase):
         self.load()
         values = {
             row["is_ambiguous"]
-            for row in self.conn.execute(sa.text("SELECT is_ambiguous FROM factory.case_file"))
+            for row in self.conn.execute(
+                sa.text("SELECT is_ambiguous FROM factory.case_file")
+            ).mappings()
         }
         self.assertEqual(values, {True, False})
         self.assertTrue(all(isinstance(value, bool) for value in values))
@@ -219,7 +221,7 @@ class FactorySinkPostgresTests(unittest.TestCase):
             row["month_start"]: row
             for row in self.conn.execute(sa.text(
                 "SELECT * FROM factory.complaint_area_month WHERE modzcta = '10001'"
-            ))
+            )).mappings()
         }
         self.assertEqual(rows["2025-01"]["rate_per_10k"], Decimal("30.0000"))
         self.assertEqual(str(rows["2025-01"]["rate_per_10k"]), "30.0000")
@@ -227,7 +229,7 @@ class FactorySinkPostgresTests(unittest.TestCase):
             row["month_start"]: row["rate_per_10k"]
             for row in self.conn.execute(sa.text(
                 "SELECT * FROM factory.complaint_area_month WHERE modzcta = 'UNKNOWN'"
-            ))
+            )).mappings()
         }
         self.assertIsNone(unknown["2025-01"], "a delivered empty rate is unknown, not zero")
         self.assertEqual(unknown["2025-02"], Decimal("40.0000"))
