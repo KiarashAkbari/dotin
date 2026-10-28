@@ -15,7 +15,7 @@
 
 ## تصمیم‌های کلیدی
 
-1. **unittest به‌جای pytest.** گزینه‌ها: pytest یا unittest. unittest را انتخاب کردم چون در کتابخانه‌ی استاندارد است. هزینه: syntax طولانی‌تر. شاهد: `python -m unittest discover -s tests` بدون اینترنت اجرا می‌شود و 205 تست دارد. مهاجرت در PR #6 انجام شد. پس از افزودن تست‌های schema فکتوری و بازنویسی `tests/test_sql_migrations.py` به `unittest.TestCase` (همان فایل در نسخهٔ base، `import pytest` داشت و فرمان بالا را به ImportError می‌کشاند)، همین فرمان ۲۵۷ تست را بدون skip اجرا می‌کند. اجرای جدا با `pytest` دستی نیز همان ۲۵۷ تست را قبول کرد؛ runner رسمی همچنان unittest است.
+1. **unittest به‌جای pytest.** گزینه‌ها: pytest یا unittest. unittest را انتخاب کردم چون در کتابخانه‌ی استاندارد است. هزینه: syntax طولانی‌تر. شاهد: `python -m unittest discover -s tests` بدون اینترنت اجرا می‌شود و 205 تست دارد. مهاجرت در PR #6 انجام شد. پس از افزودن تست‌های schema فکتوری و بازنویسی `tests/test_sql_migrations.py` به `unittest.TestCase`، همین فرمان ۲۵۷ تست را بدون skip اجرا می‌کند (`Ran 257 tests`، `OK`). آن فایل در نسخهٔ base `import pytest` داشت؛ چون `requirements.txt` این مرحله pytest را ندارد (grep روی آن: صفر سطر)، روی نصب پاک همان فرمان با `ModuleNotFoundError: No module named 'pytest'` می‌شکست (`Ran 215`، `FAILED (errors=1)`) و با pytest نصب‌شده سبز می‌شد؛ یعنی شکست وابسته به محیط بود و همین آن را پنهان نگه داشت. runner رسمی همچنان unittest است و اجرای دستی جدا با pytest نیز همان ۲۵۷ تست را قبول کرد.
 
 2. **اعتبارسنجی مدت با منطقه‌ی زمانی.** گزینه‌ها: datetime ساده یا آگاه از timezone. `zoneinfo` را انتخاب کردم چون ۸۷۶ timestamp مبهم (ساعت تکراری DST) در داده بود و بدون آن مدت‌ها غلط حساب می‌شد. هزینه: پیچیدگی `timeutil.py`. شاهد: `join.ambiguous_timestamps = 876` در manifest (بخش ۰ نوت‌بوک).
 
