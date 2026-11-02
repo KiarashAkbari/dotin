@@ -11,7 +11,7 @@
 | `tests/test_factory_sink_sql.py` (آفلاین) | `Ran 21 tests`، `OK` |
 | `tests/test_factory_sink_postgres.py` (PostgreSQL واقعی) | `Ran 16 tests`، `OK` |
 | `tests/test_postgres_integration.py` (PostgreSQL واقعی) | `Ran 9 tests`، `OK` |
-| `scripts/bootstrap_test_db.sh` عليه سرور واقعی | NOT RUN |
+| `scripts/bootstrap_test_db.sh` عليه سرور واقعی | OK (۹ + ۱۶ آزمون، صفر skip) |
 | `load-database --reset` کامل روی `olist_stage2_test` با داده‌ی واقعی | `exit=0`؛ `case_file` برابر 1,083,410 ردیف |
 
 ردیف‌های PostgreSQL و CLI از اجرای واقعی روی دیتابیس یک‌بارمصرف `olist_stage2_test` آمده‌اند؛ خروجی‌ها در `docs/evidence/` هستند. skip شدن تست‌ها قبولی حساب نمی‌شود.
@@ -147,4 +147,4 @@ unset OLIST_DB_PASSWORD
 
 ## دامنهٔ تحویل
 
-جزئیات تصمیم‌ها، Function و Procedure و پوشش تست در `report.md` است. ممیزی FK، هزینهٔ درج ایندکس، مقایسهٔ کامل view/snapshot، بازسازی از صفر و تست نصب تازه هنوز شواهد تکمیلی لازم دارند، و این مستندات تکمیل همهٔ الزامات مرحله را اعلام نمی‌کنند. برای schema فکتوری، اعمال ۰۰۹، محدودیت‌ها، همگرایی و بازگشت‌پذیری روی PostgreSQL واقعی اجرا شده‌اند؛ همین مسیر با اجرای کامل CLI روی داده‌ی واقعی هم بسته شد. فقط اسکریپت bootstrap و بارگذاری هم‌زمان هنوز بدون شاهدند.
+جزئیات تصمیم‌ها، Function و Procedure و پوشش تست در `report.md` است. ممیزی FK، هزینهٔ درج ایندکس، مقایسهٔ کامل view/snapshot، بازسازی از صفر و تست نصب تازه هنوز شواهد تکمیلی لازم دارند، و این مستندات تکمیل همهٔ الزامات مرحله را اعلام نمی‌کنند. برای schema فکتوری، اعمال ۰۰۹، محدودیت‌ها، همگرایی و بازگشت‌پذیری روی PostgreSQL واقعی اجرا شده‌اند؛ همین مسیر با اجرای کامل CLI روی داده‌ی واقعی هم بسته شد. اسکریپت bootstrap با `--run-only` و `-A kiarash` شاهد دارد؛ فقط بارگذاری هم‌زمان هنوز بدون شاهد است.

@@ -162,7 +162,7 @@ python -m data_factory load-database --config config/default.toml --reset
 
 | شاهد لازم | وضعیت |
 |---|---|
-| `scripts/bootstrap_test_db.sh` عليه سرور واقعی | NOT RUN؛ فقط dry run با stub (اجرای واقعی به اعتبار مدیر با `-A` نیاز دارد) |
+| `scripts/bootstrap_test_db.sh` عليه سرور واقعی | OK؛ `--run-only` با `-A kiarash` هر دو suite PostgreSQL را اجرا کرد (۹ + ۱۶ آزمون، صفر skip، `exit=0`)؛ دیتابیس `olist_stage2_bootstrap` دستی با `sudo -u postgres` ساخته شد، پس مسیر ساخت با `-A postgres` اجرا نشد. شاهد: `docs/evidence/bootstrap-test-db-run-1.txt` |
 | اجرای هم‌زمان دو بارگذاری sink | NOT RUN |
 | زمان بارگذاری یا هزینهٔ درج برای schema فکتوری | اندازه‌گیری نشده؛ عددی ادعا نمی‌شود |
 
@@ -200,7 +200,7 @@ skip شدن آزمون‌های نیازمند سرور در محیط بدون `
 
 تست idempotency ستون‌های تحلیلی snapshot را مقایسه می‌کند، نه `refreshed_at` را؛ همچنین هر دو فراخوانی در یک تراکنش‌اند. تست خطا از savepoint استفاده می‌کند و حفظ دادهٔ قبلی پس از rollback فراخوانی ناموفق را می‌سنجد. این پوشش جای آزمون اجرای هم‌زمان، ماه خالی، همهٔ حالت‌های مرزی یا اجرای مستقل در دو تراکنش را نمی‌گیرد. برابری هش در بنچمارک نیز به‌تنهایی صحت تجاری را ثابت نمی‌کند؛ تست fixture شاهد مکمل آن است.
 
-وضعیت شواهد در دور افزودهٔ schema فکتوری: جزئیات در بخش ۴.۷ است. `tests/test_factory_sink_sql.py` (۲۱ آزمون) آفلاین `OK` است؛ `tests/test_factory_sink_postgres.py` (۱۶ آزمون)، `tests/test_postgres_integration.py` (۹ آزمون) و اجرای کامل `load-database --reset` روی PostgreSQL واقعی `OK` بودند. `scripts/bootstrap_test_db.sh` عليه سرور واقعی هنوز اجرا نشده است (NOT RUN).
+وضعیت شواهد در دور افزودهٔ schema فکتوری: جزئیات در بخش ۴.۷ است. `tests/test_factory_sink_sql.py` (۲۱ آزمون) آفلاین `OK` است؛ `tests/test_factory_sink_postgres.py` (۱۶ آزمون)، `tests/test_postgres_integration.py` (۹ آزمون) و اجرای کامل `load-database --reset` روی PostgreSQL واقعی `OK` بودند. `scripts/bootstrap_test_db.sh` عليه سرور واقعی با `--run-only` و `-A kiarash` اجرا شد و هر دو suite PostgreSQL را با صفر skip پاس کرد (OK)؛ مسیر ساخت دیتابیس با `-A postgres` اجرا نشد.
 
 موارد زیر باید پیش از اعلام تکمیل کل مرحله با شواهد مستقل بسته شوند:
 
