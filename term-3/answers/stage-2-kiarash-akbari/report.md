@@ -156,7 +156,7 @@ python -m data_factory load-database --config config/default.toml --reset
 | `tests/test_postgres_integration.py` | `Ran 9 tests`، `OK` | همان فایل |
 | `load-database --reset` | `exit=0` | `docs/evidence/load-database-cli-run-2.txt` |
 
-ردیف‌های بارگذاری‌شده: `case_file` 1,083,410؛ `complaint_area_month` 18,378؛ `column_quality` 14؛ `load_run` 3. در دیتابیس: `quality_meta` یک ردیف با `conflict_count = 13` که با `COUNT(*)` جدول `borough_conflict` (13 ردیف) برابر است، و ردیف‌های `closed_at < created_at` برابر 64. هر سه SHA-256 ثبت‌شده در `load_run` با `sha256sum` فایل‌های روی دیسک برابر بود. زمان اجرا اندازه‌گیری نشد و عددی ادعا نمی‌شود.
+ردیف‌های بارگذاری‌شده: `case_file` 1,083,410؛ `complaint_area_month` 18,378؛ `column_quality` 14؛ `load_run` 3. در دیتابیس: `quality_meta` یک ردیف با `conflict_count = 13` که با `COUNT(*)` جدول `borough_conflict` (13 ردیف) برابر است، و ردیف‌های `closed_at < created_at` برابر 64. هر سه SHA-256 ثبت‌شده در `load_run` با `sha256sum` فایل‌های روی دیسک برابر بود؛ شاهد: `docs/evidence/load-run-hash-checks.txt`. زمان اجرا اندازه‌گیری نشد و عددی ادعا نمی‌شود.
 
 آنچه هنوز شاهد ندارد:
 
