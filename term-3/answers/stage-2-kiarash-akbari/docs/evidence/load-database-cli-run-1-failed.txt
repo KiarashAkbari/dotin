@@ -1,0 +1,80 @@
+Evidence provenance: raw terminal output (stdout and stderr via tee); not run by the assistant.
+Command: data_factory load-database --reset, config = copy of default.toml with database olist_stage2_test.
+Checkout at execution: HEAD 1474314, no tracked changes.
+Result: exit=1; ck_factory_case_file_order rejected a DST fall-back row (report.md 4.7).
+Execution environment: user's local PostgreSQL 16.15 (Ubuntu 24.04); database olist_stage2_test (disposable); role kiarash, non-superuser.
+Credentials omitted; home directory paths replaced with ~.
+
+error ignored terminating <psycopg.Pipeline [INERROR, pipeline=ON] (host=localhost user=kiarash database=olist_stage2_test) at 0x754d1bfda870>: pipeline aborted
+Traceback (most recent call last):
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1927, in _exec_single_context
+    self.dialect.do_executemany(
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 1189, in do_executemany
+    cursor.executemany(statement, parameters)
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/psycopg/cursor.py", line 148, in executemany
+    raise ex.with_traceback(None)
+psycopg.errors.CheckViolation: new row for relation "case_file" violates check constraint "ck_factory_case_file_order"
+DETAIL:  Failing row contains (66691064, 2025-11-02 01:04:03, 2025-11-02 01:03:22, 3559, t, NYPD, Noise - Residential, Loud Music/Party, Closed, BRONX, 01 BRONX, 10454, 10454, 38203).
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/src/data_factory/__main__.py", line 5, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/src/data_factory/cli.py", line 292, in main
+    _load_database(
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/src/data_factory/cli.py", line 269, in _load_database
+    sink = load_stage1_sink(cfg)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/src/data_factory/database.py", line 666, in load_stage1_sink
+    return _load_sink(owned, cfg, paths)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/src/data_factory/database.py", line 617, in _load_sink
+    SINK_CASE_TABLE: load_csv(
+                     ^^^^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/src/data_factory/database.py", line 186, in load_csv
+    connection.execute(sa.insert(target), converted)
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1463, in execute
+    return meth(
+           ^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 533, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1683, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1837, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1977, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2347, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1927, in _exec_single_context
+    self.dialect.do_executemany(
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 1189, in do_executemany
+    cursor.executemany(statement, parameters)
+  File "~/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/lib/python3.12/site-packages/psycopg/cursor.py", line 148, in executemany
+    raise ex.with_traceback(None)
+sqlalchemy.exc.IntegrityError: (psycopg.errors.CheckViolation) new row for relation "case_file" violates check constraint "ck_factory_case_file_order"
+DETAIL:  Failing row contains (66691064, 2025-11-02 01:04:03, 2025-11-02 01:03:22, 3559, t, NYPD, Noise - Residential, Loud Music/Party, Closed, BRONX, 01 BRONX, 10454, 10454, 38203).
+[SQL: INSERT INTO factory.case_file (unique_key, created_at, closed_at, duration_seconds, is_ambiguous, agency, complaint_type, descriptor, status, borough, community_board, incident_zip, modzcta, population) VALUES (%(unique_key)s::BIGINT, %(created_at)s::TIMESTAMP WITHOUT TIME ZONE, %(closed_at)s::TIMESTAMP WITHOUT TIME ZONE, %(duration_seconds)s::BIGINT, %(is_ambiguous)s, %(agency)s::VARCHAR, %(complaint_type)s::VARCHAR, %(descriptor)s::VARCHAR, %(status)s::VARCHAR, %(borough)s::VARCHAR, %(community_board)s::VARCHAR, %(incident_zip)s::VARCHAR, %(modzcta)s::VARCHAR, %(population)s::BIGINT)]
+[parameters: [{'unique_key': 66692336, 'created_at': datetime.datetime(2025, 11, 1, 9, 0, 26), 'closed_at': datetime.datetime(2025, 11, 1, 9, 21, 32), 'duration_seconds': 1266, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Banging/Pounding', 'status': 'Closed', 'borough': 'MANHATTAN', 'community_board': '03 MANHATTAN', 'incident_zip': '10002', 'modzcta': '10002', 'population': 74993}, {'unique_key': 66686674, 'created_at': datetime.datetime(2025, 11, 1, 9, 0, 31), 'closed_at': datetime.datetime(2025, 11, 1, 9, 35, 53), 'duration_seconds': 2122, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Banging/Pounding', 'status': 'Closed', 'borough': 'BROOKLYN', 'community_board': '02 BROOKLYN', 'incident_zip': '11201', 'modzcta': '11201', 'population': 62823}, {'unique_key': 66686901, 'created_at': datetime.datetime(2025, 11, 1, 9, 1, 13), 'closed_at': datetime.datetime(2025, 11, 1, 9, 24, 3), 'duration_seconds': 1370, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Street/Sidewalk', 'descriptor': 'Loud Music/Party', 'status': 'Closed', 'borough': 'BROOKLYN', 'community_board': '14 BROOKLYN', 'incident_zip': '11226', 'modzcta': '11226', 'population': 100277}, {'unique_key': 66693722, 'created_at': datetime.datetime(2025, 11, 1, 9, 1, 29), 'closed_at': datetime.datetime(2025, 11, 1, 11, 22, 42), 'duration_seconds': 8473, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Banging/Pounding', 'status': 'Closed', 'borough': 'BROOKLYN', 'community_board': '09 BROOKLYN', 'incident_zip': '11203', 'modzcta': '11203', 'population': 75451}, {'unique_key': 66695082, 'created_at': datetime.datetime(2025, 11, 1, 9, 3, 18), 'closed_at': datetime.datetime(2025, 11, 1, 9, 30, 36), 'duration_seconds': 1638, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Banging/Pounding', 'status': 'Closed', 'borough': 'BROOKLYN', 'community_board': '14 BROOKLYN', 'incident_zip': '11226', 'modzcta': '11226', 'population': 100277}, {'unique_key': 66689592, 'created_at': datetime.datetime(2025, 11, 1, 9, 3, 51), 'closed_at': datetime.datetime(2025, 11, 1, 9, 13, 44), 'duration_seconds': 593, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Loud Music/Party', 'status': 'Closed', 'borough': 'MANHATTAN', 'community_board': '05 MANHATTAN', 'incident_zip': '10010', 'modzcta': '10010', 'population': 33730}, {'unique_key': 66689319, 'created_at': datetime.datetime(2025, 11, 1, 9, 4, 14), 'closed_at': datetime.datetime(2025, 11, 1, 12, 0, 47), 'duration_seconds': 10593, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Vehicle', 'descriptor': 'Car/Truck Horn', 'status': 'Closed', 'borough': 'QUEENS', 'community_board': '03 QUEENS', 'incident_zip': '11372', 'modzcta': '11372', 'population': 61844}, {'unique_key': 66695304, 'created_at': datetime.datetime(2025, 11, 1, 9, 5, 53), 'closed_at': datetime.datetime(2025, 11, 1, 14, 43, 32), 'duration_seconds': 20259, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Street/Sidewalk', 'descriptor': 'Loud Music/Party', 'status': 'Closed', 'borough': 'BROOKLYN', 'community_board': '11 BROOKLYN', 'incident_zip': '11214', 'modzcta': '11214', 'population': 92946}  ... displaying 10 of 5000 total bound parameter sets ...  {'unique_key': 66703815, 'created_at': datetime.datetime(2025, 11, 3, 1, 30, 33), 'closed_at': datetime.datetime(2025, 11, 3, 2, 30, 22), 'duration_seconds': 3589, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Loud Music/Party', 'status': 'Closed', 'borough': 'MANHATTAN', 'community_board': '12 MANHATTAN', 'incident_zip': '10034', 'modzcta': '10034', 'population': 42910}, {'unique_key': 66701580, 'created_at': datetime.datetime(2025, 11, 3, 1, 32, 2), 'closed_at': datetime.datetime(2025, 11, 3, 6, 16, 3), 'duration_seconds': 17041, 'is_ambiguous': False, 'agency': 'NYPD', 'complaint_type': 'Noise - Residential', 'descriptor': 'Banging/Pounding', 'status': 'Closed', 'borough': 'BRONX', 'community_board': '07 BRONX', 'incident_zip': '10458', 'modzcta': '10458', 'population': 83960}]]
+(Background on this error at: https://sqlalche.me/e/21/gkpj)
+schema=reset
+factory_schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=71
+table=customers loaded=99441
+table=sellers loaded=3095
+table=products loaded=32951
+table=geolocation loaded=738332
+table=orders loaded=99441
+table=order_items loaded=112650
+table=payments loaded=103886
+table=order_reviews loaded=99224
+factory_migrations=1 files=009_factory_sink_schema.sql
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql

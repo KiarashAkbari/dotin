@@ -300,9 +300,9 @@ class FactorySinkPostgresTests(unittest.TestCase):
              "(99, '2025-01-01T00:00:00', false, 'NYPD', 'Noise', 'Closed', 'QUEENS', '1234')",
              "ck_factory_case_file_zip"),
             ("INSERT INTO factory.case_file (unique_key, created_at, is_ambiguous, agency, "
-             "complaint_type, status, borough, closed_at) VALUES "
+             "complaint_type, status, borough, closed_at, duration_seconds) VALUES "
              "(98, '2025-01-01T00:00:00', false, 'NYPD', 'Noise', 'Closed', 'QUEENS', "
-             "'2024-12-31T23:59:59')", "ck_factory_case_file_order"),
+             "'2025-01-01T00:00:01', -1)", "ck_factory_case_file_duration"),
             ("INSERT INTO factory.complaint_area_month (modzcta, complaint_type, month_start, "
              "complaint_count) VALUES ('10001', 'Noise', '2025-03', -1)",
              "ck_factory_complaint_area_month_count"),
@@ -320,6 +320,20 @@ class FactorySinkPostgresTests(unittest.TestCase):
         for sql, constraint in cases:
             with self.subTest(constraint=constraint):
                 self.assertRejected(sql, constraint)
+
+    def test_a_fall_back_case_closes_before_it_opens_on_the_clock(self):
+        # 2025-11-02 01:04:03 EDT to 01:03:22 EST is 3559 seconds apart: the
+        # naive local columns are inverted, the duration is not.
+        self.load()
+        self.conn.execute(sa.text(
+            "INSERT INTO factory.case_file (unique_key, created_at, closed_at, "
+            "duration_seconds, is_ambiguous, agency, complaint_type, status, borough) "
+            "VALUES (97, '2025-11-02T01:04:03', '2025-11-02T01:03:22', 3559, false, "
+            "'NYPD', 'Noise - Residential', 'Closed', 'BRONX')"))
+        row = self.conn.execute(sa.text(
+            "SELECT closed_at < created_at AS inverted, duration_seconds "
+            "FROM factory.case_file WHERE unique_key = 97")).mappings().one()
+        self.assertEqual((row["inverted"], row["duration_seconds"]), (True, 3559))
 
     def test_primary_keys_reject_duplicates(self):
         self.load()

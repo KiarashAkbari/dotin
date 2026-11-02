@@ -7,14 +7,14 @@
 | مورد | وضعیت |
 |---|---|
 | `stage-1-kiarash-akbari/tests` | `Ran 257 tests`، `OK` |
-| `stage-2-kiarash-akbari/tests` بدون `TEST_DATABASE_URL` | `Ran 45 tests`، `OK (skipped=24)` |
+| `stage-2-kiarash-akbari/tests` بدون `TEST_DATABASE_URL` | `Ran 46 tests`، `OK (skipped=25)` |
 | `tests/test_factory_sink_sql.py` (آفلاین) | `Ran 21 tests`، `OK` |
-| `tests/test_factory_sink_postgres.py` (PostgreSQL واقعی) | `Ran 15 tests`، `OK` |
+| `tests/test_factory_sink_postgres.py` (PostgreSQL واقعی) | `Ran 16 tests`، `OK` |
 | `tests/test_postgres_integration.py` (PostgreSQL واقعی) | `Ran 9 tests`، `OK` |
 | `scripts/bootstrap_test_db.sh` عليه سرور واقعی | NOT RUN |
-| `load-database --reset` کامل از دیتابیس خالی | NOT RUN |
+| `load-database --reset` کامل روی `olist_stage2_test` با داده‌ی واقعی | `exit=0`؛ `case_file` برابر 1,083,410 ردیف |
 
-دو ردیف PostgreSQL از یک اجرای واقعی روی دیتابیس یک‌بارمصرف `olist_stage2_test` آمده‌اند؛ خروجی ذخیره‌شده در `docs/evidence/factory-sink-postgres-run.txt` است. skip شدن تست‌ها قبولی حساب نمی‌شود.
+ردیف‌های PostgreSQL و CLI از اجرای واقعی روی دیتابیس یک‌بارمصرف `olist_stage2_test` آمده‌اند؛ خروجی‌ها در `docs/evidence/` هستند. skip شدن تست‌ها قبولی حساب نمی‌شود.
 
 ## محیط و نصب
 
@@ -117,6 +117,17 @@ unset PGPASSWORD TEST_DATABASE_URL
 
 `test_factory_sink_sql.py` به دیتابیس نیاز ندارد و متن `009` را با قرارداد loader مقایسه می‌کند. دو فایل دیگر بدون `TEST_DATABASE_URL` کاملاً skip می‌شوند.
 
+اجرای کامل CLI روی دیتابیس یک‌بارمصرف، بدون دست‌زدن به `olist_db`: یک کپی از config بسازید که فقط نام دیتابیس را عوض می‌کند، آن را commit نکنید و رمز را فقط در همان shell تنظیم کنید.
+
+```bash
+cp ../stage-1-kiarash-akbari/config/default.toml ../stage-1-kiarash-akbari/config/stage2-test.toml
+sed -i 's#/olist_db"#/olist_stage2_test"#' ../stage-1-kiarash-akbari/config/stage2-test.toml
+grep -n '^url = "postgresql' ../stage-1-kiarash-akbari/config/stage2-test.toml   # باید olist_stage2_test باشد
+read -r -s -p 'PostgreSQL password: ' OLIST_DB_PASSWORD; printf '\n'; export OLIST_DB_PASSWORD
+(cd ../stage-1-kiarash-akbari && .venv/bin/python -m data_factory load-database --config config/stage2-test.toml --reset)
+unset OLIST_DB_PASSWORD
+```
+
 اسکریپت `scripts/bootstrap_test_db.sh` آماده‌سازی و اجرای هر دو فایل را خودکار می‌کند:
 
 ```bash
@@ -130,8 +141,10 @@ unset PGPASSWORD TEST_DATABASE_URL
 شواهد PostgreSQL موجود:
 
 - `docs/evidence/postgres-integration-user-run.txt`: ۹ تست یکپارچگی، رونویسی خروجی ارسالی کاربر.
-- `docs/evidence/factory-sink-postgres-run.txt`: خروجی `tee` اجرای ۱۵ تست sink و ۹ تست یکپارچگی روی PostgreSQL واقعی، ۲۰۲۶-۱۱-۰۲.
+- `docs/evidence/factory-sink-postgres-run.txt`: اجرای نخست، ۱۵ تست sink و ۹ تست یکپارچگی.
+- `docs/evidence/factory-sink-postgres-run-2.txt`: اجرای پس از اصلاح ساعت پاییزی، ۱۶ تست sink و ۹ تست یکپارچگی.
+- `docs/evidence/load-database-cli-run-1-failed.txt` و `docs/evidence/load-database-cli-run-2.txt`: اجرای CLI روی داده‌ی واقعی، به‌ترتیب شکست (`exit=1`) و موفق (`exit=0`).
 
 ## دامنهٔ تحویل
 
-جزئیات تصمیم‌ها، Function و Procedure و پوشش تست در `report.md` است. ممیزی FK، هزینهٔ درج ایندکس، مقایسهٔ کامل view/snapshot، بازسازی از صفر و تست نصب تازه هنوز شواهد تکمیلی لازم دارند، و این مستندات تکمیل همهٔ الزامات مرحله را اعلام نمی‌کنند. برای schema فکتوری، اعمال ۰۰۹، محدودیت‌ها، همگرایی و بازگشت‌پذیری روی PostgreSQL واقعی اجرا شده‌اند؛ اجرای CLI کامل از دیتابیس خالی و اسکریپت bootstrap هنوز بدون شاهدند.
+جزئیات تصمیم‌ها، Function و Procedure و پوشش تست در `report.md` است. ممیزی FK، هزینهٔ درج ایندکس، مقایسهٔ کامل view/snapshot، بازسازی از صفر و تست نصب تازه هنوز شواهد تکمیلی لازم دارند، و این مستندات تکمیل همهٔ الزامات مرحله را اعلام نمی‌کنند. برای schema فکتوری، اعمال ۰۰۹، محدودیت‌ها، همگرایی و بازگشت‌پذیری روی PostgreSQL واقعی اجرا شده‌اند؛ همین مسیر با اجرای کامل CLI روی داده‌ی واقعی هم بسته شد. فقط اسکریپت bootstrap و بارگذاری هم‌زمان هنوز بدون شاهدند.

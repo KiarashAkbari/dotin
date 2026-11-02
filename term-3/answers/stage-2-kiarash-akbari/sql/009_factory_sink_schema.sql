@@ -51,10 +51,14 @@ CREATE TABLE IF NOT EXISTS factory.case_file (
     modzcta            VARCHAR(5),
     population         BIGINT,
     CONSTRAINT pk_factory_case_file PRIMARY KEY (unique_key),
-    -- Stage 1 rejects a close before a create (ReasonCode.CLOSED_BEFORE_CREATED)
-    -- and drops nothing: equality is legal, so the same-second cohort is
-    -- visible here as duration_seconds = 0 rather than hidden.
-    CONSTRAINT ck_factory_case_file_order CHECK (closed_at IS NULL OR closed_at >= created_at),
+    -- Timestamps are New York local time without an offset. Stage 1 rejects a
+    -- close before a create (ReasonCode.CLOSED_BEFORE_CREATED) on the
+    -- offset-aware values, so the ordering invariant is duration_seconds >= 0
+    -- below, not a comparison of these naive columns: at the November
+    -- fall-back the 01:00 hour occurs twice, and a case opened in the first
+    -- pass and closed in the second has closed_at < created_at with a positive
+    -- duration. Equality is legal, so the same-second cohort shows up as
+    -- duration_seconds = 0.
     CONSTRAINT ck_factory_case_file_duration CHECK (duration_seconds IS NULL OR duration_seconds >= 0),
     CONSTRAINT ck_factory_case_file_zip CHECK (
         incident_zip IS NULL OR incident_zip ~ '^[0-9]{5}$'
