@@ -1,4 +1,5 @@
 """PostgreSQL destination for the existing data factory package."""
+
 from __future__ import annotations
 
 
@@ -45,14 +46,16 @@ OLIST_CSV_FILES = {
 }
 OLIST_TABLES = tuple(OLIST_CSV_FILES)
 GEOLOCATION_KEY = (
-    "geolocation_zip_code_prefix", "geolocation_lat",
-    "geolocation_lng", "geolocation_city", "geolocation_state",
+    "geolocation_zip_code_prefix",
+    "geolocation_lat",
+    "geolocation_lng",
+    "geolocation_city",
+    "geolocation_state",
 )
 COLUMN_ALIASES = {
     "product_name_length": "product_name_lenght",
     "product_description_length": "product_description_lenght",
 }
-
 
 
 def build_database_url(cfg: Config) -> URL:
@@ -61,12 +64,13 @@ def build_database_url(cfg: Config) -> URL:
         raise DataError("Database destination is not configured")
     parsed = urlsplit(cfg.database.url)
     return URL.create(
-        drivername=parsed.scheme, username=parsed.username,
+        drivername=parsed.scheme,
+        username=parsed.username,
         password=os.environ.get(cfg.database.password_env),
-        host=parsed.hostname, port=parsed.port,
+        host=parsed.hostname,
+        port=parsed.port,
         database=parsed.path.lstrip("/"),
     )
-
 
 
 def read_csv_batches(path: Path, batch_size: int) -> Iterator[list[dict]]:
@@ -89,7 +93,6 @@ def read_csv_batches(path: Path, batch_size: int) -> Iterator[list[dict]]:
             yield batch
 
 
-
 def deduplicate_geolocation(rows: Iterator[list[dict]]) -> Iterator[list[dict]]:
     """Deduplicate raw observations; the distinct-key set grows with input."""
     seen = set()
@@ -102,7 +105,6 @@ def deduplicate_geolocation(rows: Iterator[list[dict]]) -> Iterator[list[dict]]:
                 unique_rows.append(row)
         if unique_rows:
             yield unique_rows
-
 
 
 def _convert(value, column):
@@ -134,6 +136,7 @@ def _convert(value, column):
     if isinstance(column.type, sa.Float):
         number = float(value)
         import math
+
         if not math.isfinite(number):
             raise ValueError("Non-finite number")
         return number
@@ -145,9 +148,14 @@ def _convert(value, column):
     return value
 
 
-
-def load_csv(connection: sa.Connection, csv_path: Path, schema: str, table: str,
-             batch_size: int, deduplicate: bool = False) -> dict[str, int]:
+def load_csv(
+    connection: sa.Connection,
+    csv_path: Path,
+    schema: str,
+    table: str,
+    batch_size: int,
+    deduplicate: bool = False,
+) -> dict[str, int]:
     """Reflect identifiers and bind typed values through SQLAlchemy Core."""
     csv_path = Path(csv_path)
     if not csv_path.is_file():
@@ -156,11 +164,14 @@ def load_csv(connection: sa.Connection, csv_path: Path, schema: str, table: str,
     columns = [c for c in target.columns if c.identity is None and c.computed is None]
     with csv_path.open("r", encoding="utf-8-sig", newline="") as fh:
         header = next(csv.reader(fh), [])
-    source_names = {c.name: c.name if c.name in header else COLUMN_ALIASES.get(c.name, c.name)
-                    for c in columns}
+    source_names = {
+        c.name: c.name if c.name in header else COLUMN_ALIASES.get(c.name, c.name) for c in columns
+    }
     missing = [name for name in source_names.values() if name not in header]
     if missing:
-        raise DataError("CSV columns are missing", context={"file": str(csv_path), "columns": missing})
+        raise DataError(
+            "CSV columns are missing", context={"file": str(csv_path), "columns": missing}
+        )
     counts = {"raw": 0, "loaded": 0, "duplicates": 0}
     seen = set()
     for batch in read_csv_batches(csv_path, batch_size):
@@ -178,15 +189,19 @@ def load_csv(connection: sa.Connection, csv_path: Path, schema: str, table: str,
                 try:
                     record[column.name] = _convert(row[source_names[column.name]], column)
                 except (ValueError, TypeError, InvalidOperation) as exc:
-                    raise DataError("CSV value violates the typed load contract", context={
-                        "file": str(csv_path), "line": counts["raw"] + 1,
-                        "column": column.name}) from exc
+                    raise DataError(
+                        "CSV value violates the typed load contract",
+                        context={
+                            "file": str(csv_path),
+                            "line": counts["raw"] + 1,
+                            "column": column.name,
+                        },
+                    ) from exc
             converted.append(record)
         if converted:
             connection.execute(sa.insert(target), converted)
             counts["loaded"] += len(converted)
     return counts
-
 
 
 def load_olist(cfg: Config) -> dict[str, dict[str, int]]:
@@ -196,14 +211,19 @@ def load_olist(cfg: Config) -> dict[str, dict[str, int]]:
     engine = sa.create_engine(build_database_url(cfg))
     try:
         with engine.begin() as connection:
-            return {table: load_csv(
-                connection, cfg.database.olist_csv_dir / OLIST_CSV_FILES[table],
-                OLIST_SCHEMA, table, cfg.database.batch_size,
-                deduplicate=(table == "geolocation"),
-            ) for table in OLIST_TABLES}
+            return {
+                table: load_csv(
+                    connection,
+                    cfg.database.olist_csv_dir / OLIST_CSV_FILES[table],
+                    OLIST_SCHEMA,
+                    table,
+                    cfg.database.batch_size,
+                    deduplicate=(table == "geolocation"),
+                )
+                for table in OLIST_TABLES
+            }
     finally:
         engine.dispose()
-
 
 
 def sql_migration_files(sql_dir: Path) -> list[Path]:
@@ -214,10 +234,7 @@ def sql_migration_files(sql_dir: Path) -> list[Path]:
             "SQL migrations directory not found",
             context={"dir": str(sql_dir)},
         )
-    return sorted(
-        path for path in sql_dir.glob("*.sql") if path.is_file()
-    )
-
+    return sorted(path for path in sql_dir.glob("*.sql") if path.is_file())
 
 
 def reset_olist_schema(engine: sa.Engine) -> None:
@@ -241,9 +258,7 @@ def apply_sql_migrations(
     if include is not None:
         files = [path for path in files if include(path)]
 
-
     applied: list[str] = []
-
 
     with engine.begin() as connection:
         raw_connection = connection.connection.driver_connection
@@ -262,9 +277,7 @@ def apply_sql_migrations(
                 ) from exc
             applied.append(path.name)
 
-
     return applied
-
 
 
 FACTORY_SCHEMA = "factory"
@@ -280,12 +293,21 @@ SINK_TABLES = {
     SINK_QUALITY_TABLE: REPORT_FILENAME,
 }
 NARROW_COLUMNS = (
-    "modzcta", "complaint_type", "month_start",
-    "complaint_count", "rate_per_10k", "population",
+    "modzcta",
+    "complaint_type",
+    "month_start",
+    "complaint_count",
+    "rate_per_10k",
+    "population",
 )
 PROFILE_KEYS = (
-    "rows", "null_count", "null_percent", "distinct_values",
-    "distinct_capped", "min", "max",
+    "rows",
+    "null_count",
+    "null_percent",
+    "distinct_values",
+    "distinct_capped",
+    "min",
+    "max",
 )
 WIDE_AREA_COLUMN = "modzcta"
 WIDE_TYPE_COLUMN = "complaint_type"
@@ -293,18 +315,16 @@ WIDE_POPULATION_COLUMN = "population"
 MONTH_PATTERN = re.compile(r"^(\d{4}-(?:0[1-9]|1[0-2]))$")
 
 
-
 def _month_of(column_name: str, prefix: str) -> str:
     if not column_name.startswith(prefix):
         raise DataError("Unexpected sink column", context={"column": column_name})
-    month = column_name[len(prefix):]
+    month = column_name[len(prefix) :]
     if MONTH_PATTERN.match(month) is None:
         raise DataError(
             "Sink month column is not a YYYY-MM label",
             context={"column": column_name},
         )
     return month
-
 
 
 def sink_months(header) -> tuple[str, ...]:
@@ -332,7 +352,6 @@ def sink_months(header) -> tuple[str, ...]:
     if len(set(months)) != len(months):
         raise DataError("Wide CSV repeats a month", context={"months": list(months)})
     return months
-
 
 
 def narrow_wide_rows(row: dict, months) -> Iterator[dict]:
@@ -372,7 +391,6 @@ def narrow_wide_rows(row: dict, months) -> Iterator[dict]:
         }
 
 
-
 def _sink_target(connection: sa.Connection, table: str, required: tuple[str, ...]) -> sa.Table:
     """Reflect a sink table and refuse to write columns it does not have."""
     target = sa.Table(table, sa.MetaData(), schema=FACTORY_SCHEMA, autoload_with=connection)
@@ -385,11 +403,9 @@ def _sink_target(connection: sa.Connection, table: str, required: tuple[str, ...
     return target
 
 
-
 def _insert_records(connection: sa.Connection, target: sa.Table, records: list[dict]) -> None:
     if records:
         connection.execute(sa.insert(target), records)
-
 
 
 def _profile_bound(value):
@@ -401,7 +417,6 @@ def _profile_bound(value):
     if isinstance(value, (int, float, Decimal)):
         return str(value)
     raise ValueError(f"Unsupported profile bound type: {type(value).__name__}")
-
 
 
 def parse_quality_report(path: Path) -> dict:
@@ -425,7 +440,6 @@ def parse_quality_report(path: Path) -> dict:
     if not isinstance(payload, dict):
         raise DataError("Data quality report must be a JSON object", context={"file": str(path)})
 
-
     columns = payload.get("columns")
     if not isinstance(columns, dict) or not columns:
         raise DataError("Data quality report has no column profiles", context={"file": str(path)})
@@ -445,7 +459,6 @@ def parse_quality_report(path: Path) -> dict:
             context={"file": str(path), "declared": declared, "listed": len(conflicts)},
         )
 
-
     profiles = []
     for name in sorted(columns):
         stats = columns[name]
@@ -461,28 +474,33 @@ def parse_quality_report(path: Path) -> dict:
                 context={"file": str(path), "column": name, "missing": absent},
             )
         try:
-            profiles.append({
-                "column_name": name,
-                "rows_total": stats["rows"],
-                "null_count": stats["null_count"],
-                "null_percent": stats["null_percent"],
-                "distinct_values": stats["distinct_values"],
-                "distinct_capped": stats["distinct_capped"],
-                "min_value": _profile_bound(stats["min"]),
-                "max_value": _profile_bound(stats["max"]),
-            })
+            profiles.append(
+                {
+                    "column_name": name,
+                    "rows_total": stats["rows"],
+                    "null_count": stats["null_count"],
+                    "null_percent": stats["null_percent"],
+                    "distinct_values": stats["distinct_values"],
+                    "distinct_capped": stats["distinct_capped"],
+                    "min_value": _profile_bound(stats["min"]),
+                    "max_value": _profile_bound(stats["max"]),
+                }
+            )
         except ValueError as exc:
             raise DataError(
                 "Column profile holds a value the sink cannot store",
                 context={"file": str(path), "column": name, "error": str(exc)},
             ) from exc
 
-
     pairs = []
     for entry in conflicts:
         boroughs = entry.get("boroughs") if isinstance(entry, dict) else None
-        if (not isinstance(entry, dict) or not isinstance(entry.get("modzcta"), str)
-                or not isinstance(boroughs, (list, tuple)) or not boroughs):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("modzcta"), str)
+            or not isinstance(boroughs, (list, tuple))
+            or not boroughs
+        ):
             raise DataError(
                 "Borough conflict entry is malformed",
                 context={"file": str(path), "entry": entry},
@@ -495,7 +513,6 @@ def parse_quality_report(path: Path) -> dict:
                 )
             pairs.append({"modzcta": entry["modzcta"].strip(), "borough": borough.strip()})
 
-
     return {
         "profiles": profiles,
         "conflicts": pairs,
@@ -503,7 +520,6 @@ def parse_quality_report(path: Path) -> dict:
         "distinct_cap": cap,
         "conflict_count": len(pairs),
     }
-
 
 
 def load_narrow_wide(connection: sa.Connection, csv_path: Path, batch_size: int) -> dict[str, int]:
@@ -544,21 +560,36 @@ def load_narrow_wide(connection: sa.Connection, csv_path: Path, batch_size: int)
     return counts
 
 
-
 def load_quality_report(connection: sa.Connection, json_path: Path) -> dict[str, int]:
     """Insert the per-column profiles, the report scalars and the conflicts."""
     parsed = parse_quality_report(json_path)
-    quality = _sink_target(connection, SINK_QUALITY_TABLE, (
-        "column_name", "rows_total", "null_count", "null_percent",
-        "distinct_values", "distinct_capped", "min_value", "max_value",
-    ))
+    quality = _sink_target(
+        connection,
+        SINK_QUALITY_TABLE,
+        (
+            "column_name",
+            "rows_total",
+            "null_count",
+            "null_percent",
+            "distinct_values",
+            "distinct_capped",
+            "min_value",
+            "max_value",
+        ),
+    )
     _insert_records(connection, quality, parsed["profiles"])
     meta = _sink_target(connection, SINK_META_TABLE, ("id", "distinct_cap", "conflict_count"))
-    _insert_records(connection, meta, [{
-        "id": 1,
-        "distinct_cap": parsed["distinct_cap"],
-        "conflict_count": parsed["conflict_count"],
-    }])
+    _insert_records(
+        connection,
+        meta,
+        [
+            {
+                "id": 1,
+                "distinct_cap": parsed["distinct_cap"],
+                "conflict_count": parsed["conflict_count"],
+            }
+        ],
+    )
     if parsed["conflicts"]:
         conflict = _sink_target(connection, SINK_CONFLICT_TABLE, ("modzcta", "borough"))
         _insert_records(connection, conflict, parsed["conflicts"])
@@ -567,7 +598,6 @@ def load_quality_report(connection: sa.Connection, json_path: Path) -> dict[str,
         "loaded": len(parsed["profiles"]),
         "conflicts": parsed["conflict_entries"],
     }
-
 
 
 def factory_sink_paths(curated_dir: Path) -> dict[str, Path]:
@@ -588,7 +618,6 @@ def factory_sink_paths(curated_dir: Path) -> dict[str, Path]:
     return paths
 
 
-
 def truncate_factory(connection: sa.Connection) -> None:
     """Clear every sink table so a repeated load converges instead of growing.
 
@@ -604,28 +633,44 @@ def truncate_factory(connection: sa.Connection) -> None:
         SINK_CONFLICT_TABLE,
         SINK_PROVENANCE_TABLE,
     )
-    connection.execute(sa.text(
-        "TRUNCATE TABLE "
-        + ", ".join(f"{FACTORY_SCHEMA}.{table}" for table in tables)
-        + " RESTART IDENTITY"
-    ))
+    connection.execute(
+        sa.text(
+            "TRUNCATE TABLE "
+            + ", ".join(f"{FACTORY_SCHEMA}.{table}" for table in tables)
+            + " RESTART IDENTITY"
+        )
+    )
 
 
-
-def _load_sink(connection: sa.Connection, cfg: Config, paths: dict[str, Path]) -> dict[str, dict[str, int]]:
+def _load_sink(
+    connection: sa.Connection, cfg: Config, paths: dict[str, Path]
+) -> dict[str, dict[str, int]]:
     results = {
         SINK_CASE_TABLE: load_csv(
-            connection, paths[SINK_CASE_TABLE], FACTORY_SCHEMA, SINK_CASE_TABLE,
+            connection,
+            paths[SINK_CASE_TABLE],
+            FACTORY_SCHEMA,
+            SINK_CASE_TABLE,
             cfg.database.batch_size,
         ),
         SINK_WIDE_TABLE: load_narrow_wide(
-            connection, paths[SINK_WIDE_TABLE], cfg.database.batch_size,
+            connection,
+            paths[SINK_WIDE_TABLE],
+            cfg.database.batch_size,
         ),
         SINK_QUALITY_TABLE: load_quality_report(connection, paths[SINK_QUALITY_TABLE]),
     }
-    provenance = _sink_target(connection, SINK_PROVENANCE_TABLE, (
-        "sink_table", "file_name", "sha256", "rows_loaded", "loaded_at",
-    ))
+    provenance = _sink_target(
+        connection,
+        SINK_PROVENANCE_TABLE,
+        (
+            "sink_table",
+            "file_name",
+            "sha256",
+            "rows_loaded",
+            "loaded_at",
+        ),
+    )
     loaded_at = datetime.now(timezone.utc)
     records = [
         {
@@ -642,8 +687,9 @@ def _load_sink(connection: sa.Connection, cfg: Config, paths: dict[str, Path]) -
     return results
 
 
-
-def load_stage1_sink(cfg: Config, connection: sa.Connection | None = None) -> dict[str, dict[str, int]]:
+def load_stage1_sink(
+    cfg: Config, connection: sa.Connection | None = None
+) -> dict[str, dict[str, int]]:
     """Load Stage 1's curated outputs into the factory schema, atomically.
 
 
@@ -666,7 +712,6 @@ def load_stage1_sink(cfg: Config, connection: sa.Connection | None = None) -> di
             return _load_sink(owned, cfg, paths)
     finally:
         engine.dispose()
-
 
 
 def reset_factory_schema(engine: sa.Engine) -> None:
