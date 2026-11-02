@@ -28,3 +28,5 @@ solution.before-fix.ipynb
 # Small, reviewed benchmark evidence (not raw datasets)
 !data/curated/benchmark-final-20261028-203102-777061.json
 !data/curated/q2-cte-comparison-20261028-202722-343310.json
+!data/curated/benchmark-final-20261028-201509-296380.json
+!data/curated/benchmark-final-20261028-202305-063575.json

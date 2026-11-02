@@ -1,3 +1,10 @@
+Evidence provenance: raw terminal output captured with tee by the user; not run by the assistant.
+Execution environment: user's local PostgreSQL 16.15 (Ubuntu 24.04).
+Database: olist_stage2_test (disposable, empty); role kiarash, non-superuser.
+Runner: unittest discovery, tests/test_factory_sink_postgres.py then tests/test_postgres_integration.py
+Exact checkout SHA at execution: not captured; nearest commits are 927e86e (loader and sink tests) and e040c5b (docs, 009 comment).
+Credentials and the original shell command have been omitted.
+
 test_a_failure_leaves_the_previous_rows_exactly_as_they_were (test_factory_sink_postgres.FactorySinkPostgresTests.test_a_failure_leaves_the_previous_rows_exactly_as_they_were) ... ok
 test_a_second_load_converges_instead_of_appending (test_factory_sink_postgres.FactorySinkPostgresTests.test_a_second_load_converges_instead_of_appending) ... ok
 test_all_six_sink_tables_exist_after_009 (test_factory_sink_postgres.FactorySinkPostgresTests.test_all_six_sink_tables_exist_after_009) ... ok
