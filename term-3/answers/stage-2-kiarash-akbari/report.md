@@ -106,22 +106,44 @@ python -m data_factory load-database --config config/default.toml --reset
 - بارگذاری، truncate سپس insert در یک تراکنش است: اجرای دوباره همگرا می‌شود و خطای میانی، ردیف‌های بار پیشین را نگه می‌دارد. `load_run` نام فایل، SHA-256 و شمارٔ ردیف هر مقصد را ثبت می‌کند تا بررسی، به `run_manifest.json` وابسته نباشد.
 - CLI: `--skip-factory-sink` برای بیرون‌گذاشتن sink؛ نبودن ۰۰۹ در حالت فعال خطاست نه skip؛ `--reset` هر دو schema را با توابع جدا حذف می‌کند تا دامنهٔ عمل مخرب در کد پیدا باشد.
 
+- معنای `quality_meta.conflict_count`: تعداد جفت‌های `(modzcta, borough)` ذخیره‌شده است و همیشه با `COUNT(*)` جدول `borough_conflict` برابر است. فیلد `borough_modzcta_conflict_count` در گزارش JSON تعداد ورودی‌هاست (یک ورودی برای هر modzcta)؛ همان عدد از `SELECT COUNT(DISTINCT modzcta) FROM factory.borough_conflict` به‌دست می‌آید. `load_quality_report` تعداد ورودی‌ها را در کلید `conflicts` نتیجه برمی‌گرداند. تست آفلاین `test_conflict_count_meaning_is_documented_next_to_the_column` وجود این توضیح را در DDL قفل می‌کند.
+
 آنچه در این دور اجرا شد (آفلاین، بدون سرور، در `stage-1` با `python -m unittest discover -s tests`):
 
 | مجموعه | نتیجه |
 |---|---|
 | `stage-1-kiarash-akbari/tests` (پس از افزودن sink و بازنویسی تست migration) | `Ran 257 tests`، `OK`، بدون skip |
-| `stage-2-kiarash-akbari/tests` بدون `TEST_DATABASE_URL` | `Ran 44 tests`، `OK (skipped=24)` |
+| `stage-2-kiarash-akbari/tests` بدون `TEST_DATABASE_URL` | `Ran 45 tests`، `OK (skipped=24)` |
 
-آنچه در این محیط اجرا **نتوانست** بشود. روی PostgreSQL، هیچ‌یک از این‌ها اجرا نشده است؛ جمله‌بندی «پیاده‌سازی شده ولی قابل اجرا در این محیط نیست» دقیقاً همین را می‌گوید و جای خود را حفظ می‌کند:
+#### شواهد اجرا روی PostgreSQL واقعی
 
-| شاهد لازم | فرمان تولید آن | وضعیت |
+مالک پروژه این اجرا را در ۲۰۲۶-۱۱-۰۲ روی یک سرور PostgreSQL 16.15 محلی (Ubuntu 24.04)، با دیتابیس خالی و یک‌بارمصرف `olist_stage2_test` و نقش غیر superuser به نام `kiarash` انجام داد. دستیار به سرور دسترسی نداشت؛ `docs/evidence/factory-sink-postgres-run.txt` خروجی ذخیره‌شدهٔ `tee` همان اجراست و هر دو suite نیازمند سرور را شامل می‌شود.
+
+| مجموعه | فرمان (از پوشهٔ مرحلهٔ دوم) | نتیجه |
 |---|---|---|
-| اعمال ۰۰۹ و بارگذاری سه فایل روی PostgreSQL واقعی | `./scripts/bootstrap_test_db.sh -d olist_stage2_test -U <role>` | NOT RUN |
-| رفتار CHECKها، `CHAR(7)`، مقیاس `NUMERIC`، `PERCENTILE_CONT` و rollback روی سرور | `python -m unittest discover -s tests -p 'test_factory_sink_postgres.py' -v` | NOT RUN |
-| شمارش زمان بارگذاری یا هزینهٔ درج برای schema فکتوری | — | اندازه‌گیری نشده؛ عددی ادعا نمی‌شود |
+| `tests/test_factory_sink_postgres.py` | `python -m unittest discover -s tests -p 'test_factory_sink_postgres.py' -v` | `Ran 15 tests`، `OK` |
+| `tests/test_postgres_integration.py` | `python -m unittest discover -s tests -p 'test_postgres_integration.py' -v` | `Ran 9 tests`، `OK` |
+| `tests/test_factory_sink_sql.py` | `python -m unittest discover -s tests -p 'test_factory_sink_sql.py' -v` | `Ran 21 tests`، `OK` (آفلاین) |
+| `stage-1-kiarash-akbari/tests` | `PYTHONPATH=src python -m unittest discover -s tests` | `Ran 257 tests`، `OK` |
 
-سطر آخر این جدول عمداً خالی است: جای عدد اندازه‌گیری‌شده را هیچ برآوردی نمی‌گیرد. تنها شواهد PostgreSQL موجود در مخزن، همان ۹ تست یکپارچگیِ ارسال‌شدهٔ کاربر در `docs/evidence/postgres-integration-user-run.txt` است که schema فکتوری را در بر نمی‌گیرد؛ پس ادعای «sink روی PostgreSQL کار می‌کند» در این دور تأیید‌شده نیست و ۱۵ تست `test_factory_sink_postgres.py` تا اجرای کاربر، ادعا نیستند.
+این شاهد نشان می‌دهد: ۰۰۹ روی سرور واقعی اعمال می‌شود؛ CHECKها و کلیدهای اصلی ردیف بد را با نام constraint رد می‌کنند؛ `CHAR(7)` و مقیاس `NUMERIC(12, 4)` حفظ می‌شوند و نرخ خالی NULL می‌ماند؛ زمان‌های naive جابه‌جا نمی‌شوند؛ `PERCENTILE_CONT` در view میانهٔ درست (990) می‌دهد؛ بارگذاری دوباره همگرا می‌شود و شکست میانی ردیف‌های قبلی را دست‌نخورده می‌گذارد؛ و SHA-256 در `load_run` با بایت‌های روی دیسک برابر است.
+
+اجرای واقعی سه نقص پیدا کرد که تست‌های آفلاین نمی‌توانستند ببینند. هر سه اصلاح شدند:
+
+- در `setUp` آزمون‌ها، `mkdir()` روی پوشه‌ای اجرا می‌شد که `TemporaryDirectory` از قبل ساخته بود و هر ۱۵ آزمون با `FileExistsError` می‌شکستند. اکنون یک زیرپوشهٔ `curated` ساخته می‌شود.
+- دو آزمون ردیف‌های خام `Result` را با نام ستون ایندکس می‌کردند و `TypeError` می‌گرفتند. اکنون `.mappings()` به کار می‌رود.
+- ناهمخوانی معنایی `conflict_count`: loader تعداد ورودی‌های گزارش را می‌ریخت در حالی که جدول یک ردیف برای هر جفت دارد. اکنون `conflict_count` تعداد جفت‌هاست و تعداد ورودی‌ها جدا برمی‌گردد (`conflict_entries`). تست Stage 1 که عدد قدیمی را ثابت کرده بود همراه اصلاح شد.
+
+آنچه هنوز شاهد ندارد:
+
+| شاهد لازم | وضعیت |
+|---|---|
+| `scripts/bootstrap_test_db.sh` عليه سرور واقعی | NOT RUN؛ فقط dry run با stub (اجرای واقعی به اعتبار مدیر با `-A` نیاز دارد) |
+| `python -m data_factory load-database --reset` از دیتابیس خالی تا پایان با CSVهای واقعی | NOT RUN |
+| اجرای هم‌زمان دو بارگذاری sink | NOT RUN |
+| زمان بارگذاری یا هزینهٔ درج برای schema فکتوری | اندازه‌گیری نشده؛ عددی ادعا نمی‌شود |
+
+skip شدن آزمون‌های نیازمند سرور در محیط بدون `TEST_DATABASE_URL` قبولی حساب نمی‌شود.
 
 ## ۵. مسیرهای بررسی‌شده و کنارگذاشته‌شده
 
@@ -155,12 +177,12 @@ python -m data_factory load-database --config config/default.toml --reset
 
 تست idempotency ستون‌های تحلیلی snapshot را مقایسه می‌کند، نه `refreshed_at` را؛ همچنین هر دو فراخوانی در یک تراکنش‌اند. تست خطا از savepoint استفاده می‌کند و حفظ دادهٔ قبلی پس از rollback فراخوانی ناموفق را می‌سنجد. این پوشش جای آزمون اجرای هم‌زمان، ماه خالی، همهٔ حالت‌های مرزی یا اجرای مستقل در دو تراکنش را نمی‌گیرد. برابری هش در بنچمارک نیز به‌تنهایی صحت تجاری را ثابت نمی‌کند؛ تست fixture شاهد مکمل آن است.
 
-وضعیت شواهد در دور افزودهٔ schema فکتوری: تست‌های ۰۰۹ در دو فایل جدا هستند. `tests/test_factory_sink_sql.py` (۲۰ آزمون) متن DDL را با قرارداد loader مقایسه می‌کند و در محیط بازبینی اجرا شد. `tests/test_factory_sink_postgres.py` (۱۵ آزمون) همان کنترل‌ها را روی سرور اجرا می‌کند و در این محیط **NOT RUN** ماند؛ نبودن `TEST_DATABASE_URL` کل کلاس را skip می‌کند و این skip به‌هیچ‌وجه قبولی خوانده نمی‌شود. فرمان‌های آماده‌سازی و اجرای آن در `readme.md` آمده‌اند؛ `scripts/bootstrap_test_db.sh` نیز فقط در حالت dry run و با stubهای فرمان بررسی شده است، نه عليه یک سرور واقعی.
+وضعیت شواهد در دور افزودهٔ schema فکتوری: جزئیات و فرمان‌ها در بخش ۴.۷ آمده‌اند. `tests/test_factory_sink_sql.py` (۲۱ آزمون) آفلاین `OK` است و `tests/test_factory_sink_postgres.py` (۱۵ آزمون) همراه `tests/test_postgres_integration.py` (۹ آزمون) روی PostgreSQL واقعی توسط مالک پروژه `OK` اجرا شدند (`docs/evidence/factory-sink-postgres-run.txt`). `scripts/bootstrap_test_db.sh` عليه سرور واقعی هنوز اجرا نشده است (NOT RUN).
 
 موارد زیر باید پیش از اعلام تکمیل کل مرحله با شواهد مستقل بسته شوند:
 
 - نوع‌های غیربدیهی ستون‌ها، محدودیت‌ها و تعداد رکوردهای ناسازگار با FK و سیاست تعیین تکلیف آن‌ها؛
-- بارگذاری خروجی مرحلهٔ اول در schema جداگانه و بازسازی از Database خالی؛ سند، درج و تست‌های آفلاین آن در این دور افزوده شد (بخش ۴.۷) و آنچه مانده اعمال SQL روی سرور واقعی و بازسازی از Database خالی است
+- بارگذاری خروجی مرحلهٔ اول در schema جداگانه: اعمال ۰۰۹ و بارگذاری سه فایل روی PostgreSQL واقعی با تست‌ها ثابت شد (بخش ۴.۷)؛ آنچه مانده اجرای کامل `load-database --reset` از دیتابیس خالی با CSVهای واقعی است؛
 - چرخهٔ زمان و پلن قبل/بعد برای هر پنج کوئری و توجیه هر ایندکس؛
 - مقایسهٔ واقعی view با snapshot و آزمون درج قبل/بعد و ایندکس حذف‌شده؛
 - گسترش پوشش Procedure به فراخوانی‌های مستقل در دو تراکنش، ماه خالی و اجرای هم‌زمان؛
@@ -183,3 +205,5 @@ python -m data_factory load-database --config config/default.toml --reset
 در ادامهٔ همکاری، دستیار ناسازگاری آماده‌سازی snapshot در تست‌ها را اصلاح و پس از تأیید کاربر در GitHub ثبت کرد. اجرای ۹ تست توسط صاحب پروژه انجام شد؛ این نسخهٔ مستندات بر اساس همان خروجی به‌روز شده است.
 
 در دور بعدی، دستیار schema فکتوری (۰۰۹)، loader بسته‌شده در پکیج مرحلهٔ اول، تست‌های آفلاین و اسکریپت آماده‌سازی دیتابیس تست را افزود و ناسازگاری نسخهٔ پایتون را با استناد به متادیتای `numpy==2.5.4` برطرف کرد. اجرای هر دو فایل نیازمند سرور، همچنان بر عهدهٔ صاحب پروژه است و گزارش، هیچ عدد PostgreSQL تازه‌ای برای آن ادعا نمی‌کند.
+
+در دور آخر، دستیار با مالک پروژه خطاهای اجرای واقعی را قدم‌به‌قدم تشخیص داد (خطای آماده‌سازی `mkdir`، دو خطای `.mappings()` و ناهمخوانی معنایی `conflict_count`) و اصلاح‌ها، تست قفل‌کنندهٔ مستندبودن `conflict_count` و متن این به‌روزرسانی مستندات را نوشت. مالک پروژه همهٔ اجراها را روی PostgreSQL خودش انجام داد، خروجی‌ها را بررسی کرد و فقط خروجی‌های واقعی را به‌عنوان شاهد ذخیره کرد.

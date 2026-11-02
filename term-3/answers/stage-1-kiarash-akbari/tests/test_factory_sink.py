@@ -228,7 +228,8 @@ class QualityReportParsingTests(unittest.TestCase):
             })
             parsed = parse_quality_report(path)
             self.assertEqual(parsed["distinct_cap"], 10000)
-            self.assertEqual(parsed["conflict_count"], 1)
+            self.assertEqual(parsed["conflict_count"], 2, "one entry, two borough pairs")
+            self.assertEqual(parsed["conflict_entries"], 1)
             self.assertEqual([row["column_name"] for row in parsed["profiles"]],
                              ["closed_at", "unique_key"])
             self.assertEqual(parsed["profiles"][0]["max_value"], "2025-06-30T23:59:00")

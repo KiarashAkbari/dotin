@@ -120,6 +120,10 @@ CREATE TABLE IF NOT EXISTS factory.column_quality (
 
 -- One row: the report's scalars need a home that is not a column of every
 -- per-column row, and a CHECK on the key keeps the table to exactly one row.
+-- conflict_count counts stored (modzcta, borough) pairs, so it always equals
+-- COUNT(*) of factory.borough_conflict. The JSON report's
+-- borough_modzcta_conflict_count counts entries (one per modzcta) instead;
+-- recover that figure with COUNT(DISTINCT modzcta) FROM factory.borough_conflict.
 CREATE TABLE IF NOT EXISTS factory.quality_meta (
     id             INTEGER NOT NULL,
     distinct_cap   INTEGER NOT NULL,
@@ -132,6 +136,7 @@ CREATE TABLE IF NOT EXISTS factory.quality_meta (
 
 -- borough_modzcta_conflicts is a list of {modzcta, boroughs[]} in the JSON
 -- report; flattened to one row per pair so it can be joined to case_file.
+-- A modzcta seen under two boroughs therefore yields two rows here.
 CREATE TABLE IF NOT EXISTS factory.borough_conflict (
     modzcta TEXT NOT NULL,
     borough TEXT NOT NULL,

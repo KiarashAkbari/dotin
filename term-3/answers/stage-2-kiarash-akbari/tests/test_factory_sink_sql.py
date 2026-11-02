@@ -208,6 +208,13 @@ class ProvenanceContractTests(unittest.TestCase):
         self.assertEqual(column_names(TABLES[SINK_META_TABLE]),
                          ["id", "distinct_cap", "conflict_count"])
 
+    def test_conflict_count_meaning_is_documented_next_to_the_column(self):
+        """conflict_count is pairs, not report entries; the DDL must say so."""
+        start = DDL.index("CREATE TABLE IF NOT EXISTS factory.quality_meta")
+        comment = DDL[:start].rsplit("\n\n", 1)[-1]
+        self.assertIn("conflict_count counts stored (modzcta, borough) pairs", comment)
+        self.assertIn("COUNT(DISTINCT modzcta)", comment)
+
 
 if __name__ == "__main__":
     unittest.main()
