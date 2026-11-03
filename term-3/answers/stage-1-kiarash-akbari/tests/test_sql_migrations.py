@@ -1,5 +1,6 @@
 """Migration discovery and grouping tests, in the suite's own runner.
 
+
 These are unittest.TestCase on purpose: the suite runs through
 `python -m unittest discover -s tests` and stage 1 does not depend on pytest, so
 a pytest-only test file here is an import error, not a collected test.
@@ -12,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from unittest import mock
 
+
+
 from config_helpers import make_config
 from data_factory.config import DatabaseConfig, parse_config
 from data_factory.database import (
@@ -21,16 +24,24 @@ from data_factory.database import (
 from data_factory.errors import DataError
 
 
+
+
 class RecordingCursor:
     def __init__(self, log, fail_on=None):
         self.log = log
         self.fail_on = fail_on
 
+
+
     def __enter__(self):
         return self
 
+
+
     def __exit__(self, *exc_info):
         return False
+
+
 
     def execute(self, sql):
         self.log.append(sql)
@@ -38,32 +49,76 @@ class RecordingCursor:
             raise RuntimeError(f"syntax error at or near {self.fail_on!r}")
 
 
+
+
+class FakeResult:
+    def __init__(self, rows=None, value=None):
+        self._rows = rows or []
+        self._value = value
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def scalar(self):
+        return self._value
+
+
+
 class FakeEngine:
     """Stands in for the driver connection apply_sql_migrations talks to."""
+
 
     def __init__(self, log, fail_on=None):
         self.log = log
         self.fail_on = fail_on
         self.begin_calls = 0
+        self.statements = []
+
 
     @contextlib.contextmanager
     def begin(self):
         self.begin_calls += 1
         yield self
 
+
     @property
     def connection(self):
         return self
+
 
     @property
     def driver_connection(self):
         return self
 
+
+    def connect(self):
+        return self
+
+
+    def execute(self, statement, parameters=None):
+        self.statements.append((str(statement), parameters))
+        return FakeResult()
+
+
     def cursor(self):
         return RecordingCursor(self.log, self.fail_on)
 
+
+    def commit(self):
+        return None
+
+
+    def rollback(self):
+        return None
+
+
+    def close(self):
+        return None
+
+
     def dispose(self):
         self.log.append("dispose")
+
 
 
 class SqlMigrationFileTests(unittest.TestCase):
@@ -77,14 +132,22 @@ class SqlMigrationFileTests(unittest.TestCase):
             (root / "rejected").mkdir()
             (root / "rejected" / "000_rejected.sql").write_text("SELECT 0;", encoding="utf-8")
 
+
+
             files = sql_migration_files(root)
 
+
+
             self.assertEqual([path.name for path in files], ["001_schema.sql", "002_views.sql"])
+
+
 
     def test_sql_migration_files_missing_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(DataError):
                 sql_migration_files(Path(tmp) / "missing")
+
+
 
     def test_database_config_accepts_optional_sql_migrations_dir(self):
         config = parse_config(
@@ -134,8 +197,12 @@ class SqlMigrationFileTests(unittest.TestCase):
             }
         )
 
+
+
         self.assertIsNotNone(config.database)
         self.assertEqual(config.database.sql_migrations_dir, Path("sql"))
+
+
 
 
 class ApplySqlMigrationsTests(unittest.TestCase):
@@ -150,6 +217,8 @@ class ApplySqlMigrationsTests(unittest.TestCase):
         ):
             (self.sql_dir / name).write_text(body, encoding="utf-8")
 
+
+
     def test_include_filter_selects_one_group(self):
         log = []
         applied = apply_sql_migrations(
@@ -159,6 +228,8 @@ class ApplySqlMigrationsTests(unittest.TestCase):
         )
         self.assertEqual(applied, ["009_sink.sql"])
         self.assertEqual(log, ["CREATE SCHEMA factory;"])
+
+
 
     def test_empty_selection_is_not_an_error(self):
         log = []
@@ -170,6 +241,8 @@ class ApplySqlMigrationsTests(unittest.TestCase):
         self.assertEqual(applied, [])
         self.assertEqual(log, [])
 
+
+
     def test_selection_runs_in_one_transaction(self):
         engine = FakeEngine(log := [])
         applied = apply_sql_migrations(
@@ -177,6 +250,8 @@ class ApplySqlMigrationsTests(unittest.TestCase):
         )
         self.assertEqual(applied, ["001_base.sql", "005_snap.sql"])
         self.assertEqual(engine.begin_calls, 1, "two files, one transaction")
+
+
 
     def test_failure_names_the_script_that_broke(self):
         engine = FakeEngine(log := [], fail_on="factory")
@@ -191,12 +266,26 @@ class ApplySqlMigrationsTests(unittest.TestCase):
         ], "the earlier scripts ran inside the transaction that is rolled back")
 
 
+
+
 class CliMigrationOrderTests(unittest.TestCase):
     """The groups, and the order they run in, are part of the contract."""
+
+
 
     def setUp(self):
         self._folder = tempfile.TemporaryDirectory()
         self.addCleanup(self._folder.cleanup)
+
+        sql_dir = Path(self._folder.name) / "sql"
+        sql_dir.mkdir()
+        for name in (
+            "001_base.sql",
+            "005_snap.sql",
+            "009_factory_sink_schema.sql",
+        ):
+            (sql_dir / name).write_text("-- test migration\n", encoding="utf-8")
+
         self.cfg = dataclasses.replace(
             make_config(Path(self._folder.name)),
             database=DatabaseConfig(
@@ -205,7 +294,7 @@ class CliMigrationOrderTests(unittest.TestCase):
                 olist_csv_dir=Path(self._folder.name) / "csv",
                 stage1_curated_dir=Path(self._folder.name) / "curated",
                 batch_size=100,
-                sql_migrations_dir=Path(self._folder.name) / "sql",
+                sql_migrations_dir=sql_dir,
             ),
         )
         self.calls = []
@@ -218,9 +307,9 @@ class CliMigrationOrderTests(unittest.TestCase):
             mock.patch("data_factory.cli.apply_sql_migrations",
                                 side_effect=self._apply),
             mock.patch("data_factory.cli.load_olist",
-                                side_effect=lambda cfg: self.calls.append("load_olist") or {}),
+                                side_effect=lambda cfg, connection=None: self.calls.append("load_olist") or {}),
             mock.patch("data_factory.cli.load_stage1_sink",
-                                side_effect=lambda cfg: self.calls.append("load_stage1_sink") or {}),
+                                side_effect=lambda cfg, connection=None: self.calls.append("load_stage1_sink") or {}),
             mock.patch("data_factory.cli.reset_olist_schema",
                                 side_effect=lambda engine: self.calls.append("reset_olist")),
             mock.patch("data_factory.cli.reset_factory_schema",
@@ -231,9 +320,14 @@ class CliMigrationOrderTests(unittest.TestCase):
             self.stack.enter_context(patcher)
         self.addCleanup(self.stack.close)
 
+
+
     def _engine(self):
         self.calls.append("create_engine")
         return FakeEngine([])
+
+
+
 
     def _apply(self, engine, sql_dir, include=None):
         names = sorted(path for path in (
@@ -244,11 +338,18 @@ class CliMigrationOrderTests(unittest.TestCase):
         self.calls.append("apply:" + ",".join(name[:3] for name in names))
         return names
 
+
+
+
     def test_base_then_load_then_sink_then_snapshots(self):
         from data_factory.cli import _load_database
 
+
+
+
         _load_database(self.cfg)
         self.assertEqual(self.calls, [
+            "create_engine",
             "create_engine",
             "apply:001",
             "load_olist",
@@ -258,27 +359,49 @@ class CliMigrationOrderTests(unittest.TestCase):
             "load_stage1_sink",
         ])
 
+
+
+
     def test_reset_drops_both_schemas_before_loading(self):
         from data_factory.cli import _load_database
 
+
+
+
         _load_database(self.cfg, reset=True)
-        self.assertEqual(self.calls[:3], ["create_engine", "reset_olist", "reset_factory"])
+        self.assertEqual(
+            self.calls[:4],
+            ["create_engine", "create_engine", "reset_olist", "reset_factory"],
+        )
+
+
+
 
     def test_skip_sql_migrations_skips_both_groups_and_the_sink(self):
         from data_factory.cli import _load_database
 
+
+
+
         _load_database(self.cfg, apply_migrations=False)
         self.assertEqual(
             self.calls,
-            ["create_engine", "load_olist"],
+            ["create_engine", "create_engine", "load_olist"],
             "no SQL at all: neither migration group nor the sink load",
         )
+
+
+
 
     def test_sink_can_be_left_out_of_a_run(self):
         from data_factory.cli import _load_database
 
+
+
+
         _load_database(self.cfg, with_sink=False)
         self.assertEqual(self.calls, [
+            "create_engine",
             "create_engine",
             "apply:001",
             "load_olist",
@@ -286,13 +409,24 @@ class CliMigrationOrderTests(unittest.TestCase):
             "apply:005",
         ], "009 is not applied and the curated files are not loaded")
 
+
+
+
     def test_missing_sink_migration_is_an_error_not_a_skip(self):
         from data_factory.cli import _load_database
 
+
         self.sink_present = False
+        (
+            self.cfg.database.sql_migrations_dir
+            / "009_factory_sink_schema.sql"
+        ).unlink()
+
         with self.assertRaises(DataError) as ctx:
             _load_database(self.cfg)
         self.assertEqual(ctx.exception.context["expected"], "009_factory_sink_schema.sql")
+
+
 
 
 if __name__ == "__main__":

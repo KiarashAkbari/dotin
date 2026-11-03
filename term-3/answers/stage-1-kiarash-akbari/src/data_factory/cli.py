@@ -8,12 +8,16 @@ import sqlalchemy as sa
 
 from .config import Config, ReferenceConfig, load_config
 from .database import (
+    LOAD_LOCK_KEY,
+    MIGRATION_LOCK_KEY,
     apply_sql_migrations,
     build_database_url,
     load_olist,
     load_stage1_sink,
+    refresh_olist_snapshots,
     reset_factory_schema,
     reset_olist_schema,
+    sql_migration_files,
 )
 from .errors import ConfigError, DataError, PipelineError
 from .exit_codes import ExitCode
@@ -191,84 +195,116 @@ def _load_database(
     if cfg.database is None:
         raise DataError("Database destination is not configured")
 
-    engine = sa.create_engine(build_database_url(cfg))
-    try:
-        if reset:
-            reset_olist_schema(engine)
-            print("schema=reset")
-            if with_sink:
-                reset_factory_schema(engine)
-                print("factory_schema=reset")
-
-        if apply_migrations:
-            base_files = apply_sql_migrations(
-                engine,
-                cfg.database.sql_migrations_dir,
-                include=_is_base_migration,
-            )
-            print(
-                f"sql_migrations={len(base_files)} "
-                f"files={','.join(base_files)}"
-            )
-    finally:
-        engine.dispose()
-
-    results = load_olist(cfg)
-    for table, result in results.items():
-        print(f"table={table} loaded={result['loaded']}")
-
-    if not apply_migrations:
-        print("sql_migrations=skipped")
-        if with_sink:
-            print("factory_sink=skipped (the sink needs 009 to be applied)")
-        return
-
-    engine = sa.create_engine(build_database_url(cfg))
-    try:
-        # The sink schema comes first: it is a destination for data, while the
-        # snapshot block derives objects from tables that are already loaded.
-        sink_files = (
-            apply_sql_migrations(
-                engine,
-                cfg.database.sql_migrations_dir,
-                include=_is_sink_migration,
-            )
-            if with_sink
-            else []
-        )
-        snapshot_files = apply_sql_migrations(
-            engine,
-            cfg.database.sql_migrations_dir,
-            include=_is_snapshot_migration,
-        )
-    finally:
-        engine.dispose()
-
-    if with_sink:
-        print(
-            f"factory_migrations={len(sink_files)} "
-            f"files={','.join(sink_files)}"
-        )
-    else:
-        print("factory_sink=skipped")
-    print(
-        f"sql_snapshots={len(snapshot_files)} "
-        f"files={','.join(snapshot_files)}"
+    lock_engine = sa.create_engine(build_database_url(cfg))
+    lock_connection = lock_engine.connect()
+    lock_connection.execute(
+        sa.text("SELECT pg_advisory_lock(hashtext(:lock_key))"),
+        {"lock_key": LOAD_LOCK_KEY},
     )
-    if not with_sink:
-        return
-    if not sink_files:
-        raise DataError(
-            "Factory sink migration is missing",
-            context={
-                "dir": str(cfg.database.sql_migrations_dir),
-                "expected": "009_factory_sink_schema.sql",
-            },
-        )
 
-    sink = load_stage1_sink(cfg)
-    for table, result in sink.items():
-        print(f"factory_table={table} loaded={result['loaded']}")
+    try:
+        try:
+            engine = sa.create_engine(build_database_url(cfg))
+            try:
+                if reset:
+                    reset_olist_schema(engine)
+                    print("schema=reset")
+                    if with_sink:
+                        reset_factory_schema(engine)
+                        print("factory_schema=reset")
+
+                if apply_migrations:
+                    base_files = apply_sql_migrations(
+                        engine,
+                        cfg.database.sql_migrations_dir,
+                        include=_is_base_migration,
+                    )
+                    print(
+                        f"sql_migrations={len(base_files)} "
+                        f"files={','.join(base_files)}"
+                    )
+            finally:
+                engine.dispose()
+
+            results = load_olist(cfg, connection=lock_connection)
+            for table, result in results.items():
+                print(f"table={table} loaded={result['loaded']}")
+
+            refresh_olist_snapshots(lock_connection)
+
+            if not apply_migrations:
+                print("sql_migrations=skipped")
+                if with_sink:
+                    print(
+                        "factory_sink=skipped "
+                        "(the sink needs 009 to be applied)"
+                    )
+                lock_connection.commit()
+                return
+
+            engine = sa.create_engine(build_database_url(cfg))
+            try:
+                sink_files = (
+                    apply_sql_migrations(
+                        engine,
+                        cfg.database.sql_migrations_dir,
+                        include=_is_sink_migration,
+                    )
+                    if with_sink
+                    else []
+                )
+                snapshot_files = apply_sql_migrations(
+                    engine,
+                    cfg.database.sql_migrations_dir,
+                    include=_is_snapshot_migration,
+                )
+            finally:
+                engine.dispose()
+
+            if with_sink:
+                print(
+                    f"factory_migrations={len(sink_files)} "
+                    f"files={','.join(sink_files)}"
+                )
+            else:
+                print("factory_sink=skipped")
+            print(
+                f"sql_snapshots={len(snapshot_files)} "
+                f"files={','.join(snapshot_files)}"
+            )
+
+            if not with_sink:
+                lock_connection.commit()
+                return
+
+            sink_migration_exists = (
+                cfg.database.sql_migrations_dir
+                / "009_factory_sink_schema.sql"
+            ).is_file()
+            if not sink_migration_exists:
+                raise DataError(
+                    "Factory sink migration is missing",
+                    context={
+                        "dir": str(cfg.database.sql_migrations_dir),
+                        "expected": "009_factory_sink_schema.sql",
+                    },
+                )
+
+            sink = load_stage1_sink(cfg, connection=lock_connection)
+            for table, result in sink.items():
+                print(f"factory_table={table} loaded={result['loaded']}")
+
+            lock_connection.commit()
+        except Exception:
+            lock_connection.rollback()
+            raise
+    finally:
+        lock_connection.execute(
+            sa.text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
+            {"lock_key": LOAD_LOCK_KEY},
+        )
+        lock_connection.close()
+        lock_engine.dispose()
 
 
 def main(argv: list[str] | None = None) -> int:

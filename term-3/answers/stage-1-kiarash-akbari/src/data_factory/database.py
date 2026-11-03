@@ -1,9 +1,12 @@
 """PostgreSQL destination for the existing data factory package."""
 
+
 from __future__ import annotations
 
 
+
 import csv
+import hashlib
 import json
 import os
 import re
@@ -14,8 +17,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+
 import sqlalchemy as sa
 from sqlalchemy.engine import URL
+
 
 
 from .config import Config
@@ -32,6 +37,7 @@ from .outputs import (
 from .profile import REPORT_FILENAME
 
 
+
 OLIST_SCHEMA = "olist"
 OLIST_CSV_FILES = {
     "product_category_name_translation": "product_category_name_translation.csv",
@@ -45,6 +51,53 @@ OLIST_CSV_FILES = {
     "order_reviews": "olist_order_reviews_dataset.csv",
 }
 OLIST_TABLES = tuple(OLIST_CSV_FILES)
+OLIST_DELETE_ORDER = (
+    "order_reviews",
+    "payments",
+    "order_items",
+    "orders",
+    "products",
+    "sellers",
+    "customers",
+    "geolocation",
+    "product_category_name_translation",
+)
+
+OLIST_MATERIALIZED_VIEWS = (
+    "mv_q1_monthly_category_sales",
+    "mv_q3_delay_satisfaction",
+    "mv_q4_seller_dashboard",
+    "mv_q5_payment_distribution",
+)
+
+
+def clear_olist_tables(connection: sa.Connection) -> None:
+    """Remove existing Olist rows in foreign-key-safe order."""
+    for table in OLIST_DELETE_ORDER:
+        connection.execute(sa.text(f"DELETE FROM {OLIST_SCHEMA}.{table}"))
+
+
+def refresh_olist_snapshots(connection: sa.Connection) -> None:
+    """Refresh materialized views that already exist after replacing data."""
+    existing = {
+        row.matviewname
+        for row in connection.execute(
+            sa.text(
+                """
+                SELECT matviewname
+                FROM pg_matviews
+                WHERE schemaname = :schema
+                """
+            ),
+            {"schema": OLIST_SCHEMA},
+        )
+    }
+    for view in OLIST_MATERIALIZED_VIEWS:
+        if view in existing:
+            connection.execute(
+                sa.text(f"REFRESH MATERIALIZED VIEW {OLIST_SCHEMA}.{view}")
+            )
+
 GEOLOCATION_KEY = (
     "geolocation_zip_code_prefix",
     "geolocation_lat",
@@ -56,6 +109,11 @@ COLUMN_ALIASES = {
     "product_name_length": "product_name_lenght",
     "product_description_length": "product_description_lenght",
 }
+
+MIGRATION_HISTORY_TABLE = "public.data_factory_migrations"
+MIGRATION_LOCK_KEY = "data_factory:migrations"
+LOAD_LOCK_KEY = "data_factory:load"
+
 
 
 def build_database_url(cfg: Config) -> URL:
@@ -71,6 +129,7 @@ def build_database_url(cfg: Config) -> URL:
         port=parsed.port,
         database=parsed.path.lstrip("/"),
     )
+
 
 
 def read_csv_batches(path: Path, batch_size: int) -> Iterator[list[dict]]:
@@ -93,6 +152,7 @@ def read_csv_batches(path: Path, batch_size: int) -> Iterator[list[dict]]:
             yield batch
 
 
+
 def deduplicate_geolocation(rows: Iterator[list[dict]]) -> Iterator[list[dict]]:
     """Deduplicate raw observations; the distinct-key set grows with input."""
     seen = set()
@@ -107,8 +167,10 @@ def deduplicate_geolocation(rows: Iterator[list[dict]]) -> Iterator[list[dict]]:
             yield unique_rows
 
 
+
 def _convert(value, column):
     """One typed contract for every CSV column this project loads.
+
 
 
     The Boolean branch exists for Stage 1's own output: cases.csv writes
@@ -137,6 +199,7 @@ def _convert(value, column):
         number = float(value)
         import math
 
+
         if not math.isfinite(number):
             raise ValueError("Non-finite number")
         return number
@@ -146,6 +209,7 @@ def _convert(value, column):
             raise ValueError("Non-finite number")
         return number
     return value
+
 
 
 def load_csv(
@@ -204,26 +268,38 @@ def load_csv(
     return counts
 
 
-def load_olist(cfg: Config) -> dict[str, dict[str, int]]:
-    """Load into existing tables atomically; dispose the engine on every path."""
+
+def load_olist(
+    cfg: Config, connection: sa.Connection | None = None
+) -> dict[str, dict[str, int]]:
+    """Replace Olist tables atomically; dispose an owned engine on every path."""
     if cfg.database is None:
         raise DataError("Database destination is not configured")
+
+    def _load(target_connection: sa.Connection) -> dict[str, dict[str, int]]:
+        clear_olist_tables(target_connection)
+        return {
+            table: load_csv(
+                target_connection,
+                cfg.database.olist_csv_dir / OLIST_CSV_FILES[table],
+                OLIST_SCHEMA,
+                table,
+                cfg.database.batch_size,
+                deduplicate=(table == "geolocation"),
+            )
+            for table in OLIST_TABLES
+        }
+
+    if connection is not None:
+        return _load(connection)
+
     engine = sa.create_engine(build_database_url(cfg))
     try:
-        with engine.begin() as connection:
-            return {
-                table: load_csv(
-                    connection,
-                    cfg.database.olist_csv_dir / OLIST_CSV_FILES[table],
-                    OLIST_SCHEMA,
-                    table,
-                    cfg.database.batch_size,
-                    deduplicate=(table == "geolocation"),
-                )
-                for table in OLIST_TABLES
-            }
+        with engine.begin() as owned:
+            return _load(owned)
     finally:
         engine.dispose()
+
 
 
 def sql_migration_files(sql_dir: Path) -> list[Path]:
@@ -237,10 +313,46 @@ def sql_migration_files(sql_dir: Path) -> list[Path]:
     return sorted(path for path in sql_dir.glob("*.sql") if path.is_file())
 
 
+
+def _migration_checksum(sql: str) -> str:
+    """Return a stable content checksum for one SQL migration file."""
+    return hashlib.sha256(sql.encode("utf-8")).hexdigest()
+
+
+
+def _ensure_migration_history(connection: sa.Connection) -> None:
+    """Create the migration-history table if it does not already exist."""
+    connection.execute(
+        sa.text(
+            f"""
+            CREATE TABLE IF NOT EXISTS {MIGRATION_HISTORY_TABLE} (
+                migration_name TEXT PRIMARY KEY,
+                checksum TEXT NOT NULL,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+    )
+
+
+
+def reset_migration_history(engine: sa.Engine) -> None:
+    """Clear migration history after a full schema reset."""
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}")
+        )
+
+
+
 def reset_olist_schema(engine: sa.Engine) -> None:
     """Drop the complete Olist schema so a rebuild starts from an empty database."""
     with engine.begin() as connection:
         connection.execute(sa.text("DROP SCHEMA IF EXISTS olist CASCADE"))
+        connection.execute(
+            sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}")
+        )
+
 
 
 def apply_sql_migrations(
@@ -248,22 +360,58 @@ def apply_sql_migrations(
     sql_dir: Path,
     include=None,
 ) -> list[str]:
-    """Apply selected direct SQL files in lexical order, all in one transaction.
+    """Apply selected SQL migrations once, safely under an advisory lock.
 
 
-    One transaction for the whole selection is the point: a file that fails
-    half way leaves no earlier file of the same selection applied.
+
+    Each file is identified by name and content checksum. A previously applied
+    file with the same checksum is skipped; a changed file fails explicitly.
+    The advisory lock serializes concurrent CLI runs so two processes cannot
+    create the same schema or table at the same time.
     """
     files = sql_migration_files(sql_dir)
     if include is not None:
         files = [path for path in files if include(path)]
 
+
     applied: list[str] = []
 
+
     with engine.begin() as connection:
+        connection.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": MIGRATION_LOCK_KEY},
+        )
+        _ensure_migration_history(connection)
+
         raw_connection = connection.connection.driver_connection
         for path in files:
             sql = path.read_text(encoding="utf-8")
+            checksum = _migration_checksum(sql)
+
+            existing_checksum = connection.execute(
+                sa.text(
+                    f"""
+                    SELECT checksum
+                    FROM {MIGRATION_HISTORY_TABLE}
+                    WHERE migration_name = :name
+                    """
+                ),
+                {"name": path.name},
+            ).scalar()
+
+            if existing_checksum is not None:
+                if existing_checksum != checksum:
+                    raise DataError(
+                        "SQL migration checksum mismatch",
+                        context={
+                            "file": str(path),
+                            "expected": existing_checksum,
+                            "actual": checksum,
+                        },
+                    )
+                continue
+
             try:
                 with raw_connection.cursor() as cursor:
                     cursor.execute(sql)
@@ -275,9 +423,21 @@ def apply_sql_migrations(
                         "error": str(exc),
                     },
                 ) from exc
+
+            connection.execute(
+                sa.text(
+                    f"""
+                    INSERT INTO {MIGRATION_HISTORY_TABLE}
+                        (migration_name, checksum)
+                    VALUES (:name, :checksum)
+                    """
+                ),
+                {"name": path.name, "checksum": checksum},
+            )
             applied.append(path.name)
 
     return applied
+
 
 
 FACTORY_SCHEMA = "factory"
@@ -315,6 +475,7 @@ WIDE_POPULATION_COLUMN = "population"
 MONTH_PATTERN = re.compile(r"^(\d{4}-(?:0[1-9]|1[0-2]))$")
 
 
+
 def _month_of(column_name: str, prefix: str) -> str:
     if not column_name.startswith(prefix):
         raise DataError("Unexpected sink column", context={"column": column_name})
@@ -327,8 +488,10 @@ def _month_of(column_name: str, prefix: str) -> str:
     return month
 
 
+
 def sink_months(header) -> tuple[str, ...]:
     """Months of the delivered wide table, read from its header.
+
 
 
     A count without its rate (or the reverse) is a half-written artifact, so it
@@ -354,8 +517,10 @@ def sink_months(header) -> tuple[str, ...]:
     return months
 
 
+
 def narrow_wide_rows(row: dict, months) -> Iterator[dict]:
     """One wide row (area, type, every month) to one narrow row per month.
+
 
 
     An empty cell is a NULL here, the same rule read_csv_batches applies to the
@@ -391,6 +556,7 @@ def narrow_wide_rows(row: dict, months) -> Iterator[dict]:
         }
 
 
+
 def _sink_target(connection: sa.Connection, table: str, required: tuple[str, ...]) -> sa.Table:
     """Reflect a sink table and refuse to write columns it does not have."""
     target = sa.Table(table, sa.MetaData(), schema=FACTORY_SCHEMA, autoload_with=connection)
@@ -403,9 +569,11 @@ def _sink_target(connection: sa.Connection, table: str, required: tuple[str, ...
     return target
 
 
+
 def _insert_records(connection: sa.Connection, target: sa.Table, records: list[dict]) -> None:
     if records:
         connection.execute(sa.insert(target), records)
+
 
 
 def _profile_bound(value):
@@ -419,8 +587,10 @@ def _profile_bound(value):
     raise ValueError(f"Unsupported profile bound type: {type(value).__name__}")
 
 
+
 def parse_quality_report(path: Path) -> dict:
     """Read the JSON quality report as JSON; the CSV reader never sees it.
+
 
 
     Every shape assumption is checked here so the inserts below deal only with
@@ -440,6 +610,7 @@ def parse_quality_report(path: Path) -> dict:
     if not isinstance(payload, dict):
         raise DataError("Data quality report must be a JSON object", context={"file": str(path)})
 
+
     columns = payload.get("columns")
     if not isinstance(columns, dict) or not columns:
         raise DataError("Data quality report has no column profiles", context={"file": str(path)})
@@ -458,6 +629,7 @@ def parse_quality_report(path: Path) -> dict:
             "Data quality report conflict count disagrees with its list",
             context={"file": str(path), "declared": declared, "listed": len(conflicts)},
         )
+
 
     profiles = []
     for name in sorted(columns):
@@ -492,6 +664,7 @@ def parse_quality_report(path: Path) -> dict:
                 context={"file": str(path), "column": name, "error": str(exc)},
             ) from exc
 
+
     pairs = []
     for entry in conflicts:
         boroughs = entry.get("boroughs") if isinstance(entry, dict) else None
@@ -513,6 +686,7 @@ def parse_quality_report(path: Path) -> dict:
                 )
             pairs.append({"modzcta": entry["modzcta"].strip(), "borough": borough.strip()})
 
+
     return {
         "profiles": profiles,
         "conflicts": pairs,
@@ -522,8 +696,10 @@ def parse_quality_report(path: Path) -> dict:
     }
 
 
+
 def load_narrow_wide(connection: sa.Connection, csv_path: Path, batch_size: int) -> dict[str, int]:
     """Stream the wide CSV and insert it in narrow form, one row per month.
+
 
 
     A duplicate (area, type, month) is the database's to reject: the primary key
@@ -558,6 +734,7 @@ def load_narrow_wide(connection: sa.Connection, csv_path: Path, batch_size: int)
         _insert_records(connection, target, records)
         counts["loaded"] += len(records)
     return counts
+
 
 
 def load_quality_report(connection: sa.Connection, json_path: Path) -> dict[str, int]:
@@ -600,6 +777,7 @@ def load_quality_report(connection: sa.Connection, json_path: Path) -> dict[str,
     }
 
 
+
 def factory_sink_paths(curated_dir: Path) -> dict[str, Path]:
     """Resolve the three delivered files, before any connection is opened."""
     curated_dir = Path(curated_dir)
@@ -618,8 +796,10 @@ def factory_sink_paths(curated_dir: Path) -> dict[str, Path]:
     return paths
 
 
+
 def truncate_factory(connection: sa.Connection) -> None:
     """Clear every sink table so a repeated load converges instead of growing.
+
 
 
     The table list is module constants, never config or file content, so this
@@ -640,6 +820,7 @@ def truncate_factory(connection: sa.Connection) -> None:
             + " RESTART IDENTITY"
         )
     )
+
 
 
 def _load_sink(
@@ -687,10 +868,12 @@ def _load_sink(
     return results
 
 
+
 def load_stage1_sink(
     cfg: Config, connection: sa.Connection | None = None
 ) -> dict[str, dict[str, int]]:
     """Load Stage 1's curated outputs into the factory schema, atomically.
+
 
 
     Truncate then insert, in one transaction: a rerun converges on the same
@@ -712,6 +895,7 @@ def load_stage1_sink(
             return _load_sink(owned, cfg, paths)
     finally:
         engine.dispose()
+
 
 
 def reset_factory_schema(engine: sa.Engine) -> None:
