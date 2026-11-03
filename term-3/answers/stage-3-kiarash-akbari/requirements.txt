@@ -1,0 +1,21 @@
+# Python floor: >=3.12, declared in ../stage-1-kiarash-akbari/pyproject.toml
+# (numpy 2.5.4 requires it).
+#
+# These are the versions stage 2's environment already carries, plus the one new
+# library stage 3 needs. The transitive closure must be regenerated from the
+# environment that produced report.md's numbers - a hand-written list of pins is
+# a claim about an install that has not happened:
+#
+#   .venv/bin/python -m pip freeze | grep -v '^data-factory @' > requirements.txt
+matplotlib==3.11.2
+numpy==2.5.4
+pandas==3.1.0
+psycopg==3.3.6
+psycopg-binary==3.3.6
+requests==2.34.2
+scikit-learn==1.9.1
+SQLAlchemy==2.1.6
+tzdata==2026.5
+
+# Shared package from stage 1; install from the stage-3 directory.
+-e ../stage-1-kiarash-akbari
