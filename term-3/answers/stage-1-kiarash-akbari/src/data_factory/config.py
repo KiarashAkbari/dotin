@@ -75,7 +75,8 @@ class DatabaseConfig:
     stage1_curated_dir: Path
     batch_size: int
     sql_migrations_dir: Path | None = None
-
+    credit_sql_migrations_dir: Path | None = None
+    credit_raw_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,14 @@ def _parse_database(section: dict) -> DatabaseConfig:
     if sql_migrations_dir is not None and not isinstance(sql_migrations_dir, str):
         raise ConfigError("database.sql_migrations_dir must be a string path")
 
+    credit_sql_migrations_dir = section.get("credit_sql_migrations_dir")
+    if credit_sql_migrations_dir is not None and not isinstance(credit_sql_migrations_dir, str):
+        raise ConfigError("database.credit_sql_migrations_dir must be a string path")
+
+    credit_raw_path = section.get("credit_raw_path")
+    if credit_raw_path is not None and not isinstance(credit_raw_path, str):
+        raise ConfigError("database.credit_raw_path must be a string path")
+
     return DatabaseConfig(
         url=str(_get(section, "url", "database")),
         password_env=str(_get(section, "password_env", "database")),
@@ -170,6 +179,12 @@ def _parse_database(section: dict) -> DatabaseConfig:
         batch_size=batch_size,
         sql_migrations_dir=(
             Path(sql_migrations_dir) if sql_migrations_dir is not None else None
+        ),
+        credit_sql_migrations_dir=(
+            Path(credit_sql_migrations_dir) if credit_sql_migrations_dir is not None else None
+        ),
+        credit_raw_path=(
+            Path(credit_raw_path) if credit_raw_path is not None else None
         ),
     )
 

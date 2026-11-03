@@ -12,6 +12,7 @@ from .database import (
     MIGRATION_LOCK_KEY,
     apply_sql_migrations,
     build_database_url,
+    load_credit,
     load_olist,
     load_stage1_sink,
     refresh_olist_snapshots,
@@ -33,7 +34,7 @@ from .rolling import after_watermark, load_mark, load_watermark, rolling_config
 from .store import RawPageStore
 
 DEFAULT_CONFIG = "config/default.toml"
-COMMANDS = ("run", "fetch", "fetch-reference", "validate", "clean", "load-database")
+COMMANDS = ("run", "fetch", "fetch-reference", "validate", "clean", "load-database", "load-credit")
 TOP_UNMATCHED_ZIPS = 5
 
 
@@ -306,6 +307,30 @@ def _load_database(
         lock_connection.close()
         lock_engine.dispose()
 
+def _load_credit(cfg: Config) -> None:
+    if cfg.database is None:
+        raise DataError("Database destination is not configured")
+    if cfg.database.credit_sql_migrations_dir is None:
+        raise DataError("Credit SQL migrations directory is not configured")
+    if cfg.database.credit_raw_path is None:
+        raise DataError("Credit raw file path is not configured")
+
+    engine = sa.create_engine(build_database_url(cfg))
+    try:
+        applied = apply_sql_migrations(
+            engine, cfg.database.credit_sql_migrations_dir
+        )
+        print(f"credit_migrations={len(applied)} files={','.join(applied)}")
+        with engine.begin() as connection:
+            result = load_credit(cfg, connection=connection)
+        print(
+            f"credit_loaded={result['loaded']} "
+            f"credit_quarantined={result['quarantined']} "
+            f"manifest={result['manifest_path']}"
+        )
+    finally:
+        engine.dispose()
+        
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
@@ -331,6 +356,8 @@ def main(argv: list[str] | None = None) -> int:
                 reset=args.reset,
                 with_sink=not args.skip_factory_sink,
             )
+        elif args.command == "load-credit":
+            _load_credit(cfg)
         else:
             _build(cfg, 0, utc_now_iso(), mark)
         return int(ExitCode.OK)

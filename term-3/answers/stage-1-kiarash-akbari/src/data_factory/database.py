@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
+from .quarantine import QuarantineWriter
+from .manifest import utc_now_iso, write_manifest
 
 
 
@@ -902,3 +904,94 @@ def reset_factory_schema(engine: sa.Engine) -> None:
     """Drop the sink schema; the counterpart of reset_olist_schema."""
     with engine.begin() as connection:
         connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {FACTORY_SCHEMA} CASCADE"))
+
+CREDIT_SCHEMA = "credit"
+CREDIT_APPLICATION_TABLE = "application"
+CREDIT_PROVENANCE_TABLE = "load_run"
+CREDIT_QUARANTINE_FILENAME = "credit-quarantine.jsonl"
+CREDIT_MANIFEST_FILENAME = "run_manifest_credit.json"
+
+def file_sha256(path: Path) -> str:
+    """Full SHA-256 of a file, for the credit provenance record."""
+    return sha256_file(path)
+
+
+def file_fingerprint(path: Path) -> str:
+    """Short stable fingerprint (first 12 hex chars) for the credit load_run."""
+    return sha256_file(path)[:12]
+
+def load_credit(
+    cfg: Config, connection: sa.Connection | None = None
+) -> dict[str, object]:
+    """Load the credit CSV through the factory, into the credit schema, atomically."""
+    if cfg.database is None:
+        raise DataError("Database destination is not configured")
+    if cfg.database.credit_raw_path is None:
+        raise DataError("Credit raw file path is not configured")
+
+    from credit.source import CsvFileSource
+    from credit.validate import parse_row, parse_stream
+    from credit.columns import DB_COLUMNS
+
+    raw_path = cfg.database.credit_raw_path
+    source = CsvFileSource(raw_path)
+    source.validate_header()
+
+    target = sa.Table(
+        CREDIT_APPLICATION_TABLE, sa.MetaData(), schema=CREDIT_SCHEMA,
+        autoload_with=connection,
+    )
+    provenance = sa.Table(
+        CREDIT_PROVENANCE_TABLE, sa.MetaData(), schema=CREDIT_SCHEMA,
+        autoload_with=connection,
+    )
+
+    counts = {"raw": 0, "loaded": 0, "quarantined": 0}
+    reason_counts: dict[str, int] = {}
+    batch: list[dict] = []
+
+    def _flush() -> None:
+        if batch:
+            connection.execute(sa.insert(target), batch)
+            counts["loaded"] += len(batch)
+            batch.clear()
+
+    with QuarantineWriter(
+        cfg.paths.quarantine_dir, CREDIT_QUARANTINE_FILENAME
+    ) as writer:
+        for parsed, raw_row in parse_stream(source.iter_rows()):
+            counts["raw"] += 1
+            if parsed.is_valid:
+                batch.append(parsed.record)
+                if len(batch) >= cfg.database.batch_size:
+                    _flush()
+            else:
+                counts["quarantined"] += 1
+                for reason in parsed.reasons:
+                    reason_counts[reason.value] = reason_counts.get(reason.value, 0) + 1
+                writer.write(CreditClassifiedRecord(raw_row, parsed.reasons))
+        _flush()
+
+        sha = file_sha256(raw_path)
+        connection.execute(sa.insert(provenance), [{
+            "source_kind": "file",
+            "file_name": raw_path.name,
+            "sha256": sha,
+            "rows_loaded": counts["loaded"],
+            "rejected_count": counts["quarantined"],
+            "fingerprint": file_fingerprint(raw_path),
+        }])
+
+    manifest = {
+        "source_kind": "file",
+        "file_name": raw_path.name,
+        "sha256": sha,
+        "rows_raw": counts["raw"],
+        "rows_loaded": counts["loaded"],
+        "rows_quarantined": counts["quarantined"],
+        "quarantine_reasons": reason_counts,
+        "finished_at": utc_now_iso(),
+    }
+    manifest_path = cfg.paths.manifest_path.parent / CREDIT_MANIFEST_FILENAME
+    write_manifest(manifest_path, manifest)
+    return {**counts, "manifest_path": str(manifest_path)}
