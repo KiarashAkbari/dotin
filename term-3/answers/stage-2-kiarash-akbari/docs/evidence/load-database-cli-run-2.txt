@@ -1,0 +1,25 @@
+Evidence provenance: raw terminal output (stdout and stderr via tee, traceback lines filtered); not run by the assistant.
+Command: data_factory load-database --reset, config = copy of default.toml with database olist_stage2_test.
+Checkout at execution: HEAD 1474314 plus uncommitted changes to sql/009_factory_sink_schema.sql and tests/test_factory_sink_postgres.py (committed together with this file).
+Result: exit=0.
+Execution environment: user's local PostgreSQL 16.15 (Ubuntu 24.04); database olist_stage2_test (disposable); role kiarash, non-superuser.
+Credentials omitted; home directory paths replaced with ~.
+
+schema=reset
+factory_schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=71
+table=customers loaded=99441
+table=sellers loaded=3095
+table=products loaded=32951
+table=geolocation loaded=738332
+table=orders loaded=99441
+table=order_items loaded=112650
+table=payments loaded=103886
+table=order_reviews loaded=99224
+factory_migrations=1 files=009_factory_sink_schema.sql
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+factory_table=case_file loaded=1083410
+factory_table=complaint_area_month loaded=18378
+factory_table=column_quality loaded=14
+factory_table=load_run loaded=3

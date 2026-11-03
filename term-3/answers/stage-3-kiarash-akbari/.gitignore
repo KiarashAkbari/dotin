@@ -1,0 +1,29 @@
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python junk
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+
+# The Kaggle competition file is never in Git: it is licensed per-user and the
+# delivery guide forbids raw data in history. Accepting the rules happens on the
+# student's account, so the file is placed here by hand.
+data/raw/*
+!data/raw/.gitkeep
+
+# Model artifacts and regenerated outputs
+data/curated/*
+!data/curated/.gitkeep
+*.joblib
+data/run_manifest*.json
+
+.ipynb_checkpoints/
+solution.before-fix.ipynb
+
+# Reviewed evidence only (numbers a reader can check against the report)
+!data/curated/credit-runs.json

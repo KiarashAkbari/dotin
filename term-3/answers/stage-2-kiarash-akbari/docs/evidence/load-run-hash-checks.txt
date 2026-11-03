@@ -1,0 +1,29 @@
+Evidence provenance: raw terminal output (stdout and stderr via tee); not run by the assistant.
+Command: psql queries against factory schema on olist_stage2_test; sha256sum on stage-1 curated files.
+Checkout at execution: HEAD 3282c14, no tracked changes.
+Result: conflict_count=13 matches borough_conflict rows=13; inverted naive timestamps=64; all three load_run sha256 values match the files on disk.
+Execution environment: user's local PostgreSQL 16.15 (Ubuntu 24.04); database olist_stage2_test (disposable); role kiarash, non-superuser.
+Credentials omitted; home directory paths replaced with ~.
+
+--- conflict_count vs borough_conflict ---
+13|13|MATCH
+
+--- inverted naive timestamps (closed_at < created_at) ---
+64
+
+--- load_run hashes (DB) ---
+case_file|cases.csv|e82420e9dc2bc67ab8da74e31d6bd7e727920317699b46f29572e7c1a9434b66
+column_quality|data_quality_report.json|2735a5856f05745071bb89b12bdc0d22d3947825fa0eb395ec72bfaba1ad7d31
+complaint_area_month|complaints_by_area_month.csv|f411793bde1adc226cf9d383a3e5b5d5eb282b2cd37c5121109ab30a0fd60b69
+
+--- sha256sum on disk (stage-1 curated) ---
+e82420e9dc2bc67ab8da74e31d6bd7e727920317699b46f29572e7c1a9434b66  cases.csv
+2735a5856f05745071bb89b12bdc0d22d3947825fa0eb395ec72bfaba1ad7d31  data_quality_report.json
+f411793bde1adc226cf9d383a3e5b5d5eb282b2cd37c5121109ab30a0fd60b69  complaints_by_area_month.csv
+
+--- verdict ---
+conflict_count: MATCH
+inverted_rows: 64 (matches report claim)
+sha256 cases.csv: MATCH
+sha256 data_quality_report.json: MATCH
+sha256 complaints_by_area_month.csv: MATCH

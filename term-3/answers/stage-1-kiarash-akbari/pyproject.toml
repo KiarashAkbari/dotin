@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-factory"
+version = "0.1.0"
+# The floor is what this project's own lock can install: numpy 2.5.4 declares
+# requires_python >=3.12 on PyPI, so ">=3.11" described a version the pinned
+# dependencies refuse. Nothing in the source uses 3.12-only syntax.
+requires-python = ">=3.12"
+dependencies = [
+    "requests",
+    "tzdata",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "pandas",
+    "matplotlib",
+]
+
+[project.scripts]
+data-factory = "data_factory.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Runner docs for the project are unittest-based (report.md decision 1: pytest was
+# dropped from requirements in PR #6). This section is kept only so that a reviewer who
+# installs pytest by hand gets the same tests and the same import paths; it adds no
+# dependency, and every test file here is unittest.TestCase.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.format]
+quote-style = "double"

@@ -1,0 +1,21 @@
+Evidence provenance: transcribed from terminal output supplied by the user.
+Execution environment: user's local PostgreSQL; not run by the assistant.
+Database: olist_stage2_test
+Runner: unittest discovery, tests/test_postgres_integration.py
+Exact checkout SHA at execution: not captured in the supplied output.
+Credentials and the original shell command have been omitted.
+
+test_function_calendar_day_signs (test_postgres_integration.PostgresIntegrationTests.test_function_calendar_day_signs) ... ok
+test_function_null (test_postgres_integration.PostgresIntegrationTests.test_function_null) ... ok
+test_procedure_idempotency (test_postgres_integration.PostgresIntegrationTests.test_procedure_idempotency) ... ok
+test_procedure_mid_insert_failure_restores_previous_snapshot (test_postgres_integration.PostgresIntegrationTests.test_procedure_mid_insert_failure_restores_previous_snapshot) ... ok
+test_q1_no_item_or_review_multiplication (test_postgres_integration.PostgresIntegrationTests.test_q1_no_item_or_review_multiplication) ... ok
+test_q2_late_ratio (test_postgres_integration.PostgresIntegrationTests.test_q2_late_ratio) ... ok
+test_q3_review_grain (test_postgres_integration.PostgresIntegrationTests.test_q3_review_grain) ... ok
+test_q4_seller_grain (test_postgres_integration.PostgresIntegrationTests.test_q4_seller_grain) ... ok
+test_q5_payment_shares (test_postgres_integration.PostgresIntegrationTests.test_q5_payment_shares) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.294s
+
+OK

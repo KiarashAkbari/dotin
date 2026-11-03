@@ -1,0 +1,57 @@
+Evidence provenance: raw terminal output (stdout and stderr via tee); not run by the assistant.
+Command: ./scripts/bootstrap_test_db.sh --run-only -d olist_stage2_bootstrap -U kiarash -A kiarash
+Checkout at execution: HEAD b0f0b90, no tracked changes.
+Result: see exit line below.
+Execution environment: user's local PostgreSQL 16.15 (Ubuntu 24.04); database olist_stage2_bootstrap (disposable); role kiarash, non-superuser.
+Credentials omitted; home directory paths replaced with ~.
+Note: the database was created manually with sudo -u postgres because the -A postgres path failed password auth; the -A kiarash path was used for the --run-only check.
+
+bootstrap: database 'olist_stage2_bootstrap' already exists; nothing was created
+bootstrap: TEST_DATABASE_URL=postgresql+psycopg://kiarash@localhost:5432/olist_stage2_bootstrap
+bootstrap: the URL carries no password; PGPASSWORD or PGPASSFILE supplies it
+
+bootstrap: running test_postgres_integration.py with ~/Code/PROJECTS/dotin/term-3/answers/stage-2-kiarash-akbari/../stage-1-kiarash-akbari/.venv/bin/python (verbose output below)
+test_function_calendar_day_signs (test_postgres_integration.PostgresIntegrationTests.test_function_calendar_day_signs) ... ok
+test_function_null (test_postgres_integration.PostgresIntegrationTests.test_function_null) ... ok
+test_procedure_idempotency (test_postgres_integration.PostgresIntegrationTests.test_procedure_idempotency) ... ok
+test_procedure_mid_insert_failure_restores_previous_snapshot (test_postgres_integration.PostgresIntegrationTests.test_procedure_mid_insert_failure_restores_previous_snapshot) ... ok
+test_q1_no_item_or_review_multiplication (test_postgres_integration.PostgresIntegrationTests.test_q1_no_item_or_review_multiplication) ... ok
+test_q2_late_ratio (test_postgres_integration.PostgresIntegrationTests.test_q2_late_ratio) ... ok
+test_q3_review_grain (test_postgres_integration.PostgresIntegrationTests.test_q3_review_grain) ... ok
+test_q4_seller_grain (test_postgres_integration.PostgresIntegrationTests.test_q4_seller_grain) ... ok
+test_q5_payment_shares (test_postgres_integration.PostgresIntegrationTests.test_q5_payment_shares) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.783s
+
+OK
+
+bootstrap: running test_factory_sink_postgres.py with ~/Code/PROJECTS/dotin/term-3/answers/stage-2-kiarash-akbari/../stage-1-kiarash-akbari/.venv/bin/python (verbose output below)
+test_a_failure_leaves_the_previous_rows_exactly_as_they_were (test_factory_sink_postgres.FactorySinkPostgresTests.test_a_failure_leaves_the_previous_rows_exactly_as_they_were) ... ok
+test_a_fall_back_case_closes_before_it_opens_on_the_clock (test_factory_sink_postgres.FactorySinkPostgresTests.test_a_fall_back_case_closes_before_it_opens_on_the_clock) ... ok
+test_a_second_load_converges_instead_of_appending (test_factory_sink_postgres.FactorySinkPostgresTests.test_a_second_load_converges_instead_of_appending) ... ok
+test_all_six_sink_tables_exist_after_009 (test_factory_sink_postgres.FactorySinkPostgresTests.test_all_six_sink_tables_exist_after_009) ... ok
+test_conflicts_are_joinable_and_agree_with_the_report (test_factory_sink_postgres.FactorySinkPostgresTests.test_conflicts_are_joinable_and_agree_with_the_report) ... ok
+test_load_counts_match_the_fixture_files (test_factory_sink_postgres.FactorySinkPostgresTests.test_load_counts_match_the_fixture_files) ... ok
+test_naive_timestamps_are_not_shifted (test_factory_sink_postgres.FactorySinkPostgresTests.test_naive_timestamps_are_not_shifted) ... ok
+test_named_constraints_reject_bad_rows (test_factory_sink_postgres.FactorySinkPostgresTests.test_named_constraints_reject_bad_rows) ... ok
+test_numeric_rate_keeps_its_scale_and_its_null (test_factory_sink_postgres.FactorySinkPostgresTests.test_numeric_rate_keeps_its_scale_and_its_null) ... ok
+test_primary_keys_reject_duplicates (test_factory_sink_postgres.FactorySinkPostgresTests.test_primary_keys_reject_duplicates) ... ok
+test_provenance_hash_matches_the_bytes_on_disk (test_factory_sink_postgres.FactorySinkPostgresTests.test_provenance_hash_matches_the_bytes_on_disk) ... ok
+test_quality_meta_is_a_single_row_table (test_factory_sink_postgres.FactorySinkPostgresTests.test_quality_meta_is_a_single_row_table) ... ok
+test_stage1_boolean_text_lands_as_a_real_boolean (test_factory_sink_postgres.FactorySinkPostgresTests.test_stage1_boolean_text_lands_as_a_real_boolean) ... ok
+test_timestamp_columns_keep_the_delivered_naive_type (test_factory_sink_postgres.FactorySinkPostgresTests.test_timestamp_columns_keep_the_delivered_naive_type) ... ok
+test_unknown_area_is_a_storable_bucket (test_factory_sink_postgres.FactorySinkPostgresTests.test_unknown_area_is_a_storable_bucket) ... ok
+test_view_computes_the_median_the_stage_exists_for (test_factory_sink_postgres.FactorySinkPostgresTests.test_view_computes_the_median_the_stage_exists_for) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 6.123s
+
+OK
+
+bootstrap: summary
+  test_postgres_integration.py: exit 0
+  test_factory_sink_postgres.py: exit 0
+  logs: /tmp/tmp.ZJXDgB02Km (kept for you to read; delete it with: rm -rf '/tmp/tmp.ZJXDgB02Km')
+bootstrap: both suites exited 0 -- read the skip counts above before calling that a pass
+exit=0

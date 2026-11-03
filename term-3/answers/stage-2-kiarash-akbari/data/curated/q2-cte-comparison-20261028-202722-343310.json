@@ -1,0 +1,473 @@
+{
+  "method": "3 warmups per version; 15 measured runs per version; alternating order; db_benchmark.consume including hashing",
+  "original_sql": "-- Denominator: observed delivered orders; calendar-day delay; purchase month.\nSELECT date_trunc('month', d.order_purchase_timestamp)::date AS purchase_month,\n       c.customer_state, COUNT(*) AS delivered_orders,\n       COUNT(*) FILTER (WHERE olist.delivery_delay_days(\n           d.order_delivered_customer_date, d.order_estimated_delivery_date) > 0) AS late_orders,\n       AVG((olist.delivery_delay_days(d.order_delivered_customer_date,\n           d.order_estimated_delivery_date) > 0)::integer)::numeric AS late_ratio\nFROM olist.v_delivered_orders AS d\nJOIN olist.customers AS c ON c.customer_id = d.customer_id\nGROUP BY 1, 2 ORDER BY 1, 2;\n",
+  "candidate_sql": "\nWITH grouped AS MATERIALIZED (\n    SELECT\n        date_trunc(\n            'month', d.order_purchase_timestamp\n        )::date AS purchase_month,\n        c.customer_state,\n        COUNT(*) AS delivered_orders,\n        COUNT(*) FILTER (\n            WHERE olist.delivery_delay_days(\n                d.order_delivered_customer_date,\n                d.order_estimated_delivery_date\n            ) > 0\n        ) AS late_orders,\n        AVG((\n            olist.delivery_delay_days(\n                d.order_delivered_customer_date,\n                d.order_estimated_delivery_date\n            ) > 0\n        )::integer)::numeric AS late_ratio\n    FROM olist.v_delivered_orders AS d\n    JOIN olist.customers AS c\n        ON c.customer_id = d.customer_id\n    GROUP BY 1, 2\n)\nSELECT\n    purchase_month,\n    customer_state,\n    delivered_orders,\n    late_orders,\n    late_ratio\nFROM grouped\nORDER BY 1, 2\n",
+  "candidate_plan": {
+    "Plan": {
+      "Node Type": "Sort",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 21976.98,
+      "Total Cost": 22211.11,
+      "Plan Rows": 93654,
+      "Plan Width": 64,
+      "Actual Startup Time": 174.496,
+      "Actual Total Time": 174.522,
+      "Actual Rows": 556,
+      "Actual Loops": 1,
+      "Sort Key": [
+        "grouped.purchase_month",
+        "grouped.customer_state"
+      ],
+      "Sort Method": "quicksort",
+      "Sort Space Used": 57,
+      "Sort Space Type": "Memory",
+      "Shared Hit Blocks": 3259,
+      "Shared Read Blocks": 0,
+      "Shared Dirtied Blocks": 0,
+      "Shared Written Blocks": 0,
+      "Local Hit Blocks": 0,
+      "Local Read Blocks": 0,
+      "Local Dirtied Blocks": 0,
+      "Local Written Blocks": 0,
+      "Temp Read Blocks": 0,
+      "Temp Written Blocks": 0,
+      "Plans": [
+        {
+          "Node Type": "Aggregate",
+          "Strategy": "Hashed",
+          "Partial Mode": "Simple",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "CTE grouped",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 10731.45,
+          "Total Cost": 12370.39,
+          "Plan Rows": 93654,
+          "Plan Width": 55,
+          "Actual Startup Time": 172.875,
+          "Actual Total Time": 173.95,
+          "Actual Rows": 556,
+          "Actual Loops": 1,
+          "Group Key": [
+            "(date_trunc('month'::text, orders.order_purchase_timestamp))::date",
+            "c.customer_state"
+          ],
+          "Planned Partitions": 0,
+          "HashAgg Batches": 1,
+          "Peak Memory Usage": 3217,
+          "Disk Usage": 0,
+          "Shared Hit Blocks": 3259,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Hash Join",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Join Type": "Inner",
+              "Startup Cost": 3687.42,
+              "Total Cost": 7453.56,
+              "Plan Rows": 93654,
+              "Plan Width": 23,
+              "Actual Startup Time": 47.199,
+              "Actual Total Time": 139.244,
+              "Actual Rows": 96470,
+              "Actual Loops": 1,
+              "Inner Unique": true,
+              "Hash Cond": "((orders.customer_id)::text = (c.customer_id)::text)",
+              "Shared Hit Blocks": 3259,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Relation Name": "orders",
+                  "Alias": "orders",
+                  "Startup Cost": 0.0,
+                  "Total Cost": 3052.01,
+                  "Plan Rows": 93654,
+                  "Plan Width": 57,
+                  "Actual Startup Time": 0.018,
+                  "Actual Total Time": 32.189,
+                  "Actual Rows": 96470,
+                  "Actual Loops": 1,
+                  "Filter": "((order_delivered_customer_date IS NOT NULL) AND (order_estimated_delivery_date IS NOT NULL) AND (order_status = 'delivered'::text))",
+                  "Rows Removed by Filter": 2971,
+                  "Shared Hit Blocks": 1809,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "Hash",
+                  "Parent Relationship": "Inner",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 2444.41,
+                  "Total Cost": 2444.41,
+                  "Plan Rows": 99441,
+                  "Plan Width": 36,
+                  "Actual Startup Time": 46.395,
+                  "Actual Total Time": 46.396,
+                  "Actual Rows": 99441,
+                  "Actual Loops": 1,
+                  "Hash Buckets": 131072,
+                  "Original Hash Buckets": 131072,
+                  "Hash Batches": 1,
+                  "Original Hash Batches": 1,
+                  "Peak Memory Usage": 7628,
+                  "Shared Hit Blocks": 1450,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "customers",
+                      "Alias": "c",
+                      "Startup Cost": 0.0,
+                      "Total Cost": 2444.41,
+                      "Plan Rows": 99441,
+                      "Plan Width": 36,
+                      "Actual Startup Time": 0.016,
+                      "Actual Total Time": 16.48,
+                      "Actual Rows": 99441,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 1450,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Node Type": "CTE Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "CTE Name": "grouped",
+          "Alias": "grouped",
+          "Startup Cost": 0.0,
+          "Total Cost": 1873.08,
+          "Plan Rows": 93654,
+          "Plan Width": 64,
+          "Actual Startup Time": 172.882,
+          "Actual Total Time": 174.118,
+          "Actual Rows": 556,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 3259,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        }
+      ]
+    },
+    "Planning": {
+      "Shared Hit Blocks": 8,
+      "Shared Read Blocks": 0,
+      "Shared Dirtied Blocks": 0,
+      "Shared Written Blocks": 0,
+      "Local Hit Blocks": 0,
+      "Local Read Blocks": 0,
+      "Local Dirtied Blocks": 0,
+      "Local Written Blocks": 0,
+      "Temp Read Blocks": 0,
+      "Temp Written Blocks": 0
+    },
+    "Planning Time": 0.35,
+    "Triggers": [],
+    "Execution Time": 175.373
+  },
+  "samples": [
+    {
+      "version": "original",
+      "run": 1,
+      "position": 1,
+      "elapsed_ms": 197.06148499972187,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 1,
+      "position": 2,
+      "elapsed_ms": 149.0002850005112,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 2,
+      "position": 1,
+      "elapsed_ms": 160.26435299863806,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 2,
+      "position": 2,
+      "elapsed_ms": 179.65589400046156,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 3,
+      "position": 1,
+      "elapsed_ms": 190.8140320010716,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 3,
+      "position": 2,
+      "elapsed_ms": 164.12007200051448,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 4,
+      "position": 1,
+      "elapsed_ms": 119.80643400238478,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 4,
+      "position": 2,
+      "elapsed_ms": 176.7466940000304,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 5,
+      "position": 1,
+      "elapsed_ms": 188.8191949983593,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 5,
+      "position": 2,
+      "elapsed_ms": 150.16109200223582,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 6,
+      "position": 1,
+      "elapsed_ms": 147.5413230000413,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 6,
+      "position": 2,
+      "elapsed_ms": 150.47284300089814,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 7,
+      "position": 1,
+      "elapsed_ms": 150.27637400271487,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 7,
+      "position": 2,
+      "elapsed_ms": 123.35563099986757,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 8,
+      "position": 1,
+      "elapsed_ms": 124.89770200045314,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 8,
+      "position": 2,
+      "elapsed_ms": 191.66007400053786,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 9,
+      "position": 1,
+      "elapsed_ms": 182.49564199868473,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 9,
+      "position": 2,
+      "elapsed_ms": 128.79560099827358,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 10,
+      "position": 1,
+      "elapsed_ms": 130.14252500215662,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 10,
+      "position": 2,
+      "elapsed_ms": 173.10342299970216,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 11,
+      "position": 1,
+      "elapsed_ms": 159.23660500266124,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 11,
+      "position": 2,
+      "elapsed_ms": 115.89383400132647,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 12,
+      "position": 1,
+      "elapsed_ms": 118.52622899823473,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 12,
+      "position": 2,
+      "elapsed_ms": 181.13399000139907,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 13,
+      "position": 1,
+      "elapsed_ms": 145.8899509998446,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 13,
+      "position": 2,
+      "elapsed_ms": 116.80015199817717,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 14,
+      "position": 1,
+      "elapsed_ms": 124.27865299832774,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 14,
+      "position": 2,
+      "elapsed_ms": 145.75830200192286,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "original",
+      "run": 15,
+      "position": 1,
+      "elapsed_ms": 149.30221900067409,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    },
+    {
+      "version": "candidate",
+      "run": 15,
+      "position": 2,
+      "elapsed_ms": 138.91717200021958,
+      "rows": 556,
+      "result_sha256": "6a5cfeb3521ad2b15a76bfcc7368ce4944b88144c1c64f9b59eddb6a272f794b"
+    }
+  ]
+}
