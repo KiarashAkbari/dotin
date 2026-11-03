@@ -90,7 +90,7 @@ class PagingTests(unittest.TestCase):
             rows = list(source.iter_rows())
         self.assertEqual(len(rows), ROWS)
         self.assertEqual(
-            [row["Give.Me.Some.Credits"] for row in rows], [str(i + 1) for i in range(ROWS)]
+            [row[""] for row in rows], [str(i + 1) for i in range(ROWS)]
         )
 
     def test_out_of_order_access_rewinds_and_still_answers(self):

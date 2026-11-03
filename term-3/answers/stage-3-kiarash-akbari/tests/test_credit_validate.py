@@ -27,7 +27,7 @@ from credit.validate import (
 
 VALID = row(
     **{
-        "Give.Me.Some.Credits": "1",
+        "": "1",
         "SeriousDlqin2yrs": "0",
         "RevolvingUtilizationOfUnsecuredLines": "0.81",
         "age": "45",
@@ -109,7 +109,7 @@ class ReasonTests(unittest.TestCase):
         self.assertEqual(parsed.reasons, (CreditReasonCode.VALUE_OUT_OF_DOMAIN,))
 
     def test_fractional_row_id_is_not_integral(self):
-        parsed = parse_row({**VALID, "Give.Me.Some.Credits": "12.5"})
+        parsed = parse_row({**VALID, "": "12.5"})
         self.assertEqual(parsed.reasons, (CreditReasonCode.NOT_INTEGRAL,))
 
     def test_reasons_are_deduplicated_and_ordered(self):

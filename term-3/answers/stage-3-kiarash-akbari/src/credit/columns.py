@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-ID_COLUMN = "Give.Me.Some.Credits"
+ID_COLUMN = ""  # the Kaggle file leaves its index column unnamed
 TARGET_COLUMN = "SeriousDlqin2yrs"
 
 #: the header this project loads; verified against the file on every run
