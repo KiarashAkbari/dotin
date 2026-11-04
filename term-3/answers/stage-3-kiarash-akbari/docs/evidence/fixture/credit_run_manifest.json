@@ -1,0 +1,58 @@
+{
+  "code_version": "unknown",
+  "database": {
+    "digest": {
+      "age_max": 79.0,
+      "age_min": 21.0,
+      "age_missing": 5173,
+      "code_30_59": 49686,
+      "code_60_89": 29842,
+      "code_90": 24907,
+      "defaults": 11539,
+      "distinct_ids": 150000,
+      "income_missing": 21429,
+      "rows_total": 150000,
+      "utilization_above_1": 5578,
+      "utilization_mean": 0.529783
+    },
+    "migrations_applied": [
+      "010_credit_schema.sql",
+      "011_credit_staging.sql"
+    ],
+    "schema": "credit",
+    "table": "credit.application"
+  },
+  "finished_at": "2026-11-04T02:11:29+00:00",
+  "http": {
+    "note": "a file source makes no requests",
+    "requests_this_run": 0
+  },
+  "kind": "credit-ingest",
+  "paging": {
+    "already_complete_before_run": false,
+    "page_bound_respected": true,
+    "pages_fetched_this_run": 16,
+    "pages_total": 16,
+    "resumed_from_page": 0
+  },
+  "quality": {
+    "by_reason": {
+      "DUPLICATE_ROW_ID": 0,
+      "MISSING_REQUIRED_FIELD": 0,
+      "NOT_INTEGRAL": 0,
+      "UNPARSEABLE_NUMBER": 0,
+      "VALUE_OUT_OF_DOMAIN": 0
+    },
+    "quarantine_share": 0.0,
+    "rows_loaded": 150000,
+    "rows_rejected": 0
+  },
+  "source": {
+    "fingerprint": "e9eb3b094a62",
+    "kind": "file",
+    "name": "cs-training.csv",
+    "rows_in_file": 150000,
+    "sha256": "026a9163cc6f40092627d66ed837ae63b2cf83d4b4c15ebbefa419a727121330"
+  },
+  "started_at": "2026-11-04T02:11:24+00:00"
+}

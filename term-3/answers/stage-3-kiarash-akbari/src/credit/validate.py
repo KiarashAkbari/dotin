@@ -61,7 +61,9 @@ def _spec_by_csv_name(name: str) -> CreditColumn:
     raise KeyError(f"no contract entry for column {name!r}")
 
 
-def _parse_number(text: str, spec: CreditColumn) -> tuple[object, CreditReasonCode | None]:
+def _parse_number(
+    text: str, spec: CreditColumn
+) -> tuple[object, CreditReasonCode | None]:
     """Coerce one field, or say why it cannot be coerced."""
     try:
         value = float(text)

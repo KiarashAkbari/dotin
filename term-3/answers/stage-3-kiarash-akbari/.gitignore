@@ -16,6 +16,10 @@ __pycache__/
 data/raw/*
 !data/raw/.gitkeep
 
+# Rejected rows carry applicant values verbatim; a quarantine file in history would
+# undo the whole "no raw data in Git" rule
+data/quarantine/
+
 # Model artifacts and regenerated outputs
 data/curated/*
 !data/curated/.gitkeep
@@ -27,3 +31,20 @@ solution.before-fix.ipynb
 
 # Reviewed evidence only (numbers a reader can check against the report)
 !data/curated/credit-runs.json
+
+# The local copy of the source config. It holds paths on the student's machine and
+# nothing worth reviewing, while config/credit.example.toml is the tracked contract -
+# and the example says "untracked", so this makes that sentence true.
+config/credit.toml
+
+# Jupyter writes these beside an open notebook; a stray copy in Git would look like
+# a second, older delivery
+*checkpoint.ipynb
+.ipynb_checkpoints/
+
+# tool caches and OS junk
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+*.pyo
+.DS_Store

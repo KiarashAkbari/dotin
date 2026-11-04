@@ -1,0 +1,30 @@
+executed solution.executed.ipynb code_cells=24 errors=0 elapsed=259.1s budget=20min problems=0
+checked solution.executed.ipynb code_cells=24 errors=0 problems=0
+ok: solution.executed.ipynb matches the generator (executed: outputs saved, cells numbered)
+
+server: PostgreSQL 16.2 (pgserver) on 127.0.0.1, empty database, this stage applied both migrations
+fixture: data/raw/cs-training.csv sha256 026a9163cc6f40092627d66ed837ae63b2cf83d4b4c15ebbefa419a727121330 rows=150000 (12 columns, first header cell empty)
+ingest: rows_loaded=150000 rejected=0 pages=16; migrations=2 on the empty database, 0 on the second run
+report.md after the run: slots=43 unresolved=0 changed=true
+python: 3.11.2 in this sandbox (the pinned environment is >=3.12); library versions as pinned in requirements.txt
+note: elapsed is wall-clock of Run All on this box, not a claim about yours
+
+fresh-file path (the 011 staging view), on the same server: PYTHONPATH=src python -m credit.predict --file /tmp/cs-fresh.csv --bundle data/curated/model --credit-config config/credit.toml
+file=cs-fresh.csv sha256=ed09aaa8dd46 rows=500 rejected=0 cost_per_1000=916.00  (exit 0, scored through credit.v_staging_model_input)
+
+--- re-execution after the engine factory (`credit.db`), same server, same fixture ---
+executed solution.executed.ipynb code_cells=24 errors=0 elapsed=263.3s budget=20min problems=0
+checked solution.ipynb code_cells=24 errors=0 problems=0
+ok: solution.ipynb matches the generator (executed: outputs saved, cells numbered)
+report.md after the run: slots=43 unresolved=0 changed=true   (in the scratch copy; the tracked
+  report.md keeps its placeholders until a real-data run fills them)
+credit_evidence.json: identical to the block above except load_run.loaded_at - a timestamp, not
+  a metric. credit_run_manifest.json differs only in started_at/finished_at and in
+  paging.already_complete_before_run (true here: this re-run went against an already-loaded
+  database, so the page store had nothing left to fetch)
+refusals observed on this box, both from the first cell, neither about a password:
+  port 5499, nothing listening  -> ConfigError: the database refused the connection: ... Connection refused
+  role "nosuchuser"             -> ConfigError: ... FATAL:  role "nosuchuser" does not exist
+  both carried fix="the refusal is not about a password: re-read database.url ..."; the DSN used
+  for the test held a marker password, and no output quoted it - so nothing credential-shaped
+  is stored in this file either, including by the transcript of the test that checks that

@@ -27,7 +27,7 @@ from typing import Self
 from data_factory.errors import DataError, SchemaDriftError
 from data_factory.schema import check_page_schema
 
-from .columns import CSV_COLUMNS
+from .columns import CSV_COLUMNS, ID_ALIASES
 
 DEFAULT_PAGE_SIZE = 10_000
 #: matches data_factory.fetch.FINGERPRINT_LENGTH so both source kinds look alike
@@ -72,7 +72,9 @@ def file_fingerprint(path: Path, columns: tuple[str, ...] = CSV_COLUMNS) -> str:
     }
     canonical = io.StringIO()
     json.dump(payload, canonical, sort_keys=True)
-    return hashlib.sha256(canonical.getvalue().encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
+    return hashlib.sha256(canonical.getvalue().encode("utf-8")).hexdigest()[
+        :FINGERPRINT_LENGTH
+    ]
 
 
 def count_data_rows(path: Path, columns: tuple[str, ...] | None = None) -> int:
@@ -131,7 +133,14 @@ class CsvFileSource:
         """Read and check the header once; every later page depends on it."""
         if self._header is None:
             header = read_header(self._path)
-            if header != self._columns:
+            # only the id column may be spelled differently, and only at position 0 -
+            # including spelled as nothing, which is how the Kaggle file ships. The
+            # rest is positional and exact, so a reordered or blank-shifted file is
+            # still drift.
+            checked = header
+            if checked and checked[0] in ID_ALIASES:
+                checked = (self._columns[0], *checked[1:])
+            if checked != self._columns:
                 missing = sorted(set(self._columns) - set(header))
                 extra = sorted(set(header) - set(self._columns))
                 raise SchemaDriftError(
@@ -197,7 +206,12 @@ class CsvFileSource:
                 )
             # blanks stay missing rather than becoming "": stage 1's contract
             # treats an omitted field as null, and the API source omits nulls
-            return dict(zip(self.header, (value if value != "" else None for value in raw)))
+            # keyed by the contract, not by the file's spelling: validate_header has
+            # already proven the positions line up, and this is what makes an
+            # alternatively-named id column inert instead of a KeyError downstream
+            return dict(
+                zip(self._columns, (value if value != "" else None for value in raw))
+            )
 
     def _ensure_current(self) -> dict[str, str | None] | None:
         if self._current is None and not self._eof:

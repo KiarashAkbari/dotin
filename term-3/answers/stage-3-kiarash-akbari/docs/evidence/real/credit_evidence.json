@@ -1,0 +1,503 @@
+{
+  "ablation": {
+    "dropped": 4,
+    "full_cost": 368.5443800767831,
+    "rows": 6
+  },
+  "cv": {
+    "boosted_trees": {
+      "cost_range": [
+        356.778,
+        386.944
+      ],
+      "family": "boosted_trees",
+      "folds": 5,
+      "matrix": "12:1",
+      "mean_auc": 0.8629,
+      "mean_cost_per_1000": 368.544,
+      "per_fold": [
+        {
+          "auc": 0.8649,
+          "cost_per_1000": 365.091,
+          "counts": {
+            "fn": 313,
+            "fp": 2816,
+            "tn": 13981,
+            "tp": 891
+          },
+          "fold": 1,
+          "positives": 1204,
+          "rows": 18001,
+          "threshold": 0.08
+        },
+        {
+          "auc": 0.8523,
+          "cost_per_1000": 386.944,
+          "counts": {
+            "fn": 275,
+            "fp": 3665,
+            "tn": 13132,
+            "tp": 928
+          },
+          "fold": 2,
+          "positives": 1203,
+          "rows": 18000,
+          "threshold": 0.065
+        },
+        {
+          "auc": 0.8705,
+          "cost_per_1000": 356.778,
+          "counts": {
+            "fn": 228,
+            "fp": 3686,
+            "tn": 13111,
+            "tp": 975
+          },
+          "fold": 3,
+          "positives": 1203,
+          "rows": 18000,
+          "threshold": 0.065
+        },
+        {
+          "auc": 0.8564,
+          "cost_per_1000": 374.611,
+          "counts": {
+            "fn": 325,
+            "fp": 2843,
+            "tn": 13954,
+            "tp": 878
+          },
+          "fold": 4,
+          "positives": 1203,
+          "rows": 18000,
+          "threshold": 0.08
+        },
+        {
+          "auc": 0.8704,
+          "cost_per_1000": 359.298,
+          "counts": {
+            "fn": 324,
+            "fp": 2579,
+            "tn": 14217,
+            "tp": 879
+          },
+          "fold": 5,
+          "positives": 1203,
+          "rows": 17999,
+          "threshold": 0.09
+        }
+      ],
+      "plan": "zero+none",
+      "std_auc": 0.0083,
+      "std_cost_per_1000": 12.362,
+      "threshold_mean": 0.076,
+      "threshold_std": 0.0108,
+      "worst_cost_per_1000": 386.944
+    },
+    "logistic": {
+      "cost_range": [
+        387.077,
+        410.778
+      ],
+      "family": "logistic",
+      "folds": 5,
+      "matrix": "12:1",
+      "mean_auc": 0.8458,
+      "mean_cost_per_1000": 397.455,
+      "per_fold": [
+        {
+          "auc": 0.8476,
+          "cost_per_1000": 392.367,
+          "counts": {
+            "fn": 287,
+            "fp": 3619,
+            "tn": 13178,
+            "tp": 917
+          },
+          "fold": 1,
+          "positives": 1204,
+          "rows": 18001,
+          "threshold": 0.065
+        },
+        {
+          "auc": 0.8418,
+          "cost_per_1000": 406.444,
+          "counts": {
+            "fn": 300,
+            "fp": 3716,
+            "tn": 13081,
+            "tp": 903
+          },
+          "fold": 2,
+          "positives": 1203,
+          "rows": 18000,
+          "threshold": 0.065
+        },
+        {
+          "auc": 0.853,
+          "cost_per_1000": 390.611,
+          "counts": {
+            "fn": 313,
+            "fp": 3275,
+            "tn": 13522,
+            "tp": 890
+          },
+          "fold": 3,
+          "positives": 1203,
+          "rows": 18000,
+          "threshold": 0.075
+        },
+        {
+          "auc": 0.834,
+          "cost_per_1000": 410.778,
+          "counts": {
+            "fn": 314,
+            "fp": 3626,
+            "tn": 13171,
+            "tp": 889
+          },
+          "fold": 4,
+          "positives": 1203,
+          "rows": 18000,
+          "threshold": 0.065
+        },
+        {
+          "auc": 0.8527,
+          "cost_per_1000": 387.077,
+          "counts": {
+            "fn": 328,
+            "fp": 3031,
+            "tn": 13765,
+            "tp": 875
+          },
+          "fold": 5,
+          "positives": 1203,
+          "rows": 17999,
+          "threshold": 0.08
+        }
+      ],
+      "plan": "zero+none",
+      "std_auc": 0.008,
+      "std_cost_per_1000": 10.473,
+      "threshold_mean": 0.07,
+      "threshold_std": 0.0071,
+      "worst_cost_per_1000": 410.778
+    }
+  },
+  "fairness": {
+    "bands": 6,
+    "max_band": {
+      "age_band": "0-25",
+      "cost_per_1000": 635.934,
+      "flag_rate": 0.486998,
+      "mean_score": 0.110255,
+      "positive_rate": 0.096927,
+      "precision": 0.160194,
+      "recall": 0.804878,
+      "rows": 423
+    },
+    "min_band": {
+      "age_band": "65+",
+      "cost_per_1000": 192.026,
+      "flag_rate": 0.066721,
+      "mean_score": 0.027429,
+      "positive_rate": 0.024898,
+      "precision": 0.2,
+      "recall": 0.535948,
+      "rows": 6145
+    }
+  },
+  "holdout": {
+    "auc": 0.8699,
+    "baselines_cost_per_1000": {
+      "flag-everybody": 933.167,
+      "flag-nobody": 802.0
+    },
+    "cost_per_1000": 368.067,
+    "counts": {
+      "fn": 513,
+      "fp": 4886,
+      "tn": 23109,
+      "tp": 1492
+    },
+    "cv_holdout_gap": 0.378,
+    "cv_mean_cost": 367.689,
+    "cv_std_cost": 10.105,
+    "family": "boosted_trees",
+    "matrix": "12:1",
+    "matrix_sensitivity": [
+      {
+        "cost_per_1000": 361.46666666666664,
+        "cost_per_1000_at_0.5": 665.2,
+        "flag_rate": 0.20036666666666667,
+        "matrix": "12:1",
+        "ratio": 12.0,
+        "recall": 0.7376558603491272,
+        "threshold": 0.085,
+        "ties": 1
+      }
+    ],
+    "metrics": {
+      "accuracy": 0.820033,
+      "f1": 0.355958,
+      "flag_rate": 0.2126,
+      "majority_class_accuracy": 0.933167,
+      "n": 30000.0,
+      "positive_rate": 0.066833,
+      "precision": 0.233929,
+      "recall": 0.74414,
+      "specificity": 0.825469
+    },
+    "positives": 2005,
+    "reduction_vs_flagging_nobody_pct": 54.11,
+    "rows": 30000,
+    "threshold": 0.08,
+    "undefined_metrics": []
+  },
+  "importance": {
+    "count": 12
+  },
+  "load_run": {
+    "file_name": "cs-training.csv",
+    "fingerprint": "e9eb3b094a62",
+    "loaded_at": "2026-11-04 07:00:09.472672+03:30",
+    "rejected_count": 0,
+    "rows_loaded": 150000,
+    "sha256": "1bd46da486a5708c58c7b01a034fae2a13b327f6f7b62ea7ba4fe3b5824b24ac",
+    "source_kind": "file"
+  },
+  "plans": {
+    "median+indicator": {
+      "mean_cost_per_1000": 415.75545852496543
+    },
+    "median+no-indicator": {
+      "mean_cost_per_1000": 417.8443461797665
+    },
+    "zero+none": {
+      "mean_cost_per_1000": 397.45549677743463
+    }
+  },
+  "prep": {
+    "features": 12,
+    "fitted_rows": 120000,
+    "input_columns": 12
+  },
+  "queries": {
+    "missingness_parity": {
+      "columns": [
+        "column_name",
+        "rows_total",
+        "missing_rows",
+        "missing_pct",
+        "default_rate_when_missing",
+        "default_rate_otherwise",
+        "difference"
+      ],
+      "preview": [
+        {
+          "column_name": "monthly_income",
+          "default_rate_otherwise": "0.06949",
+          "default_rate_when_missing": "0.05614",
+          "difference": "-0.01335",
+          "missing_pct": "19.8207",
+          "missing_rows": 29731,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "num_dependents",
+          "default_rate_otherwise": "0.06741",
+          "default_rate_when_missing": "0.04562",
+          "difference": "-0.02179",
+          "missing_pct": "2.6160",
+          "missing_rows": 3924,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "age",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "debt_ratio",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "num_late_30_59",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "num_late_60_89",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "num_late_90",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "num_open_credit_lines",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "num_real_estate_loans",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        },
+        {
+          "column_name": "revolving_utilization_unsecured",
+          "default_rate_otherwise": "0.06684",
+          "default_rate_when_missing": null,
+          "difference": "-0.06684",
+          "missing_pct": "0.0000",
+          "missing_rows": 0,
+          "rows_total": 150000
+        }
+      ],
+      "rows": 10,
+      "statements_in_file": 3,
+      "table": "| column_name | rows_total | missing_rows | missing_pct | default_rate_when_missing | default_rate_otherwise | difference |\n| --- | --- | --- | --- | --- | --- | --- |\n| monthly_income | 150000 | 29731 | 19.8207 | 0.05614 | 0.06949 | -0.01335 |\n| num_dependents | 150000 | 3924 | 2.6160 | 0.04562 | 0.06741 | -0.02179 |\n| age | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| debt_ratio | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| num_late_30_59 | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| num_late_60_89 | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| num_late_90 | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| num_open_credit_lines | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| num_real_estate_loans | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |\n| revolving_utilization_unsecured | 150000 | 0 | 0.0000 | NaN | 0.06684 | -0.06684 |"
+    },
+    "sentinel_spikes": {
+      "columns": [
+        "column_name",
+        "code",
+        "rows_with_code",
+        "rows_total",
+        "pct_of_file",
+        "default_rate_with_code",
+        "default_rate_otherwise",
+        "default_rate_overall"
+      ],
+      "preview": [
+        {
+          "code": 96,
+          "column_name": "num_late_30_59",
+          "default_rate_otherwise": "0.06682",
+          "default_rate_overall": "0.06684",
+          "default_rate_with_code": "0.80000",
+          "pct_of_file": "0.0033",
+          "rows_total": 150000,
+          "rows_with_code": 5
+        },
+        {
+          "code": 98,
+          "column_name": "num_late_30_59",
+          "default_rate_otherwise": "0.06600",
+          "default_rate_overall": "0.06684",
+          "default_rate_with_code": "0.54167",
+          "pct_of_file": "0.1760",
+          "rows_total": 150000,
+          "rows_with_code": 264
+        },
+        {
+          "code": 96,
+          "column_name": "num_late_60_89",
+          "default_rate_otherwise": "0.06682",
+          "default_rate_overall": "0.06684",
+          "default_rate_with_code": "0.80000",
+          "pct_of_file": "0.0033",
+          "rows_total": 150000,
+          "rows_with_code": 5
+        },
+        {
+          "code": 98,
+          "column_name": "num_late_60_89",
+          "default_rate_otherwise": "0.06600",
+          "default_rate_overall": "0.06684",
+          "default_rate_with_code": "0.54167",
+          "pct_of_file": "0.1760",
+          "rows_total": 150000,
+          "rows_with_code": 264
+        },
+        {
+          "code": 96,
+          "column_name": "num_late_90",
+          "default_rate_otherwise": "0.06682",
+          "default_rate_overall": "0.06684",
+          "default_rate_with_code": "0.80000",
+          "pct_of_file": "0.0033",
+          "rows_total": 150000,
+          "rows_with_code": 5
+        },
+        {
+          "code": 98,
+          "column_name": "num_late_90",
+          "default_rate_otherwise": "0.06600",
+          "default_rate_overall": "0.06684",
+          "default_rate_with_code": "0.54167",
+          "pct_of_file": "0.1760",
+          "rows_total": 150000,
+          "rows_with_code": 264
+        }
+      ],
+      "rows": 6,
+      "statements_in_file": 2,
+      "table": "| column_name | code | rows_with_code | rows_total | pct_of_file | default_rate_with_code | default_rate_otherwise | default_rate_overall |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| num_late_30_59 | 96 | 5 | 150000 | 0.0033 | 0.80000 | 0.06682 | 0.06684 |\n| num_late_30_59 | 98 | 264 | 150000 | 0.1760 | 0.54167 | 0.06600 | 0.06684 |\n| num_late_60_89 | 96 | 5 | 150000 | 0.0033 | 0.80000 | 0.06682 | 0.06684 |\n| num_late_60_89 | 98 | 264 | 150000 | 0.1760 | 0.54167 | 0.06600 | 0.06684 |\n| num_late_90 | 96 | 5 | 150000 | 0.0033 | 0.80000 | 0.06682 | 0.06684 |\n| num_late_90 | 98 | 264 | 150000 | 0.1760 | 0.54167 | 0.06600 | 0.06684 |"
+    }
+  },
+  "sensitivity": {
+    "12_1": {
+      "cost_per_1000": 370.96666666666664,
+      "cost_per_1000_at_0.5": 668.5666666666666,
+      "flag_rate": 0.20986666666666667,
+      "matrix": "12:1",
+      "ratio": 12.0,
+      "recall": 0.7376558603491272,
+      "threshold": 0.08,
+      "ties": 1
+    },
+    "4_1": {
+      "cost_per_1000": 189.86666666666665,
+      "cost_per_1000_at_0.5": 228.3,
+      "flag_rate": 0.09236666666666667,
+      "matrix": "4:1",
+      "ratio": 4.0,
+      "recall": 0.5082294264339152,
+      "threshold": 0.2,
+      "ties": 2
+    }
+  },
+  "splits": {
+    "holdout": 30000,
+    "train": 90000,
+    "validation": 30000
+  },
+  "threshold": {
+    "cost_per_1000": 370.96666666666664,
+    "grid_size": 201,
+    "ties": 1,
+    "value": 0.08
+  }
+}

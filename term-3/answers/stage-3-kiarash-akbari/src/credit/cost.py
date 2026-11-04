@@ -55,7 +55,9 @@ def _as_binary(values: Sequence[object] | np.ndarray, label: str) -> np.ndarray:
     try:
         numeric = np.asarray(values, dtype="float64")
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{label} must hold 0/1 values, got non-numeric entries") from exc
+        raise ValueError(
+            f"{label} must hold 0/1 values, got non-numeric entries"
+        ) from exc
     if not np.isin(numeric, (0.0, 1.0)).all():
         raise ValueError(f"{label} must be 0/1; some values are neither")
     return numeric.astype("int64")
@@ -78,7 +80,9 @@ def binary_counts(
     return {"tp": tp, "fp": fp, "tn": tn, "fn": fn}
 
 
-def total_cost(counts: Mapping[str, int], matrix: CostMatrix = CHALLENGE_MATRIX) -> float:
+def total_cost(
+    counts: Mapping[str, int], matrix: CostMatrix = CHALLENGE_MATRIX
+) -> float:
     return float(
         counts["fp"] * matrix.false_positive
         + counts["fn"] * matrix.false_negative
@@ -88,7 +92,10 @@ def total_cost(counts: Mapping[str, int], matrix: CostMatrix = CHALLENGE_MATRIX)
 
 
 def cost_per_1000(
-    counts: Mapping[str, int], matrix: CostMatrix = CHALLENGE_MATRIX, *, n: int | None = None
+    counts: Mapping[str, int],
+    matrix: CostMatrix = CHALLENGE_MATRIX,
+    *,
+    n: int | None = None,
 ) -> float:
     """The report's headline unit: expected cost for a thousand applicants."""
     rows = int(n if n is not None else sum(counts.values()))
@@ -116,13 +123,19 @@ def metrics(counts: Mapping[str, int]) -> dict[str, float]:
 
     precision = ratio(tp, tp + fp, "precision")
     recall = ratio(tp, tp + fn, "recall")
-    f1 = 0.0 if precision + recall == 0 else 2 * precision * recall / (precision + recall)
+    f1 = (
+        0.0
+        if precision + recall == 0
+        else 2 * precision * recall / (precision + recall)
+    )
     return {
         "n": float(n),
         "positive_rate": ratio(tp + fn, n, "positive_rate") if n else 0.0,
         # the number a naive report would lead with, and its ceiling
         "accuracy": ratio(tp + tn, n, "accuracy") if n else 0.0,
-        "majority_class_accuracy": ratio(max(tp + fn, tn + fp), n, "majority") if n else 0.0,
+        "majority_class_accuracy": ratio(max(tp + fn, tn + fp), n, "majority")
+        if n
+        else 0.0,
         "precision": precision,
         "recall": recall,
         "f1": f1,
@@ -132,7 +145,9 @@ def metrics(counts: Mapping[str, int]) -> dict[str, float]:
     }
 
 
-def auc_rank(y_true: Sequence[object] | np.ndarray, scores: Sequence[object] | np.ndarray) -> float:
+def auc_rank(
+    y_true: Sequence[object] | np.ndarray, scores: Sequence[object] | np.ndarray
+) -> float:
     """AUC as the Mann-Whitney U statistic, ties at one half.
 
     Implemented here rather than imported so the value the report quotes has a
@@ -176,7 +191,11 @@ def cost_curve(
     scores = np.asarray(proba, dtype="float64")
     if truth.shape != scores.shape:
         raise ValueError(f"length mismatch: {truth.shape} vs {scores.shape}")
-    grid = THRESHOLD_GRID if thresholds is None else np.asarray(thresholds, dtype="float64")
+    grid = (
+        THRESHOLD_GRID
+        if thresholds is None
+        else np.asarray(thresholds, dtype="float64")
+    )
     if grid.ndim != 1 or grid.size == 0:
         raise ValueError("thresholds must be a non-empty 1-D array")
     n = truth.size
@@ -303,11 +322,15 @@ def constant_baselines(
     return {"flag_nobody": nobody, "flag_everybody": everybody}
 
 
-def reduction_vs_baseline(baseline_cost_per_1000: float, model_cost_per_1000: float) -> float:
+def reduction_vs_baseline(
+    baseline_cost_per_1000: float, model_cost_per_1000: float
+) -> float:
     """Percent reduction; the acceptance bar in the challenge is 25%."""
     if baseline_cost_per_1000 == 0:
         raise ZeroDivisionError("baseline cost is zero, so a reduction is undefined")
-    return (baseline_cost_per_1000 - model_cost_per_1000) / baseline_cost_per_1000 * 100.0
+    return (
+        (baseline_cost_per_1000 - model_cost_per_1000) / baseline_cost_per_1000 * 100.0
+    )
 
 
 def matrix_sensitivity(
@@ -323,7 +346,11 @@ def matrix_sensitivity(
     matrix, because the gap between those two numbers is the argument for
     choosing a threshold at all.
     """
-    grid = THRESHOLD_GRID if thresholds is None else np.asarray(thresholds, dtype="float64")
+    grid = (
+        THRESHOLD_GRID
+        if thresholds is None
+        else np.asarray(thresholds, dtype="float64")
+    )
     rows: list[dict[str, object]] = []
     for matrix in matrices:
         choice = select_threshold(y_true, proba, matrix=matrix, thresholds=grid)
