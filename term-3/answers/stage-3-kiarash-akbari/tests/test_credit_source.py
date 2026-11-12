@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
+    HERE.parents[1] / "stage-1" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -27,7 +27,7 @@ from data_factory.fetch import fetch_all
 from data_factory.store import RawPageStore
 from fixtures import write_csv
 
-from credit.columns import CSV_COLUMNS
+from credit.columns import CSV_COLUMNS, db_for
 from credit.source import (
     CsvFileSource,
     count_data_rows,
@@ -71,6 +71,83 @@ class HeaderContractTests(unittest.TestCase):
         self.assertIn("MonthlyIncome", page[0])
         self.assertTrue(any(row["MonthlyIncome"] is None for row in page))
 
+    def test_the_id_column_may_be_spelled_either_way(self):
+        """The first header cell is the one name this contract does not demand.
+
+        A draft of the contract took the id column's name from the competition's title
+        instead of from the file, so a header spelled that way is a naming difference
+        with no consequence: same positions, same values, same ``row_id``. Every other
+        column stays exact, because a wrong name there changes what the model is fed.
+        """
+        text = self.csv.read_text(encoding="utf-8")
+        legacy = text.replace("Id,", "Give.Me.Some.Credits,", 1)
+        self.assertNotEqual(legacy, text, "the fixture header no longer starts with Id")
+        other = self.csv.with_name("legacy.csv")
+        other.write_text(legacy, encoding="utf-8")
+        with CsvFileSource(other) as source:
+            rows = list(source.iter_rows())
+            self.assertEqual(source.header[0], "Give.Me.Some.Credits")
+        self.assertEqual([row["Id"] for row in rows[:2]], ["1", "2"])
+        self.assertEqual(db_for("Give.Me.Some.Credits"), "row_id")
+        self.assertEqual(db_for("Id"), "row_id")
+
+    def test_an_unnamed_id_column_is_the_file_people_actually_have(self):
+        """The Kaggle export's first header cell is empty, and that must load.
+
+        Both prior guesses at this name came from prose about the competition rather
+        than from the file, so the file gets the benefit of the doubt here: the slot
+        is present, the other eleven names are exact, and the row index is discarded.
+        """
+        lines = self.csv.read_text(encoding="utf-8").splitlines()
+        names = lines[0].split(",")
+        names[0] = ""
+        other = self.csv.with_name("kaggle.csv")
+        other.write_text(
+            "\r\n".join([",".join(names), *lines[1:]]) + "\r\n", encoding="utf-8"
+        )
+        with CsvFileSource(other) as source:
+            rows = list(source.iter_rows())
+            self.assertEqual(source.header[0], "")
+        with CsvFileSource(self.csv) as reference:
+            expected = list(reference.iter_rows())
+        self.assertEqual([row["Id"] for row in rows[:2]], ["1", "2"])
+        self.assertEqual(rows, expected)
+        self.assertEqual(db_for(""), "row_id")
+        # provenance identity is the contract plus the name, so a differently spelled
+        # header must not look like a different dataset to the resumability check
+        twin = self.csv.parent / "sub" / self.csv.name
+        twin.parent.mkdir()
+        twin.write_text(
+            "\r\n".join([",".join(names), *lines[1:]]) + "\r\n", encoding="utf-8"
+        )
+        self.assertEqual(file_fingerprint(self.csv), file_fingerprint(twin))
+
+    def test_a_reordered_header_is_drift_even_though_the_id_name_is_free(self):
+        """Leniency about one name must not turn into leniency about order."""
+        lines = self.csv.read_text(encoding="utf-8").splitlines()
+        names = lines[0].split(",")
+        names[1], names[2] = names[2], names[1]
+        other = self.csv.with_name("swapped.csv")
+        other.write_text(
+            "\r\n".join([",".join(names), *lines[1:]]) + "\r\n", encoding="utf-8"
+        )
+        # entering the source is the check: __enter__ validates the header, and the
+        # contextlib one-liner keeps ruff's nested-with rule off the test
+        with self.assertRaises(SchemaDriftError), CsvFileSource(other):
+            pass
+
+    def test_a_blank_name_somewhere_else_is_drift(self):
+        """Accepting an empty id cell must not mean accepting empty cells generally."""
+        lines = self.csv.read_text(encoding="utf-8").splitlines()
+        names = lines[0].split(",")
+        names[3] = ""
+        other = self.csv.with_name("hollow.csv")
+        other.write_text(
+            "\r\n".join([",".join(names), *lines[1:]]) + "\r\n", encoding="utf-8"
+        )
+        with self.assertRaises(SchemaDriftError), CsvFileSource(other):
+            pass
+
 
 class PagingTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -90,7 +167,8 @@ class PagingTests(unittest.TestCase):
             rows = list(source.iter_rows())
         self.assertEqual(len(rows), ROWS)
         self.assertEqual(
-            [row[""] for row in rows], [str(i + 1) for i in range(ROWS)]
+            [row["Id"] for row in rows],
+            [str(i + 1) for i in range(ROWS)],
         )
 
     def test_out_of_order_access_rewinds_and_still_answers(self):
@@ -101,7 +179,10 @@ class PagingTests(unittest.TestCase):
         self.assertEqual(first, again)
 
     def test_negative_offset_is_a_programming_error(self):
-        with CsvFileSource(self.csv, page_size=10) as source, self.assertRaises(ValueError):
+        with (
+            CsvFileSource(self.csv, page_size=10) as source,
+            self.assertRaises(ValueError),
+        ):
             source.fetch_page(-1)
 
     def test_ragged_row_reports_its_line(self):
@@ -109,7 +190,10 @@ class PagingTests(unittest.TestCase):
         lines = self.csv.read_text(encoding="utf-8").splitlines()
         lines[3] = lines[3] + ",extra"
         broken.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        with self.assertRaises(DataError) as caught, CsvFileSource(broken, page_size=2) as source:
+        with (
+            self.assertRaises(DataError) as caught,
+            CsvFileSource(broken, page_size=2) as source,
+        ):
             source.fetch_page(2)
         self.assertEqual(caught.exception.context["line"], 4)
 
@@ -158,7 +242,8 @@ class StageOneReuseTests(unittest.TestCase):
         with CsvFileSource(self.csv, page_size=10) as source:
             fetch_all(source, store)
         sizes = sorted(
-            len(p.read_text(encoding="utf-8").splitlines()) for p in store.directory.glob("*.jsonl")
+            len(p.read_text(encoding="utf-8").splitlines())
+            for p in store.directory.glob("*.jsonl")
         )
         self.assertEqual(sizes, [7, 10, 10, 10])
 
@@ -183,7 +268,8 @@ class ProvenanceTests(unittest.TestCase):
             file_fingerprint(self.csv, CSV_COLUMNS), file_fingerprint(twin, CSV_COLUMNS)
         )
         self.assertNotEqual(
-            file_fingerprint(self.csv, CSV_COLUMNS), file_fingerprint(renamed, CSV_COLUMNS)
+            file_fingerprint(self.csv, CSV_COLUMNS),
+            file_fingerprint(renamed, CSV_COLUMNS),
         )
 
     def test_fingerprint_is_twelve_hex(self):

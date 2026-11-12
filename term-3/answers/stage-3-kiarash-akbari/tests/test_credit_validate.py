@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
+    HERE.parents[1] / "stage-1" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -27,7 +27,7 @@ from credit.validate import (
 
 VALID = row(
     **{
-        "": "1",
+        "Id": "1",
         "SeriousDlqin2yrs": "0",
         "RevolvingUtilizationOfUnsecuredLines": "0.81",
         "age": "45",
@@ -109,14 +109,17 @@ class ReasonTests(unittest.TestCase):
         self.assertEqual(parsed.reasons, (CreditReasonCode.VALUE_OUT_OF_DOMAIN,))
 
     def test_fractional_row_id_is_not_integral(self):
-        parsed = parse_row({**VALID, "": "12.5"})
+        parsed = parse_row({**VALID, "Id": "12.5"})
         self.assertEqual(parsed.reasons, (CreditReasonCode.NOT_INTEGRAL,))
 
     def test_reasons_are_deduplicated_and_ordered(self):
         parsed = parse_row({**VALID, "MonthlyIncome": "x", "SeriousDlqin2yrs": ""})
         self.assertEqual(
             parsed.reasons,
-            (CreditReasonCode.MISSING_REQUIRED_FIELD, CreditReasonCode.UNPARSEABLE_NUMBER),
+            (
+                CreditReasonCode.MISSING_REQUIRED_FIELD,
+                CreditReasonCode.UNPARSEABLE_NUMBER,
+            ),
         )
 
     def test_negative_counts_are_reported_not_rejected(self):
@@ -138,7 +141,9 @@ class StreamTests(unittest.TestCase):
         self.assertEqual([item[0].reasons for item in parsed], [(), ()])
 
     def test_reason_counts_include_zeroes(self):
-        counts = count_reasons([parse_row({**VALID, "MonthlyIncome": "x"}), parse_row(VALID)])
+        counts = count_reasons(
+            [parse_row({**VALID, "MonthlyIncome": "x"}), parse_row(VALID)]
+        )
         self.assertEqual(counts[CreditReasonCode.UNPARSEABLE_NUMBER.value], 1)
         self.assertEqual(counts[CreditReasonCode.DUPLICATE_ROW_ID.value], 0)
         self.assertEqual(len(counts), len(CreditReasonCode))

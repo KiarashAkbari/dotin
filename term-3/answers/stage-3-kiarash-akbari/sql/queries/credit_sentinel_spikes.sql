@@ -39,8 +39,13 @@ SELECT
     round(counted.default_rate_otherwise::numeric, 5) AS default_rate_otherwise,
     round(overall.default_rate_overall::numeric, 5) AS default_rate_overall
 FROM counted CROSS JOIN overall
-WHERE counted.rows_with_code > 0
 ORDER BY counted.column_name, counted.code;
+
+-- A pair that was probed and found nothing stays a row here. Deleting it with
+-- `WHERE rows_with_code > 0` makes "no row in this file carries 96 in num_late_90"
+-- look identical to "this query never ran", and it also breaks the row-for-row
+-- comparison with the pandas count in the notebook, which reports every probed pair.
+-- A measured zero is evidence; an absent row is not.
 
 -- The same shape for the values that are merely extreme rather than coded: the
 -- file contains utilisation ratios above 1 and at least one impossible age, and

@@ -104,20 +104,25 @@ def missingness_profile(
                 "difference": test["difference"],
                 "z": test["z"],
                 "p_value": test["p_value"],
-                "informative": bool(test["p_value"] == test["p_value"] and test["p_value"] < alpha),
+                "informative": bool(
+                    test["p_value"] == test["p_value"] and test["p_value"] < alpha
+                ),
             }
         )
     return pd.DataFrame(rows)
 
 
-def co_missingness(frame: pd.DataFrame, columns: Sequence[str], *, top: int = 6) -> pd.DataFrame:
+def co_missingness(
+    frame: pd.DataFrame, columns: Sequence[str], *, top: int = 6
+) -> pd.DataFrame:
     """Do absences arrive together? A pair that travels is one mechanism, not two.
 
     Relevant because it decides whether one imputation policy can cover both
     columns or whether each needs its own argument.
     """
     mask = {
-        column: np.isnan(numeric(frame, column).to_numpy(dtype="float64")) for column in columns
+        column: np.isnan(numeric(frame, column).to_numpy(dtype="float64"))
+        for column in columns
     }
     rows: list[dict[str, object]] = []
     names = list(columns)
@@ -130,7 +135,11 @@ def co_missingness(frame: pd.DataFrame, columns: Sequence[str], *, top: int = 6)
             total = both + only_left + only_right + neither
             # Haldane-Anscombe correction: a zero cell would make the ratio
             # infinite, and "infinite" is not a number anyone can read in a table
-            odds_ratio = (both + 0.5) * (neither + 0.5) / ((only_left + 0.5) * (only_right + 0.5))
+            odds_ratio = (
+                (both + 0.5)
+                * (neither + 0.5)
+                / ((only_left + 0.5) * (only_right + 0.5))
+            )
             rows.append(
                 {
                     "left": left,

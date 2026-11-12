@@ -41,7 +41,9 @@ def write_csv(path: Path, *, rows: int = DEFAULT_ROWS, seed: int = 20261103) -> 
             age = "" if index % 29 == 0 else str(rng.randrange(21, 80))
             dependents = "" if index % 9 == 0 else str(rng.randrange(0, 5))
             # one value above 1 every tenth row, the documented outlier shape
-            utilization = f"{rng.uniform(0.0, 1.6):.6f}" if index % 10 == 0 else "0.500000"
+            utilization = (
+                f"{rng.uniform(0.0, 1.6):.6f}" if index % 10 == 0 else "0.500000"
+            )
             writer.writerow(
                 [
                     index + 1,

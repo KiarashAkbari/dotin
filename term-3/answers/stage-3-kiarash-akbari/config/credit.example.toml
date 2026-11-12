@@ -1,0 +1,32 @@
+# Stage 3 source config. Copy to config/credit.toml (untracked) and adjust paths.
+#
+# Deliberately a separate file: stage 1's [database] section owns the connection
+# string and the password, and this one owns only what is new in this stage. The
+# loader also accepts the same keys as a [credit] table inside
+# ../stage-1/config/default.toml - stage 1 ignores sections it does
+# not know, so adopting it there cannot break the factory.
+#
+# Relative paths resolve against this file's directory, which is why the data and
+# sql paths climb out of config/ the way stage 1's do.
+
+[credit]
+csv_path = "../data/raw/cs-training.csv"
+sql_migrations_dir = "../sql"
+schema = "credit"
+# the migrations are the *.sql files in the directory above, applied in filename
+# order: 010 creates the schema, tables and views, 011 the staging objects that a
+# fresh file is scored through. sql/queries is a subdirectory, so the measurement
+# SQL in it is never treated as a migration. A migration already applied must not
+# be edited - the runner checks its checksum against the ledger - so a schema
+# change arrives as a new file, 012 and onward.
+# a page is a slice of the file; the same fetch loop that bounded HTTP bounds this,
+# so the memory ceiling is page_size rows and nothing else
+page_size = 10000
+batch_size = 5000
+# above this share of rejected rows the run fails instead of loading a suspect file
+quarantine_max_share = 0.05
+quarantine_min_rows = 1000
+curated_dir = "../data/curated"
+raw_pages_dir = "../data/raw/credit-pages"
+quarantine_dir = "../data/quarantine"
+manifest_name = "credit_run_manifest.json"

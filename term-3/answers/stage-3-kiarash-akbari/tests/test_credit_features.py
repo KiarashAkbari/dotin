@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
+    HERE.parents[1] / "stage-1" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -65,10 +65,30 @@ class SentinelTests(unittest.TestCase):
     def test_spike_counts_measure_the_share_and_the_label(self):
         source = frame(
             [
-                {TARGET: 0, "num_late_90": 96.0, "num_late_30_59": 0.0, "num_late_60_89": 0.0},
-                {TARGET: 0, "num_late_90": 96.0, "num_late_30_59": 0.0, "num_late_60_89": 0.0},
-                {TARGET: 1, "num_late_90": 0.0, "num_late_30_59": 0.0, "num_late_60_89": 0.0},
-                {TARGET: 0, "num_late_90": 1.0, "num_late_30_59": 0.0, "num_late_60_89": 0.0},
+                {
+                    TARGET: 0,
+                    "num_late_90": 96.0,
+                    "num_late_30_59": 0.0,
+                    "num_late_60_89": 0.0,
+                },
+                {
+                    TARGET: 0,
+                    "num_late_90": 96.0,
+                    "num_late_30_59": 0.0,
+                    "num_late_60_89": 0.0,
+                },
+                {
+                    TARGET: 1,
+                    "num_late_90": 0.0,
+                    "num_late_30_59": 0.0,
+                    "num_late_60_89": 0.0,
+                },
+                {
+                    TARGET: 0,
+                    "num_late_90": 1.0,
+                    "num_late_30_59": 0.0,
+                    "num_late_60_89": 0.0,
+                },
             ]
         )
         table = sentinel_spike_counts(source, columns=("num_late_90",), codes=(96,))
@@ -98,7 +118,12 @@ class FeatureMathTests(unittest.TestCase):
 
     def test_delinquency_total_never_sums_a_code(self):
         built = build_features(
-            one_row(serious_dlqin_2yrs=0, num_late_30_59=98.0, num_late_60_89=1.0, num_late_90=0.0)
+            one_row(
+                serious_dlqin_2yrs=0,
+                num_late_30_59=98.0,
+                num_late_60_89=1.0,
+                num_late_90=0.0,
+            )
         )
         self.assertAlmostEqual(float(built["delinquency_events_total"].iloc[0]), 1.0)
 
@@ -106,7 +131,10 @@ class FeatureMathTests(unittest.TestCase):
         # min_count=1: absence of history is not the same as no history
         built = build_features(
             one_row(
-                serious_dlqin_2yrs=0, num_late_30_59=None, num_late_60_89=None, num_late_90=None
+                serious_dlqin_2yrs=0,
+                num_late_30_59=None,
+                num_late_60_89=None,
+                num_late_90=None,
             )
         )
         self.assertTrue(math.isnan(float(built["delinquency_events_total"].iloc[0])))
@@ -139,19 +167,29 @@ class FeatureMathTests(unittest.TestCase):
         self.assertTrue(math.isnan(float(built["income_per_dependent"].iloc[0])))
 
     def test_overcommitted_is_strictly_past_the_ratio_of_one(self):
-        built = build_features(frame([{TARGET: 1, "debt_ratio": v} for v in (1.2, 1.0, 0.5, None)]))
+        built = build_features(
+            frame([{TARGET: 1, "debt_ratio": v} for v in (1.2, 1.0, 0.5, None)])
+        )
         values = [built["overcommitted"].iloc[i] for i in range(4)]
         self.assertEqual(
-            [float(v) if not math.isnan(float(v)) else None for v in values], [1.0, 0.0, 0.0, None]
+            [float(v) if not math.isnan(float(v)) else None for v in values],
+            [1.0, 0.0, 0.0, None],
         )
 
     def test_exposure_total_adds_credit_lines_and_property_loans(self):
-        built = build_features(one_row(num_open_credit_lines=3.0, num_real_estate_loans=2.0))
+        built = build_features(
+            one_row(num_open_credit_lines=3.0, num_real_estate_loans=2.0)
+        )
         self.assertAlmostEqual(float(built["recent_exposure_total"].iloc[0]), 5.0)
 
     def test_missing_income_becomes_a_visible_indicator(self):
         built = build_features(
-            frame([{TARGET: 1, "monthly_income": None}, {TARGET: 0, "monthly_income": 500.0}])
+            frame(
+                [
+                    {TARGET: 1, "monthly_income": None},
+                    {TARGET: 0, "monthly_income": 500.0},
+                ]
+            )
         )
         self.assertEqual(float(built["income_not_reported"].iloc[0]), 1.0)
         self.assertEqual(float(built["income_not_reported"].iloc[1]), 0.0)
@@ -177,7 +215,9 @@ class BuildTests(unittest.TestCase):
         built = build_features(self.source)
         for name in FEATURE_NAMES:
             self.assertIn(name, built.columns)
-        self.assertEqual(list(built.columns)[-len(FEATURE_NAMES) :], list(FEATURE_NAMES))
+        self.assertEqual(
+            list(built.columns)[-len(FEATURE_NAMES) :], list(FEATURE_NAMES)
+        )
 
     def test_building_twice_changes_nothing(self):
         once = build_features(self.source)
@@ -203,14 +243,18 @@ class BuildTests(unittest.TestCase):
     def test_model_matrix_applies_the_ablation(self):
         built = build_features(self.source)
         full, _ = model_matrix(built, base=MODEL_FEATURE_COLUMNS)
-        ablated, _ = model_matrix(built, base=MODEL_FEATURE_COLUMNS, drop=["overcommitted"])
+        ablated, _ = model_matrix(
+            built, base=MODEL_FEATURE_COLUMNS, drop=["overcommitted"]
+        )
         self.assertEqual(len(ablated.columns), len(full.columns) - 1)
         self.assertNotIn("overcommitted", ablated.columns)
 
     def test_model_matrix_columns_are_base_plus_features(self):
         built = build_features(self.source)
         matrix, label = model_matrix(built, base=MODEL_FEATURE_COLUMNS)
-        self.assertEqual(len(matrix.columns), len(MODEL_FEATURE_COLUMNS) + len(FEATURES))
+        self.assertEqual(
+            len(matrix.columns), len(MODEL_FEATURE_COLUMNS) + len(FEATURES)
+        )
         self.assertNotIn("serious_dlqin_2yrs", matrix.columns)
         self.assertEqual(int(label.iloc[0]), 0)
 

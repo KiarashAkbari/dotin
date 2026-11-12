@@ -272,7 +272,9 @@ def audit_table(specs: Sequence[FeatureSpec] = FEATURES) -> pd.DataFrame:
                 "feature": spec.name,
                 "built from": ", ".join(spec.source_columns),
                 "hypothesis": spec.hypothesis,
-                "available before the decision": "yes" if spec.decision_time_available else "NO",
+                "available before the decision": "yes"
+                if spec.decision_time_available
+                else "NO",
                 "why": spec.availability_note,
                 "boundary that keeps it honest": spec.leakage_boundary,
                 "needs evidence": spec.requires_evidence or "-",
