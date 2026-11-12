@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
+    HERE.parents[1] / "stage-1" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -63,7 +63,8 @@ class CostTests(unittest.TestCase):
 
     def test_the_matrix_is_the_one_the_challenge_sets(self):
         self.assertEqual(
-            (CHALLENGE_MATRIX.false_negative, CHALLENGE_MATRIX.false_positive), (12.0, 1.0)
+            (CHALLENGE_MATRIX.false_negative, CHALLENGE_MATRIX.false_positive),
+            (12.0, 1.0),
         )
         self.assertEqual(CHALLENGE_MATRIX.ratio, 12.0)
 
@@ -226,7 +227,8 @@ class SanityTests(unittest.TestCase):
     def test_cost_is_scale_independent_of_split_size(self):
         counts = {"tp": 1, "fp": 1, "tn": 1, "fn": 1}
         self.assertAlmostEqual(
-            cost_per_1000(counts, CHALLENGE_MATRIX), cost_per_1000(counts, CHALLENGE_MATRIX, n=4)
+            cost_per_1000(counts, CHALLENGE_MATRIX),
+            cost_per_1000(counts, CHALLENGE_MATRIX, n=4),
         )
 
     def test_no_nan_leaks_into_a_cost_report(self):

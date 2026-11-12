@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-STAGE1_SRC = HERE.parents[1] / "stage-1-kiarash-akbari" / "src"
+STAGE1_SRC = HERE.parents[1] / "stage-1" / "src"
 for candidate in (HERE, HERE.parent / "src", STAGE1_SRC):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -31,12 +31,14 @@ from credit.columns import (
     DB_INPUT_VIEW,
     DB_MISSINGNESS_VIEW,
     DB_RUN_TABLE,
+    DB_SCHEMA,
     DB_TABLE,
     DERIVED_COLUMNS,
     LATE_PAYMENT_COLUMNS,
     MODEL_FEATURE_COLUMNS,
     VIEW_SELECT_COLUMNS,
 )
+from credit.load import digest_query
 
 MIGRATION = HERE.parent / "sql" / "010_credit_schema.sql"
 DDL = MIGRATION.read_text(encoding="utf-8")
@@ -58,6 +60,102 @@ VIEW_BODIES = {
 def _body(table: str) -> str:
     assert table in TABLE_BODIES, f"{table} is not created by this migration"
     return TABLE_BODIES[table]
+
+
+AGGREGATES = ("count", "sum", "avg", "min", "max", "bool_or", "bool_and", "every")
+
+#: every SQL text this stage sends to the server, including the one built in Python
+SQL_TEXTS: dict[str, str] = {
+    MIGRATION.name: DDL,
+    "011_credit_staging.sql": (MIGRATION.parent / "011_credit_staging.sql").read_text(
+        encoding="utf-8"
+    ),
+    "credit_sentinel_spikes.sql": (
+        MIGRATION.parent / "queries" / "credit_sentinel_spikes.sql"
+    ).read_text(encoding="utf-8"),
+    "credit_missingness_parity.sql": (
+        MIGRATION.parent / "queries" / "credit_missingness_parity.sql"
+    ).read_text(encoding="utf-8"),
+    "digest_query": digest_query(DB_SCHEMA),
+}
+
+
+def _function_before(text: str, index: int) -> str:
+    """The name of the call whose closing paren a FILTER clause attaches to.
+
+    Grouping parens are walked through, because the mistake this guard exists for -
+    ``round((avg(x)::numeric) FILTER (...))`` - has a bare group in front of FILTER
+    rather than a call, and the real function behind it is the outer ``round``.
+    """
+    j = index - 1
+    while j >= 0:
+        while j >= 0 and text[j].isspace():
+            j -= 1
+        if j < 0 or text[j] != ")":
+            return ""
+        depth = 0
+        while j >= 0:
+            if text[j] == ")":
+                depth += 1
+            elif text[j] == "(":
+                depth -= 1
+                if depth == 0:
+                    break
+            j -= 1
+        opened_at = j
+        k = opened_at - 1
+        while k >= 0 and (text[k].isalnum() or text[k] == "_"):
+            k -= 1
+        if k != opened_at - 1:
+            return text[k + 1 : opened_at].lower()
+        # a group rather than a call: the name belongs to the pair that wraps it
+        k = opened_at - 1
+        while k >= 0 and text[k].isspace():
+            k -= 1
+        if k >= 0 and text[k] == "(":
+            opened_at = k
+            k = opened_at - 1
+            while k >= 0 and (text[k].isalnum() or text[k] == "_"):
+                k -= 1
+            if k != opened_at - 1:
+                return text[k + 1 : opened_at].lower()
+        return ""
+    return ""
+
+
+class FilterClauseTests(unittest.TestCase):
+    """`FILTER` binds to an aggregate call, and to nothing else.
+
+    PostgreSQL rejects round(avg(x)::numeric) FILTER (...) with a syntax error, and the
+    first time that was found it was by running the migration on a real server - which is
+    not available to this suite. Reading the parenthesis nesting is the closest offline
+    equivalent, and it is here so the next cast wrapped around an aggregate fails a test
+    instead of a delivery.
+    """
+
+    def test_every_filter_clause_follows_an_aggregate_call(self):
+        for name, text in SQL_TEXTS.items():
+            for match in re.finditer(r"\bFILTER\s*\(", text):
+                with self.subTest(
+                    file=name, line=text[: match.start()].count("\n") + 1
+                ):
+                    self.assertIn(_function_before(text, match.start()), AGGREGATES)
+
+    def _attached_function(self, text: str) -> str:
+        match = re.search(r"\bFILTER\s*\(", text)
+        assert match is not None, "the sample has no FILTER clause to read"
+        return _function_before(text, match.start())
+
+    def test_the_helper_reads_the_real_shape_of_the_bug(self):
+        # a guard that cannot fail is not a guard: the exact mistake it exists for
+        self.assertEqual(
+            self._attached_function("round((avg(t)::numeric) FILTER (WHERE x))"),
+            "round",
+        )
+        self.assertEqual(
+            self._attached_function("round(avg(t) FILTER (WHERE x)::numeric, 5)"), "avg"
+        )
+        self.assertEqual(self._attached_function("count(*) FILTER ("), "count")
 
 
 class FileHygieneTests(unittest.TestCase):
@@ -101,7 +199,9 @@ class ApplicationTableTests(unittest.TestCase):
     def test_only_the_id_and_the_label_are_not_null(self):
         body = _body(DB_TABLE)
         for spec in COLUMNS:
-            declared = re.search(rf"^\s*{spec.db_name}[^,\n]*", body, re.MULTILINE).group(0)
+            declared = re.search(
+                rf"^\s*{spec.db_name}[^,\n]*", body, re.MULTILINE
+            ).group(0)
             self.assertEqual("NOT NULL" in declared, not spec.nullable, declared)
 
     def test_features_are_never_numeric(self):
@@ -115,12 +215,19 @@ class ApplicationTableTests(unittest.TestCase):
     def test_the_only_domain_check_on_the_data_is_the_label(self):
         body = _body(DB_TABLE)
         self.assertIn("CHECK (serious_dlqin_2yrs IN (0, 1))", body)
-        for column in ("age", "revolving_utilization_unsecured", "num_dependents", "debt_ratio"):
+        for column in (
+            "age",
+            "revolving_utilization_unsecured",
+            "num_dependents",
+            "debt_ratio",
+        ):
             self.assertNotIn(f"CHECK ({column}", body)
             self.assertNotIn(f"CHECK ( {column}", body)
 
     def test_the_primary_key_is_the_row_id(self):
-        self.assertIn("CONSTRAINT pk_credit_application PRIMARY KEY (row_id)", _body(DB_TABLE))
+        self.assertIn(
+            "CONSTRAINT pk_credit_application PRIMARY KEY (row_id)", _body(DB_TABLE)
+        )
 
     def test_raw_values_are_preserved_in_the_table(self):
         # codes are masked in the view, never destroyed here
@@ -171,7 +278,9 @@ class InputViewTests(unittest.TestCase):
     def test_the_codes_stop_being_numbers_for_every_late_column(self):
         body = VIEW_BODIES[DB_INPUT_VIEW]
         for column in LATE_PAYMENT_COLUMNS:
-            self.assertIn(f"CASE WHEN a.{column} IN (96, 98) THEN NULL ELSE a.{column} END", body)
+            self.assertIn(
+                f"CASE WHEN a.{column} IN (96, 98) THEN NULL ELSE a.{column} END", body
+            )
 
     def test_utilisation_is_capped_without_losing_the_cap_as_a_fact(self):
         body = VIEW_BODIES[DB_INPUT_VIEW]
@@ -181,13 +290,21 @@ class InputViewTests(unittest.TestCase):
     def test_the_missing_income_indicator_is_row_wise(self):
         body = VIEW_BODIES[DB_INPUT_VIEW]
         self.assertIn(
-            "CASE WHEN a.monthly_income IS NULL THEN 1 ELSE 0 END AS income_missing", body
+            "CASE WHEN a.monthly_income IS NULL THEN 1 ELSE 0 END AS income_missing",
+            body,
         )
 
     def test_the_view_derives_no_fitted_statistic(self):
         # no average, no percentile, no window: a view cannot be fitted on one split
         body = VIEW_BODIES[DB_INPUT_VIEW]
-        for forbidden in ("avg(", "percentile_cont", "stddev", " OVER (", "max(", "min("):
+        for forbidden in (
+            "avg(",
+            "percentile_cont",
+            "stddev",
+            " OVER (",
+            "max(",
+            "min(",
+        ):
             self.assertNotIn(forbidden, body.lower())
 
     def test_each_derived_column_is_produced_exactly_once(self):

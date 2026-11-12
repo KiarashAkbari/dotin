@@ -14,7 +14,12 @@ here so that the DDL, the loader and the notebook cannot drift apart:
 
 The header itself is a hard contract: a file whose header differs from
 ``CSV_COLUMNS`` fails with ``SchemaDriftError`` instead of quietly producing
-empty columns, which is how stage 1 treats a changed API response.
+empty columns, which is how stage 1 treats a changed API response. The one
+allowance is the id column's spelling - see ``ID_ALIASES`` - because that column
+carries no modelled information, and refusing a file over it would be a
+preference dressed up as a safety check. The Kaggle export leaves that cell empty
+(it is a row index nobody named), which is why the empty string is one of the
+accepted spellings rather than a reason to reject the file as shipped.
 """
 
 from __future__ import annotations
@@ -22,7 +27,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-ID_COLUMN = ""  # the Kaggle file leaves its index column unnamed
+#: the label column of the Kaggle export. An earlier draft of this contract named
+#: the column after the competition ("Give Me Some Credit"), which is prose, not a
+#: header; ``ID_ALIASES`` keeps a file spelled that way loadable rather than
+#: pretending the mistake was in the data.
+ID_COLUMN = "Id"
+#: header names accepted at position 0. ``""`` is the Kaggle file as shipped: its first
+#: header cell is blank, because the column is a row index nobody named. ``ID_COLUMN``
+#: stays the name rows are keyed by, so the difference never reaches the pipeline.
+ID_ALIASES: tuple[str, ...] = ("Id", "", "Give.Me.Some.Credits")
 TARGET_COLUMN = "SeriousDlqin2yrs"
 
 #: the header this project loads; verified against the file on every run
@@ -50,6 +63,19 @@ DB_TABLE = "application"
 DB_INPUT_VIEW = "v_model_input"
 DB_MISSINGNESS_VIEW = "v_column_missingness"
 DB_RUN_TABLE = "load_run"
+#: the provenance row one load writes; ``load_run`` in the migration and
+#: ``credit.load.run_table`` are both described from this list
+RUN_COLUMNS: tuple[str, ...] = (
+    "source_kind",
+    "file_name",
+    "sha256",
+    "rows_loaded",
+    "rejected_count",
+    "fingerprint",
+)
+#: the 011 objects, so a fresh file is scored through the same view text
+DB_STAGING_TABLE = "staging_application"
+DB_STAGING_VIEW = "v_staging_model_input"
 
 #: columns whose extreme values are documented as codes rather than counts
 SENTINEL_COLUMNS: tuple[str, ...] = (
@@ -83,7 +109,9 @@ class CreditColumn:
 
 COLUMNS: tuple[CreditColumn, ...] = (
     CreditColumn(ID_COLUMN, "row_id", "bigint", nullable=False, integral=True),
-    CreditColumn(TARGET_COLUMN, "serious_dlqin_2yrs", "smallint", nullable=False, integral=True),
+    CreditColumn(
+        TARGET_COLUMN, "serious_dlqin_2yrs", "smallint", nullable=False, integral=True
+    ),
     CreditColumn(
         "RevolvingUtilizationOfUnsecuredLines",
         "revolving_utilization_unsecured",
@@ -92,7 +120,10 @@ COLUMNS: tuple[CreditColumn, ...] = (
     ),
     CreditColumn("age", "age", "double precision", nullable=True),
     CreditColumn(
-        "NumberOfTime30-59DaysPastDueNotWorse", "num_late_30_59", "double precision", nullable=True
+        "NumberOfTime30-59DaysPastDueNotWorse",
+        "num_late_30_59",
+        "double precision",
+        nullable=True,
     ),
     CreditColumn("DebtRatio", "debt_ratio", "double precision", nullable=True),
     CreditColumn("MonthlyIncome", "monthly_income", "double precision", nullable=True),
@@ -102,7 +133,9 @@ COLUMNS: tuple[CreditColumn, ...] = (
         "double precision",
         nullable=True,
     ),
-    CreditColumn("NumberOfTimes90DaysLate", "num_late_90", "double precision", nullable=True),
+    CreditColumn(
+        "NumberOfTimes90DaysLate", "num_late_90", "double precision", nullable=True
+    ),
     CreditColumn(
         "NumberRealEstateLoansOrLines",
         "num_real_estate_loans",
@@ -110,9 +143,14 @@ COLUMNS: tuple[CreditColumn, ...] = (
         nullable=True,
     ),
     CreditColumn(
-        "NumberOfTime60-89DaysPastDueNotWorse", "num_late_60_89", "double precision", nullable=True
+        "NumberOfTime60-89DaysPastDueNotWorse",
+        "num_late_60_89",
+        "double precision",
+        nullable=True,
     ),
-    CreditColumn("NumberOfDependents", "num_dependents", "double precision", nullable=True),
+    CreditColumn(
+        "NumberOfDependents", "num_dependents", "double precision", nullable=True
+    ),
 )
 
 
@@ -120,6 +158,8 @@ def db_for(csv_name: str) -> str:
     """Database name for a header name; a clear error beats a KeyError mid-load."""
     for spec in COLUMNS:
         if spec.csv_name == csv_name:
+            return spec.db_name
+        if spec.csv_name == ID_COLUMN and csv_name in ID_ALIASES:
             return spec.db_name
     raise KeyError(
         f"{csv_name!r} is not part of the credit contract; "
@@ -145,7 +185,9 @@ DB_COLUMNS: tuple[str, ...] = tuple(spec.db_name for spec in COLUMNS)
 MODEL_FEATURE_COLUMNS: tuple[str, ...] = tuple(
     spec.db_name for spec in COLUMNS if spec.csv_name in FEATURE_COLUMNS
 )
-LATE_PAYMENT_COLUMNS: tuple[str, ...] = tuple(db_for(csv_name) for csv_name in SENTINEL_COLUMNS)
+LATE_PAYMENT_COLUMNS: tuple[str, ...] = tuple(
+    db_for(csv_name) for csv_name in SENTINEL_COLUMNS
+)
 
 DERIVED_COLUMNS: tuple[str, ...] = (
     "utilization_capped",

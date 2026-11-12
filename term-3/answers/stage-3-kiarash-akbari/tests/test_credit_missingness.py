@@ -11,7 +11,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
+    HERE.parents[1] / "stage-1" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -72,10 +72,14 @@ def _sample_frame():
 
 class ProfileTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.table = missingness_profile(_sample_frame(), ("monthly_income", "age", "debt_ratio"))
+        self.table = missingness_profile(
+            _sample_frame(), ("monthly_income", "age", "debt_ratio")
+        )
 
     def test_one_row_per_column_in_the_order_asked(self):
-        self.assertEqual(list(self.table["column"]), ["monthly_income", "age", "debt_ratio"])
+        self.assertEqual(
+            list(self.table["column"]), ["monthly_income", "age", "debt_ratio"]
+        )
 
     def test_absence_is_counted_from_nan_only(self):
         by_name = {row["column"]: row for _, row in self.table.iterrows()}
@@ -122,14 +126,23 @@ class CoMissingnessTests(unittest.TestCase):
         table = co_missingness(frame(rows), ("monthly_income", "num_dependents", "age"))
         self.assertEqual(list(table.columns)[-1], "odds_ratio")
         first = table.iloc[0]
-        self.assertEqual({first["left"], first["right"]}, {"monthly_income", "num_dependents"})
-        self.assertGreater(float(first["odds_ratio"]), float(table.iloc[-1]["odds_ratio"]))
+        self.assertEqual(
+            {first["left"], first["right"]}, {"monthly_income", "num_dependents"}
+        )
+        self.assertGreater(
+            float(first["odds_ratio"]), float(table.iloc[-1]["odds_ratio"])
+        )
 
     def test_counts_add_up_to_the_frame(self):
         table = co_missingness(_sample_frame(), ("monthly_income", "debt_ratio"))
         row = table.iloc[0]
         self.assertEqual(
-            int(row["both_missing"] + row["left_only"] + row["right_only"] + row["neither"]),
+            int(
+                row["both_missing"]
+                + row["left_only"]
+                + row["right_only"]
+                + row["neither"]
+            ),
             20,
         )
 
