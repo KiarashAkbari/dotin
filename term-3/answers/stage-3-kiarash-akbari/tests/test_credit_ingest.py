@@ -124,9 +124,7 @@ def config_values(base: Path, **overrides: object) -> dict:
 
 class CreditConfigTests(unittest.TestCase):
     def test_the_example_file_is_the_documented_shape(self):
-        example = HERE.parents[1] / "stage-3" / "config" / "credit.example.toml"
-        if not example.is_file():
-            example = HERE.parents[0].parent / "config" / "credit.example.toml"
+        example = HERE.parent / "config" / "credit.example.toml"
         data = read_toml(example)
         cfg = parse_credit_config(data["credit"], base=example.parent)
         self.assertEqual(cfg.schema, DB_SCHEMA)
