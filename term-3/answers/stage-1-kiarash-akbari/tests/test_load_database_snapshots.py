@@ -37,6 +37,35 @@ from data_factory.database import (
     sql_migration_files,
 )
 
+ANSWERS_ROOT = Path(__file__).resolve().parents[2]
+# `__name__`, not a literal: the module is `test_load_database_snapshots` under
+# `discover -s tests` and `tests.test_load_database_snapshots` when named directly, and
+# a hard-coded target silently patches nothing in one of the two.
+MODULE = __name__
+
+
+def stage2_sql_dir():
+    """Locate the stage-2 `sql` directory, which sits beside stage-1 here and beside
+    the answers in `dotin`, under two different names.
+
+    Exactly one match is required. Zero means the layout or this helper is broken, and
+    several mean the choice would be alphabetical luck -- both are worth a failure with
+    the searched root and the sorted matches in the message, and neither is worth a
+    skip, because a skip is how a real check quietly stops checking.
+    """
+    return sorted(path for path in ANSWERS_ROOT.glob("stage-2*/sql") if path.is_dir())
+
+
+def require_stage2_sql_dir(test):
+    found = stage2_sql_dir()
+    if len(found) != 1:
+        test.fail(
+            f"expected exactly one stage-2*/sql directory under {ANSWERS_ROOT}, found "
+            f"{len(found)}: {found or 'none'}; the fixtures need the real 001-009 scripts"
+        )
+    return found[0]
+
+
 SNAPSHOT_MIGRATION = "005_snap.sql"
 SINK_MIGRATION = "009_factory_sink_schema.sql"
 ID = "0" * 32
@@ -151,6 +180,13 @@ class FakeEngine:
         return None
 
 
+class FakeTest:
+    """A test-case stand-in: `fail` raises and keeps the message, as TestCase does."""
+
+    def fail(self, message=""):
+        raise AssertionError(message)
+
+
 class SnapshotRefreshOrderTests(unittest.TestCase):
     def setUp(self):
         self._folder = tempfile.TemporaryDirectory()
@@ -243,6 +279,28 @@ class SnapshotRefreshOrderTests(unittest.TestCase):
             "the return path that applies no snapshots still publishes, refreshes, publishes again",
         )
 
+    def test_the_stage2_sql_directory_requirement_fails_rather_than_skips(self):
+        # No database needed: a broken layout is a failure with the counts in it,
+        # in both directions, because "0 matches" and "2 matches" mean different things.
+        with (
+            mock.patch(f"{MODULE}.stage2_sql_dir", list),
+            self.assertRaises(AssertionError) as zero,
+        ):
+            require_stage2_sql_dir(FakeTest())
+        self.assertIn("found 0:", str(zero.exception))
+        matches = [ANSWERS_ROOT / "stage-2/sql", ANSWERS_ROOT / "stage-2-x/sql"]
+        with (
+            mock.patch(f"{MODULE}.stage2_sql_dir", lambda: matches),
+            self.assertRaises(AssertionError) as two,
+        ):
+            require_stage2_sql_dir(FakeTest())
+        self.assertIn("found 2:", str(two.exception))
+        self.assertIn(str(ANSWERS_ROOT), str(two.exception))
+        # outside every patch: this checkout must satisfy its own requirement
+        one = require_stage2_sql_dir(self)
+        self.assertEqual([one], stage2_sql_dir())
+        self.assertTrue(one.is_dir(), "the real stage-2 sql directory should be a directory")
+
     def test_a_failed_run_does_not_refresh_after_its_rollback(self):
         from data_factory.cli import _load_database
 
@@ -294,11 +352,7 @@ class EmptyDatabaseSnapshotTests(unittest.TestCase):
 
         self.sql_dir = root / "sql"
         self.sql_dir.mkdir()
-        answers = Path(__file__).resolve().parents[2]
-        found = sorted(d for d in answers.glob("stage-2*/sql") if d.is_dir())
-        if not found:
-            self.skipTest(f"no stage-2*/sql directory next to {answers}")
-        source = found[0]
+        source = require_stage2_sql_dir(self)
         for path in sql_migration_files(source):
             (self.sql_dir / path.name).write_text(
                 path.read_text(encoding="utf-8"), encoding="utf-8"
