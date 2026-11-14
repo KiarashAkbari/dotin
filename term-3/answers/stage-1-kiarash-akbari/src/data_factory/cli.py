@@ -187,6 +187,24 @@ def _is_sink_migration(path: Path) -> bool:
     return path.name[:3] in {"009"}
 
 
+def _refresh_after_commit(connection: sa.Connection) -> None:
+    """Repopulate the snapshot views once the load they read from is durable.
+
+    The refresh before the commits cannot do this on a fresh database: the
+    views do not exist yet there, because 005-008 create them after it, and
+    this function only knows views already listed in pg_matviews. A view
+    created from a reset, still-uncommitted olist schema is committed empty,
+    so each exit path refreshes again after its last commit.
+
+    The refresh needs a commit of its own: executing it opens a new
+    transaction on this connection, and closing a connection whose
+    transaction is still open rolls the refresh back. That is how the first
+    version of this fix undid itself on a real database.
+    """
+    refresh_olist_snapshots(connection)
+    connection.commit()
+
+
 def _load_database(
     cfg: Config,
     apply_migrations: bool = True,
@@ -231,6 +249,8 @@ def _load_database(
             for table, result in results.items():
                 print(f"table={table} loaded={result['loaded']}")
 
+            # A no-op on a database where the views do not exist yet; it stays
+            # here so a run that only replaces data refreshes what it replaced.
             refresh_olist_snapshots(lock_connection)
 
             if not apply_migrations:
@@ -241,6 +261,7 @@ def _load_database(
                         "(the sink needs 009 to be applied)"
                     )
                 lock_connection.commit()
+                _refresh_after_commit(lock_connection)
                 return
 
             engine = sa.create_engine(build_database_url(cfg))
@@ -276,6 +297,7 @@ def _load_database(
 
             if not with_sink:
                 lock_connection.commit()
+                _refresh_after_commit(lock_connection)
                 return
 
             sink_migration_exists = (
@@ -296,6 +318,7 @@ def _load_database(
                 print(f"factory_table={table} loaded={result['loaded']}")
 
             lock_connection.commit()
+            _refresh_after_commit(lock_connection)
         except Exception:
             lock_connection.rollback()
             raise
