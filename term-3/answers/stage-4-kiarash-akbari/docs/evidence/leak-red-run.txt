@@ -1,0 +1,151 @@
+leak-red-run.txt -- the same three checks against a guard whose refusal was removed.
+
+What was broken on purpose: one line in a scratch copy of stage-4/src (never the repo,
+the copy's sha256 is printed at the top of the log), turning require_allowed's refusal
+into a no-op. Two things had to go wrong for this run to be worth anything, and both did:
+the leaked column was accepted, and tests/test_leak_gate.py went red with 11 failures over
+its 8 tests -- one for each of the audit's 10 forbidden columns (each is asserted
+separately, by subtest) plus the unaudited-column case. A test that stayed green here would
+be the finding worth knowing about, and the harness reports that as its own non-zero exit.
+
+reproduce: python3 stage-4/docs/evidence/leak-run-red-green.py red
+executed in the agent sandbox on 2026-11-16 (sandbox clock); python 3.11.2.
+-------------------------------------------------------------------------------
+red patch    : capstone/audit.py in /tmp/leak-red-sxso22r3/src
+             : sha256=21b45e8d53bb (tracked file is b7056b4cfd41); the
+               refusal branch is now unreachable, so a leak passes the gate
+mode         : red
+python       : 3.11.2
+audit file   : docs/evidence/column_audit.csv sha256=756b0f2a1d14
+-------------------------------------------------------------------------------
+audit read   : 43 allowed, 10 forbidden of 53 columns
+
+### 1. the clean frame: every column the audit allows
+   accepted (43 columns)
+
+### 2. the leak: order_reviews.review_score added to that frame
+   ACCEPTED -- the guard let the label through
+
+### 3. the test module: tests/test_leak_gate.py
+test_it_covers_every_column_the_schema_defines (test_leak_gate.CommittedAuditTest.test_it_covers_every_column_the_schema_defines)
+ROADMAP phase 2 widened the audit to all 53 columns; this is what catches a ... ok
+test_it_is_self_consistent (test_leak_gate.CommittedAuditTest.test_it_is_self_consistent) ... ok
+test_the_decision_moment_itself_is_allowed (test_leak_gate.CommittedAuditTest.test_the_decision_moment_itself_is_allowed)
+``order_approved_at`` is the anchor, not a prediction; forbidding it would make ... ok
+test_the_label_columns_are_forbidden (test_leak_gate.CommittedAuditTest.test_the_label_columns_are_forbidden)
+The three columns a leak would be most tempting to smuggle in, named here so ... ok
+test_an_unaudited_column_is_refused_too (test_leak_gate.LeakGateTest.test_an_unaudited_column_is_refused_too)
+No row means no column, which is the half of the rule that keeps a new schema ... FAIL
+test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) ... 
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.order_id') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_answer_timestamp') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_comment_message') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_comment_title') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_creation_date') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_id') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_score') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='orders.order_delivered_carrier_date') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='orders.order_delivered_customer_date') ... FAIL
+  test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='orders.order_status') ... FAIL
+test_the_allowed_frame_passes (test_leak_gate.LeakGateTest.test_the_allowed_frame_passes) ... ok
+test_there_is_something_to_refuse (test_leak_gate.LeakGateTest.test_there_is_something_to_refuse)
+A vacuous red is worse than no red: if the audit ever forbids nothing, this ... ok
+
+======================================================================
+FAIL: test_an_unaudited_column_is_refused_too (test_leak_gate.LeakGateTest.test_an_unaudited_column_is_refused_too)
+No row means no column, which is the half of the rule that keeps a new schema
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 103, in test_an_unaudited_column_is_refused_too
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.order_id')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_answer_timestamp')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_comment_message')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_comment_title')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_creation_date')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_id')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='order_reviews.review_score')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='orders.order_delivered_carrier_date')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='orders.order_delivered_customer_date')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+======================================================================
+FAIL: test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) (column='orders.order_status')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-4/tests/test_leak_gate.py", line 95, in test_each_forbidden_column_is_refused_by_name
+    with self.assertRaises(AuditError) as caught:
+AssertionError: AuditError not raised
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.003s
+
+FAILED (failures=11)
+   Ran 8 tests: failures=11 errors=0
+
+expectation  : clean_frame_accepted=TrueOK leak_refused=FalseOK tests_passed=FalseOK
+-------------------------------------------------------------------------------
+exit code    : 0  (0 = this mode behaved as its expectation says)

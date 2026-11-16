@@ -1,0 +1,81 @@
+# Stage 4 (capstone) config — the tracked, password-free contract.
+#
+# Copy this to config/capstone.toml for machine-specific paths; that file is the
+# one .gitignore keeps out. Nothing secret belongs in either copy: the database
+# password is read from an environment variable, exactly as stage 1 does it
+# (`password_env = "OLIST_DB_PASSWORD"`), so no key below carries a credential.
+#
+# Only what is *new* in this stage lives here. The connection string and the
+# migration directory belong to ../stage-1/config/default.toml ([database]),
+# the olist schema belongs to stage 2, and the model layer reads features out of
+# the database and never from CSV — repeating those paths here would give two
+# files a claim over the same database. Like stage 3's example, relative paths
+# resolve against this file's directory, so they climb out of config/ the way
+# stage 1's and stage 3's do.
+#
+# Empty string / "unset" is meaningful: the code must stop with a clear error on
+# it rather than fall back to a default. A silent default is how a student
+# decision turns into an undocumented assumption.
+
+[time_guard]
+# The brief's whole constraint: only what existed at this moment may be read.
+decision_column = "order_approved_at"
+# Every column the model is handed must appear in this file with a verdict and a
+# source for that verdict; the anti-leak test reads the file, so the audit is an
+# input to the pipeline and not only prose in report.md. Written in phase 2, and
+# kept under docs/evidence/ with the other witnesses rather than in config/, which
+# in this repository holds only machine-specific settings.
+audit_file = "../docs/evidence/column_audit.csv"
+
+[features]
+schema = "capstone"
+sql_migrations_dir = "../sql"
+curated_dir = "../data/curated"
+# The brief's ceilings, kept in config so the measurement scripts and the report
+# quote the same numbers instead of each hard-coding its own.
+feature_query_ms = 500
+
+[model]
+# A review is negative at score 1 or 2: the brief's definition, not a tuned value.
+negative_max_score = 2
+# D1/D2/D3 in decisions.md are the student's call. "unset" means the loader must
+# refuse until they are written down, so an undecided policy cannot hide inside
+# a pandas default.
+no_review = "unset"
+no_approved_at = "unset"
+multi_review = "unset"
+
+[capacity]
+# The operational quota is the decision itself: rank, then take a share. A
+# probability threshold would answer a different question than the one asked.
+share = 0.10
+report_shares = [0.05, 0.10, 0.20]
+
+[split]
+# Time split only. The boundary date is a student decision (and its reasoning
+# goes to decisions.md), so it is deliberately empty here.
+boundary = ""
+# The second metric is the same number on the last month of the evaluation window.
+last_month_as_secondary = true
+
+[budget]
+# 45 minutes is the whole chain from an empty environment to the final list, not
+# a per-notebook ceiling; each step's own time is measured and recorded.
+chain_minutes = 45
+
+[external]
+# "none" is an answer, and it has to be written: 12.1 lets the project report that no external
+# source was used instead of fetching one. An empty name here does NOT mean "declined" -- it
+# means "not yet decided", which is why the doctor keeps listing it.
+# The live signal is the student's choice; the assistant does not propose one.
+# An empty name means the chain runs without it and reports that as a finding —
+# a tested-and-rejected hypothesis is a result, not something to hide.
+name = ""
+url = ""
+token_env = ""
+# how the signal joins to an order: a date, a place, or both.
+join_on = ""
+
+# For consistency with stage 3, a loader may also accept these keys as a
+# [capstone] table inside ../stage-1/config/default.toml. That is a design
+# option for phase 6, not a requirement of the brief.

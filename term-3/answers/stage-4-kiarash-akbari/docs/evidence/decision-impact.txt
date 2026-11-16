@@ -1,0 +1,210 @@
+decision-impact.txt -- what each of the four config decisions costs, measured on the data.
+
+This file decides nothing. It prices the four options the delivery guide leaves open
+(checklist 3.3, 3.4, 3.6 and the split boundary) so the decisions are made against numbers
+instead of adjectives, and so a later reader can tell which of them were already measured
+when the call was taken. Every figure is the output of one query against the sandbox
+database described in `phase1-full-load.txt` (9/9 table counts reconciled to the phase-0
+baseline). Timings, if any, are «سندباکس». The verdict lines are the student's, not here.
+
+Queries are inlined so each number can be re-run without this file's author. They were
+executed as one session; the cluster is a throwaway, never `olist_db`.
+
+
+1. D1 -- orders whose `order_approved_at` is NULL
+-------------------------------------------------
+    SELECT COUNT(*) AS orders,
+           COUNT(*) FILTER (WHERE order_approved_at IS NULL) AS missing
+    FROM olist.orders;
+=> orders = 99,441, missing = 160 (0.1609 %)
+
+The share is trivial; the shape is not. Grouped by status:
+
+    SELECT order_status, COUNT(*) AS orders,
+           COUNT(*) FILTER (WHERE order_approved_at IS NULL) AS missing_approval,
+           ROUND(100.0 * COUNT(*) FILTER (WHERE order_approved_at IS NULL) / COUNT(*), 2) AS pct
+    FROM olist.orders GROUP BY 1 HAVING COUNT(*) FILTER (WHERE order_approved_at IS NULL) > 0;
+
+    status     orders   missing   pct_within_status
+    canceled     625      141          22.56 %
+    delivered  96,478       14           0.01 %
+    created        5        5         100.00 %
+
+Three consequences a "delete 0.16 %" framing hides:
+
+* the 160 are 88.1 % of one non-delivered status, so dropping them removes 22.56 % of the
+  canceled population, not 0.16 % of a random slice;
+* 141 of the 160 are canceled or unavailable, i.e. exactly the orders a capacity decision
+  would want to look at;
+* D1 and D2 overlap in 5 orders (no approval AND no review), so the two exclusions are not
+  independent, though the overlap is small.
+
+At scoring time the same column is NULL by construction for every incoming order: a fresh
+row has no `order_approved_at` until the platform approves it, in 100 % of cases. So this
+decision prices the training table only, and the prediction entry point (checklist 8.1,
+8.2) has to state its own anchor -- that is the part the 0.16 % figure cannot answer.
+
+
+2. D2 -- orders with no review
+------------------------------
+    WITH per_order AS (
+      SELECT o.order_id, o.order_status, BOOL_OR(r.order_id IS NOT NULL) AS has_review
+      FROM olist.orders o LEFT JOIN olist.order_reviews r USING (order_id)
+      WHERE o.order_approved_at IS NOT NULL GROUP BY 1, 2)
+    SELECT COUNT(*) AS orders, COUNT(*) FILTER (WHERE NOT has_review) AS no_review FROM per_order;
+=> 99,281 approved orders, 763 without a review; 768 including the 5 unapproved ones (0.7723 %).
+
+Status mix of the no-review set (approved only), and the monthly share at the tail:
+
+    delivered 646 | shipped 75 | canceled 17 | unavailable 14 | processing 6 | invoiced 5
+
+    month     orders   no_review   pct
+    2018-03    7,328         63   0.86 %
+    2018-04    6,789         52   0.77 %
+    2018-05    7,075         38   0.54 %
+    2018-06    6,168         25   0.41 %
+    2018-07    6,200         46   0.74 %
+    2018-08    6,622         26   0.39 %
+    2018-09        1          0   0.00 %
+
+Priced at the observed negative rate, the whole no-review population is worth
+768 x 14.67 % = 112.7 orders. So whichever way D2 goes, it moves the positive class by
+about 0.8 %; it is a reporting obligation, not a modelling lever. The share is stable
+month to month (0.39-0.86 %), which is what makes "report one global share" defensible at
+all -- had the tail been 5 %, a single number would have been misleading.
+
+
+3. D3 -- orders with more than one review
+-----------------------------------------
+Three rules over the same population (approved orders with at least one review, 98,518):
+
+    WITH per_order AS (
+      SELECT o.order_id, MIN(r.review_score) AS worst, MAX(r.review_score) AS best,
+             AVG(r.review_score) AS mean_score, COUNT(*) AS n,
+             (ARRAY_AGG(r.review_score ORDER BY r.review_creation_date DESC))[1] AS latest
+      FROM olist.orders o JOIN olist.order_reviews r USING (order_id)
+      WHERE o.order_approved_at IS NOT NULL GROUP BY 1)
+    SELECT SUM((n > 1)::int), SUM((best <> worst)::int), SUM((worst <= 2 AND best > 2)::int),
+           SUM((worst <= 2)::int), SUM((mean_score <= 2)::int), SUM((latest <= 2)::int),
+           SUM(((worst <= 2) <> (mean_score <= 2))::int), SUM(((worst <= 2) <> (latest <= 2))::int)
+    FROM per_order;
+
+    multi_review_orders           546   (547 including one unapproved order)
+    any score disagreement        202
+    straddling the <=2 threshold  96
+    negatives  worst            14,454
+    negatives  mean             14,370   (worst vs mean flips 84 labels = 0.085 %)
+    negatives  latest           14,415   (worst vs latest flips 39 labels = 0.040 %)
+
+The difference between the rules is 84 labels out of 98,518, so this decision is worth
+making for principle and not for the metric. One measured point bears on the principle:
+`review_creation_date` is a DATE in the versioned DDL, so a "latest review" rule is not
+merely different, it is undefined for part of the population --
+
+    SELECT COUNT(*) FROM (SELECT o.order_id, COUNT(*) n, COUNT(DISTINCT r.review_creation_date) d
+      FROM olist.orders o JOIN olist.order_reviews r USING (order_id)
+      GROUP BY 1 HAVING COUNT(*) > 1) x WHERE d < n;
+=> 157 of the 547 multi-review orders have tied review dates (155 have all reviews on one day).
+
+`MIN` is the only one of the three that needs no tiebreaker. Recorded as a fact, not as a
+verdict: the decision is the student's.
+
+
+4. The split boundary, proposed at 2018-07-31
+---------------------------------------------
+Data horizon, measured:
+
+    last order_purchase_timestamp     2018-08-29
+    last order_approved_at            2018-09-03   (1 order approved after 2018-08-31)
+    last review_creation_date         2018-08-31
+    last review_answer_timestamp      2018-10-29
+
+    SELECT CASE WHEN order_approved_at::date <= DATE '2018-07-31' THEN 'train' ELSE 'test' END,
+           COUNT(*), SUM(neg::int), ROUND(100.0*SUM(neg::int)/COUNT(*), 2)
+    FROM ... GROUP BY 1;
+
+    side   orders   negatives   pct_negative   first_day   last_day
+    train  91,923      13,749        14.96 %    2016-09-15  2018-07-31
+    test    6,595         705        10.69 %    2018-08-01  2018-09-03
+
+4a. Label runway. The review file stops 31 days after the cut, so an order approved
+2018-08-25 can never show its review. How much label normally arrives after 31 days:
+
+    SELECT to_char(date_trunc('month', o.order_approved_at), 'YYYY-MM') AS m, COUNT(*),
+           SUM((r.review_creation_date > o.order_approved_at + INTERVAL '31 days')::int) AS late
+    FROM olist.order_reviews r JOIN olist.orders o USING (order_id)
+    WHERE o.order_approved_at >= DATE '2017-08-01' AND o.order_approved_at < DATE '2018-08-01'
+    GROUP BY 1 ORDER BY 1 DESC;
+
+    2018-07 0.49 % | 2018-06 1.35 % | 2018-05 1.15 % | 2018-04 2.14 % | 2018-03 4.18 %
+    2018-02 3.61 % | 2018-01 4.36 % | 2017-12 5.93 % | 2017-11 2.15 % | 2017-10 1.59 %
+    2017-09 1.16 % | 2017-08 1.47 %      lag: p50 10.4 d, p90 23.1 d, p99 35.9 d, max 147.9 d
+
+So the test window loses roughly 0.5-1.5 % of its labels to the file's end, and what it
+loses is not random: late reviews are disproportionately angry ones in the months where
+the negative rate was high (2018-01 through 2018-03 lose 3.6-4.4 % of reviews to the
+31-day cut, against 0.49 % in 2018-07). The direction is one-sided -- a boundary this close
+to the horizon makes the test month look cleaner than it is. Note the cut is date-level and
+inclusive: an order approved at 23:00 on 2018-07-31 is train.
+
+4b. Base rate. The gap between the two sides is drift, not the boundary's fault:
+
+    2016-Q4 28.16 % | 2017-Q1 15.08 % | 2017-Q2 13.54 % | 2017-Q3 12.02 % | 2017-Q4 16.59 %
+    2018-Q1 19.72 % | 2018-Q2 11.96 % | 2018-Q3 10.82 %        (by order, min-score rule)
+
+    window                                     orders   pct_negative
+    rest of train (<= 2018-04-30)              72,626        15.94 %
+    last 3 train months (2018-05-01..07-31)    19,297        11.26 %
+    test (> 2018-07-31)                        6,595        10.69 %
+
+A threshold or class weight tuned on the full history is set for a 15.94 % world and
+scored in a 10.69 % one. Tuned on the last three months of train it is 0.57 pp off rather
+than 5.25 pp off. This is a measurement about calibration, not a request to move the
+boundary.
+
+4c. Noise floor of the test window. With 6,595 orders and 705 positives:
+
+    1 sigma on the negative rate = sqrt(p(1-p)/n)     = 0.38 pp  (2 sigma: 0.75 pp)
+    1 sigma on a recall at 75.9 % over 705 positives  = 1.61 pp  (2 sigma: 3.13 pp)
+
+Any two metrics on this test set that differ by less than about 0.8 pp (rate-style numbers)
+or 3.1 pp (recall-style) are not a result. Worth writing into the report before anyone
+reads a leaderboard out of the model table.
+
+
+5. external.name -- what an outside table would have to join on
+----------------------------------------------------------------
+The schema carries no municipality code, only names. Measured:
+
+    distinct customer_city values                     4,119
+      of which reused across 2+ states                  163
+      of which carrying accents or non-lowercase         53
+    distinct (customer_city, customer_state) pairs    4,310
+    distinct geolocation_city values                  8,011
+      of which carrying accents or other casing       2,184
+    customer city names with no geolocation twin, after accent folding: 50 of 4,119 (1.21 %)
+    top city by volume: sao paulo, 15,540 orders (then rio de janeiro 6,882,
+      belo horizonte 2,773, brasilia 2,131, curitiba 1,521)
+    ZIP prefixes: 14,994 customer prefixes, 14,837 present in geolocation,
+      278 customers whose prefix has no geolocation row
+
+So a name-keyed enrichment can reach 98.79 % of the city values at best, and the 163
+reused names merge distinct municipalities unless the join is on (city, state) --
+which is the honest cost of the step, and the number the report has to print next to it.
+
+Not examined here: whether any particular API answers. This sandbox reaches github.com,
+registry.npmjs.org and pypi.org only; a live request to an external host returns nothing
+here, so availability, auth, rate limit and response shape are «بررسی نشده» from my side
+and must be run on the student's machine. That is why this file names no API: the missing
+half of `external.name` is not a name, it is a reachability test.
+
+
+Rules of this file
+------------------
+* No number here was typed by hand: each is the output of the query printed above it, from
+  one session against the sandbox cluster.
+* Where a figure differs from `phase1-decision-counts.txt`, the difference is the population
+  the query walks (all orders vs approved-with-review), and both files say which.
+* Nothing in this file is a decision, a recommendation to the student, or a claim about
+  the student's own PostgreSQL. The verdicts belong in `decisions.md` and in
+  `config/capstone.toml`; this is the measurement those verdicts will be argued from.

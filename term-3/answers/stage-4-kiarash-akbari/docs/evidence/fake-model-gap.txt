@@ -1,0 +1,114 @@
+fake-model-gap.txt -- the measurement `04 §۱` asks for: a deliberate leak, and the size
+of the metric gap it buys, as a number.
+
+This is the one place in the stage where a model is trained on a column it must never see.
+It exists to measure the price of skipping the audit, and it is measured, not shipped: the
+harness is not committed, the split is provisional, and no artefact downstream reads these
+numbers. ROADMAP phase 2 clause 5 says the same thing in one line -- for measurement only,
+never an operational output.
+
+
+The two arms
+------------
+Same rows, same split, same scaler, same encoder, same estimator, same hyper-parameters.
+The only difference between the arms is one column: `review_score`, which
+`docs/evidence/column_audit.csv` forbids.
+
+    rows    98,518 orders -- the orders with at least one review AND an approval stamp.
+            99,441 minus the 768 with no review (D2) minus the 155 approved-late-or-never
+            that still carry a review (D1's population). Both exclusions are drops, not
+            zero-fills: the decisions that say what to do with them are still the
+            student's, so this measurement takes the defensible subset and stops.
+    label   negative feedback = the order's minimum `review_score` <= 2.
+            14,454 of 98,518 positive for the label (14.67 %). The full-database count is
+            14,533 orders; the 79 difference is the unapproved orders the subset drops.
+    split   approved_on < 2018-08-01 for training, the rest held out: 91,923 / 6,595.
+            Provisional. The real boundary is checklist 3.x and undecided, so this split
+            is a measurement choice and not the delivery's.
+    model   `LogisticRegression(max_iter=2000, class_weight="balanced")`, 16 numeric and
+            3 boolean columns standardised, `customer_state` and
+            `product_category_name_english` one-hot with `min_frequency=200`.
+            86 features without the leak, 88 with it (`worst_score` and `best_score`).
+
+Numbers below are from the agent sandbox (PostgreSQL 16.2 built in
+`phase1-full-load.txt`, python 3.11.2, scikit-learn 1.9.1, four shared cores). They are
+not a claim about the student's machine and they judge no ceiling in the checklist.
+
+
+The gap
+-------
+    arm                          features   AUC      AP       accuracy   recall on negatives
+    allowed columns only              86   0.7383   0.2905   0.6764     535/705  ( 75.9 %)
+    with the leaked column            88   1.0000   1.0000   1.0000     705/705  (100.0 %)
+
+    gap: AUC +0.2617, AP +0.7095, recall on negatives +24.1 percentage points
+
+Read the second row for what it is. AUC 1.0000 is not a strong model: the label is defined
+as "the minimum review score is 2 or lower" and one of the features is the minimum review
+score, so the model that reads it is reading the answer key. The point of the number is not
+that a leak helps a little -- it is that a leak turns an honest 0.7383 into a perfect
+1.0000, and that nothing downstream (no threshold, no capacity decision, no manager
+summary) can tell the difference from the metric alone. The only defence that works is the
+one `04` asks for: a per-column verdict fixed before the frame is built, and a gate that
+refuses a column the verdict forbids. The gate is
+`capstone.audit.require_allowed`; its test is `tests/test_leak_gate.py`; its red witness is
+`leak-red-run.txt`.
+
+
+What this file does NOT establish
+---------------------------------
+* It is not the delivery model. `features.build` is still a placeholder (checklist 5.1) and
+  the config decisions D1/D2/D3 are open, so the real frame does not exist yet. When it
+  does, the same two-arm comparison should be re-run on the shipped feature set, and that
+  number -- not this one -- goes in `report.md`.
+* It is not a ranking of models. One estimator, one split, no tuning; comparing learners is
+  phase 6's job.
+* It is not a timing. The extraction took 1.5 s and the fit 3.7 s / 0.5 s in the sandbox,
+  and those numbers appear here only so the run is recognisable, never against a ceiling.
+
+
+Reproducing it by hand
+----------------------
+The harness is deliberately not committed -- the same rule `sql/README.md` follows for the
+load: no script that generates and then trusts its own evidence. Two steps, both printed:
+
+1. the frame, from the sandbox database (the full `WITH items/pays/revs` query is the
+   `SQL` string below, run through `COPY (...) TO STDOUT WITH (FORMAT csv, HEADER true)`):
+
+    COPY ( ... SELECT o.order_id, ..., COALESCE(i.n_items, 0) AS n_items, ...
+           FROM olist.orders o
+           LEFT JOIN olist.customers c ON c.customer_id = o.customer_id
+           LEFT JOIN (SELECT DISTINCT ON (geolocation_zip_code_prefix) * FROM olist.geolocation
+                      ORDER BY geolocation_zip_code_prefix, geolocation_lat) g
+                    ON g.geolocation_zip_code_prefix = c.customer_zip_code_prefix
+           LEFT JOIN items i USING (order_id) LEFT JOIN pays p USING (order_id)
+           LEFT JOIN revs r USING (order_id)
+           LEFT JOIN (...) pr ON pr.order_id = o.order_id
+           WHERE r.order_id IS NOT NULL AND o.order_approved_at IS NOT NULL
+         ) TO STDOUT WITH (FORMAT csv, HEADER true)
+
+   with the three CTEs aggregating at order grain: `items` over `order_items` joined to
+   `orders` (so `shipping_limit_days` is measured against `order_approved_at`), `pays`
+   over `payments`, `revs` over `order_reviews` (`MIN`/`MAX` score, count, whether a
+   comment was written).
+
+2. the two arms, in python: the column lists and estimator above, `StandardScaler` fit on
+   train only, `OneHotEncoder(handle_unknown="ignore", min_frequency=200)` fit on train
+   only, and the leak arm adding `worst_score` and `best_score` to the numeric block.
+
+The `WHERE r.order_id IS NOT NULL AND o.order_approved_at IS NOT NULL` is the whole audit
+in one line for this measurement: it is what keeps D1 and D2 from being answered by a
+silent default.
+
+
+Transcript
+----------
+
+    extract: 1.5 s (sandbox), 98518 rows
+    loaded: 98518 rows x 27 cols
+    label: 14454 negative of 98518 (14.67 %)
+    split: 91923 train / 6595 test, cut at 2018-08-01 (provisional)
+      allowed columns only       features= 86  AUC=0.7383  AP=0.2905  acc=0.6764  recall=535/705 (75.9 %)  fit=3.7 s
+      with the leaked column     features= 88  AUC=1.0000  AP=1.0000  acc=1.0000  recall=705/705 (100.0 %)  fit=0.5 s
+
+    gap: AUC +0.2617  AP +0.7095  recall on negatives +24.1 pp

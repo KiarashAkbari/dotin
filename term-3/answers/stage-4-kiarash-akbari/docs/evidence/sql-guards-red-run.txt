@@ -1,0 +1,46 @@
+sql-guards-red-run.txt -- the phase-4 SQL checks, against three forbidden files.
+
+What was broken on purpose, one file at a time, in the repository itself and restored
+immediately afterwards: a feature reading `olist.order_reviews.review_score`, a frame
+built with `SELECT *`, and a `CREATE TABLE` that loses its `IF NOT EXISTS`. The point is
+not that the SQL is perfect; it is that the three rules `sql/README.md` states are
+enforced by something that stops when the rule is broken. The harness had to be told
+twice about the first mutation -- the column-level check did not fire on a subquery that
+reads the review table without an alias, so `olist.order_reviews` is now refused by name
+on the feature side as well as column by column, and the harness requires at least one of
+the two guards to go red rather than trusting either alone. That is the finding this log
+exists to record: a green run before the mutation was written proved less than it looked
+like it proved.
+
+reproduce: python3 stage-4/docs/evidence/sql-guards-run-red-green.py
+executed in the agent sandbox on 2026-11-16 (sandbox clock); python 3.11.2.
+-------------------------------------------------------------------------------
+python       : 3.11.2
+sql dir      :   sql/001_capstone_schema.sql            sha256=fcadc1be3204
+  sql/002_time_guard.sql                 sha256=e732de9a1720
+  sql/003_feature_views.sql              sha256=9ec77ae782bf
+  sql/004_as_of_functions.sql            sha256=0f835fe9d94b
+  sql/005_external_signal.sql            sha256=d691e4ff8ea1
+guard tests  : tests/test_capstone_sql_guards.py sha256=baf4bc6fd5dd
+-------------------------------------------------------------------------------
+========================================================================
+RED: three forbidden files, each should break exactly its own guard
+========================================================================
+
+--- a feature reads the label (003_feature_views.sql)
+    test_no_feature_reads_a_column_the_audit_does_not_allow exit 1 (red, as intended)
+      | Ran 1 test in 0.007s
+      | FAILED (failures=1)
+    test_the_feature_side_never_names_the_reviews_table     exit 1 (red, as intended)
+      | Ran 1 test in 0.002s
+      | FAILED (failures=1)
+
+--- a frame built with SELECT * (003_feature_views.sql)
+    test_no_star_expansion_and_no_write_against_the_source_schema exit 1 (red, as intended)
+      | Ran 1 test in 0.002s
+      | FAILED (failures=1)
+
+--- a table that cannot be re-created (001_capstone_schema.sql)
+    test_every_object_is_replaceable                        exit 1 (red, as intended)
+      | Ran 1 test in 0.001s
+      | FAILED (failures=1)

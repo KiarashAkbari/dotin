@@ -1,0 +1,395 @@
+phase-0 red run: stage-1/tests/test_load_database_snapshots.py (8 tests) plus the
+phase-0 scenario, against a real PostgreSQL 16.2, executed in the agent sandbox on
+2026-11-14. cli.py under test: stage-1 12806b9 (pre-fix cli.py)
+reproduce: python stage-4/docs/evidence/phase0-run-red-green.py red
+see stage-4/docs/evidence/README.md for what this file does and does not prove.
+-------------------------------------------------------------------------------
+server       : 16.2 | listen_addresses =  | unix socket only
+database     : phase0_red (created empty, dropped and recreated by this script)
+cli.py       : stage-1 HEAD, pre-fix sha256=6d8bc80631c1
+config       : url=postgresql+psycopg2://postgres@/phase0_red?host=/tmp/pgdata_v4  (driver postgresql+psycopg2: the pgserver build returns bytes to psycopg3, so SQLAlchemy cannot parse its version)
+stage-2/sql  : sha256=dc7b1a651ada over 8 files
+csv fixtures : /tmp/fixtures/olist_csv, one row per table, header from the loader predicate
+
+########## unittest tests.test_load_database_snapshots ##########
+schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=1
+table=customers loaded=1
+table=sellers loaded=1
+table=products loaded=1
+table=geolocation loaded=1
+table=orders loaded=1
+table=order_items loaded=1
+table=payments loaded=1
+table=order_reviews loaded=1
+factory_sink=skipped
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=1
+table=customers loaded=1
+table=sellers loaded=1
+table=products loaded=1
+table=geolocation loaded=1
+table=orders loaded=1
+table=order_items loaded=1
+table=payments loaded=1
+table=order_reviews loaded=1
+factory_sink=skipped
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+schema=reset
+factory_schema=reset
+sql_migrations=0 files=
+sql_migrations=skipped
+factory_sink=skipped (the sink needs 009 to be applied)
+schema=reset
+sql_migrations=0 files=
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+schema=reset
+sql_migrations=0 files=
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+schema=reset
+sql_migrations=0 files=
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+test_a_reset_run_leaves_no_empty_view_behind (tests.test_load_database_snapshots.EmptyDatabaseSnapshotTests.test_a_reset_run_leaves_no_empty_view_behind) ... FAIL
+test_a_reset_view_agrees_with_the_tables_the_run_committed (tests.test_load_database_snapshots.EmptyDatabaseSnapshotTests.test_a_reset_view_agrees_with_the_tables_the_run_committed) ... FAIL
+test_a_failed_run_does_not_refresh_after_its_rollback (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_a_failed_run_does_not_refresh_after_its_rollback) ... ok
+test_a_run_without_migrations_still_refreshes_after_its_commit (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_a_run_without_migrations_still_refreshes_after_its_commit) ... FAIL
+test_every_refresh_runs_on_the_connection_that_loaded_the_data (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_every_refresh_runs_on_the_connection_that_loaded_the_data) ... ok
+test_snapshots_created_after_the_load_see_the_loaded_rows (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_snapshots_created_after_the_load_see_the_loaded_rows) ... FAIL
+test_the_refresh_follows_the_commit_that_publishes_the_load (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_the_refresh_follows_the_commit_that_publishes_the_load) ... FAIL
+test_the_stage2_sql_directory_requirement_fails_rather_than_skips (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_the_stage2_sql_directory_requirement_fails_rather_than_skips) ... ok
+
+======================================================================
+FAIL: test_a_reset_run_leaves_no_empty_view_behind (tests.test_load_database_snapshots.EmptyDatabaseSnapshotTests.test_a_reset_run_leaves_no_empty_view_behind)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 470, in test_a_reset_run_leaves_no_empty_view_behind
+    self.assertEqual(empty, [], f"committed but unpopulated: {state}")
+AssertionError: Lists differ: ['mv_q1_monthly_category_sales', 'mv_q3_de[69 chars]ion'] != []
+
+First list contains 4 additional elements.
+First extra element 0:
+'mv_q1_monthly_category_sales'
+
++ []
+- ['mv_q1_monthly_category_sales',
+-  'mv_q3_delay_satisfaction',
+-  'mv_q4_seller_dashboard',
+-  'mv_q5_payment_distribution'] : committed but unpopulated: {'mv_q1_monthly_category_sales': (True, 0), 'mv_q3_delay_satisfaction': (True, 0), 'mv_q4_seller_dashboard': (True, 0), 'mv_q5_payment_distribution': (True, 0)}
+
+======================================================================
+FAIL: test_a_reset_view_agrees_with_the_tables_the_run_committed (tests.test_load_database_snapshots.EmptyDatabaseSnapshotTests.test_a_reset_view_agrees_with_the_tables_the_run_committed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 485, in test_a_reset_view_agrees_with_the_tables_the_run_committed
+    self.assertEqual(actual, expected, f"{view} disagrees with its tables")
+AssertionError: 0 != 1 : mv_q1_monthly_category_sales disagrees with its tables
+
+======================================================================
+FAIL: test_a_run_without_migrations_still_refreshes_after_its_commit (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_a_run_without_migrations_still_refreshes_after_its_commit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 276, in test_a_run_without_migrations_still_refreshes_after_its_commit
+    self.assertEqual(
+AssertionError: Lists differ: ['commit'] != ['commit', 'refresh', 'commit']
+
+Second list contains 2 additional elements.
+First extra element 1:
+'refresh'
+
+- ['commit']
++ ['commit', 'refresh', 'commit'] : the return path that applies no snapshots still publishes, refreshes, publishes again
+
+======================================================================
+FAIL: test_snapshots_created_after_the_load_see_the_loaded_rows (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_snapshots_created_after_the_load_see_the_loaded_rows)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 241, in test_snapshots_created_after_the_load_see_the_loaded_rows
+    self.assertEqual(
+AssertionError: {'mv_[23 chars]es': 0, 'mv_q3_delay_satisfaction': 0, 'mv_q4_[49 chars]': 0} != {'mv_[23 chars]es': 150, 'mv_q3_delay_satisfaction': 150, 'mv[57 chars] 150}
+- {'mv_q1_monthly_category_sales': 0,
++ {'mv_q1_monthly_category_sales': 150,
+?                                  ++
+
+-  'mv_q3_delay_satisfaction': 0,
++  'mv_q3_delay_satisfaction': 150,
+?                              ++
+
+-  'mv_q4_seller_dashboard': 0,
++  'mv_q4_seller_dashboard': 150,
+?                            ++
+
+-  'mv_q5_payment_distribution': 0}
++  'mv_q5_payment_distribution': 150}
+?                                ++
+ : a view committed empty is a wrong answer, not an early one
+
+======================================================================
+FAIL: test_the_refresh_follows_the_commit_that_publishes_the_load (tests.test_load_database_snapshots.SnapshotRefreshOrderTests.test_the_refresh_follows_the_commit_that_publishes_the_load)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 253, in test_the_refresh_follows_the_commit_that_publishes_the_load
+    self.assertEqual(log.count("commit"), 2, "one for the load, one for the refresh")
+AssertionError: 1 != 2 : one for the load, one for the refresh
+
+----------------------------------------------------------------------
+Ran 8 tests in 1.091s
+
+FAILED (failures=5)
+[exit 1] unittest tests.test_load_database_snapshots
+
+########## full stage-1 suite ##########
+schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=1
+table=customers loaded=1
+table=sellers loaded=1
+table=products loaded=1
+table=geolocation loaded=1
+table=orders loaded=1
+table=order_items loaded=1
+table=payments loaded=1
+table=order_reviews loaded=1
+factory_sink=skipped
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=1
+table=customers loaded=1
+table=sellers loaded=1
+table=products loaded=1
+table=geolocation loaded=1
+table=orders loaded=1
+table=order_items loaded=1
+table=payments loaded=1
+table=order_reviews loaded=1
+factory_sink=skipped
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+schema=reset
+factory_schema=reset
+sql_migrations=0 files=
+sql_migrations=skipped
+factory_sink=skipped (the sink needs 009 to be applied)
+schema=reset
+sql_migrations=0 files=
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+schema=reset
+sql_migrations=0 files=
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+schema=reset
+sql_migrations=0 files=
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+sql_migrations=1 files=001_base.sql
+factory_migrations=1 files=009_sink.sql
+sql_snapshots=1 files=005_snap.sql
+sql_migrations=1 files=001_base.sql
+factory_migrations=0 files=
+sql_snapshots=1 files=005_snap.sql
+schema=reset
+factory_schema=reset
+sql_migrations=1 files=001_base.sql
+factory_migrations=1 files=009_sink.sql
+sql_snapshots=1 files=005_snap.sql
+sql_migrations=1 files=001_base.sql
+factory_sink=skipped
+sql_snapshots=1 files=005_snap.sql
+sql_migrations=skipped
+factory_sink=skipped (the sink needs 009 to be applied)
+E.................................................................................................................FF.F.FF.............................................................................................................................................
+======================================================================
+ERROR: test_analysis (unittest.loader._FailedTest.test_analysis)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_analysis
+Traceback (most recent call last):
+  File "/usr/lib/python3.11/unittest/loader.py", line 407, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/unittest/loader.py", line 350, in _get_module_from_name
+    __import__(name)
+  File "/home/user/data-factory-v2/stage-1/tests/test_analysis.py", line 3, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
+
+
+======================================================================
+FAIL: test_a_reset_run_leaves_no_empty_view_behind (test_load_database_snapshots.EmptyDatabaseSnapshotTests.test_a_reset_run_leaves_no_empty_view_behind)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 470, in test_a_reset_run_leaves_no_empty_view_behind
+    self.assertEqual(empty, [], f"committed but unpopulated: {state}")
+AssertionError: Lists differ: ['mv_q1_monthly_category_sales', 'mv_q3_de[69 chars]ion'] != []
+
+First list contains 4 additional elements.
+First extra element 0:
+'mv_q1_monthly_category_sales'
+
++ []
+- ['mv_q1_monthly_category_sales',
+-  'mv_q3_delay_satisfaction',
+-  'mv_q4_seller_dashboard',
+-  'mv_q5_payment_distribution'] : committed but unpopulated: {'mv_q1_monthly_category_sales': (True, 0), 'mv_q3_delay_satisfaction': (True, 0), 'mv_q4_seller_dashboard': (True, 0), 'mv_q5_payment_distribution': (True, 0)}
+
+======================================================================
+FAIL: test_a_reset_view_agrees_with_the_tables_the_run_committed (test_load_database_snapshots.EmptyDatabaseSnapshotTests.test_a_reset_view_agrees_with_the_tables_the_run_committed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 485, in test_a_reset_view_agrees_with_the_tables_the_run_committed
+    self.assertEqual(actual, expected, f"{view} disagrees with its tables")
+AssertionError: 0 != 1 : mv_q1_monthly_category_sales disagrees with its tables
+
+======================================================================
+FAIL: test_a_run_without_migrations_still_refreshes_after_its_commit (test_load_database_snapshots.SnapshotRefreshOrderTests.test_a_run_without_migrations_still_refreshes_after_its_commit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 276, in test_a_run_without_migrations_still_refreshes_after_its_commit
+    self.assertEqual(
+AssertionError: Lists differ: ['commit'] != ['commit', 'refresh', 'commit']
+
+Second list contains 2 additional elements.
+First extra element 1:
+'refresh'
+
+- ['commit']
++ ['commit', 'refresh', 'commit'] : the return path that applies no snapshots still publishes, refreshes, publishes again
+
+======================================================================
+FAIL: test_snapshots_created_after_the_load_see_the_loaded_rows (test_load_database_snapshots.SnapshotRefreshOrderTests.test_snapshots_created_after_the_load_see_the_loaded_rows)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 241, in test_snapshots_created_after_the_load_see_the_loaded_rows
+    self.assertEqual(
+AssertionError: {'mv_[23 chars]es': 0, 'mv_q3_delay_satisfaction': 0, 'mv_q4_[49 chars]': 0} != {'mv_[23 chars]es': 150, 'mv_q3_delay_satisfaction': 150, 'mv[57 chars] 150}
+- {'mv_q1_monthly_category_sales': 0,
++ {'mv_q1_monthly_category_sales': 150,
+?                                  ++
+
+-  'mv_q3_delay_satisfaction': 0,
++  'mv_q3_delay_satisfaction': 150,
+?                              ++
+
+-  'mv_q4_seller_dashboard': 0,
++  'mv_q4_seller_dashboard': 150,
+?                            ++
+
+-  'mv_q5_payment_distribution': 0}
++  'mv_q5_payment_distribution': 150}
+?                                ++
+ : a view committed empty is a wrong answer, not an early one
+
+======================================================================
+FAIL: test_the_refresh_follows_the_commit_that_publishes_the_load (test_load_database_snapshots.SnapshotRefreshOrderTests.test_the_refresh_follows_the_commit_that_publishes_the_load)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/data-factory-v2/stage-1/tests/test_load_database_snapshots.py", line 253, in test_the_refresh_follows_the_commit_that_publishes_the_load
+    self.assertEqual(log.count("commit"), 2, "one for the load, one for the refresh")
+AssertionError: 1 != 2 : one for the load, one for the refresh
+
+----------------------------------------------------------------------
+Ran 262 tests in 2.678s
+
+FAILED (failures=5, errors=1)
+[exit 1] full stage-1 suite
+
+########## phase-0 scenario: two consecutive --reset runs ##########
+tables before any run: {"olist schema exists": 1}
+
+--- run 1: load-database --reset --skip-factory-sink stdout ---
+schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=1
+table=customers loaded=1
+table=sellers loaded=1
+table=products loaded=1
+table=geolocation loaded=1
+table=orders loaded=1
+table=order_items loaded=1
+table=payments loaded=1
+table=order_reviews loaded=1
+factory_sink=skipped
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+--- run 1: table counts ---
+{
+ "customers": 1,
+ "geolocation": 1,
+ "order_items": 1,
+ "order_reviews": 1,
+ "orders": 1,
+ "payments": 1,
+ "product_category_name_translation": 1,
+ "products": 1,
+ "sellers": 1
+}
+--- run 1: materialized view state ---
+{
+ "mv_q1_monthly_category_sales": {
+  "ispopulated": true,
+  "rows": 0
+ },
+ "mv_q3_delay_satisfaction": {
+  "ispopulated": true,
+  "rows": 0
+ },
+ "mv_q4_seller_dashboard": {
+  "ispopulated": true,
+  "rows": 0
+ },
+ "mv_q5_payment_distribution": {
+  "ispopulated": true,
+  "rows": 0
+ }
+}
+
+--- run 2: load-database --reset --skip-factory-sink stdout ---
+schema=reset
+sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql
+table=product_category_name_translation loaded=1
+table=customers loaded=1
+table=sellers loaded=1
+table=products loaded=1
+table=geolocation loaded=1
+table=orders loaded=1
+table=order_items loaded=1
+table=payments loaded=1
+table=order_reviews loaded=1
+factory_sink=skipped
+sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql
+--- run 2: table counts ---
+{
+ "customers": 1,
+ "geolocation": 1,
+ "order_items": 1,
+ "order_reviews": 1,
+ "orders": 1,
+ "payments": 1,
+ "product_category_name_translation": 1,
+ "products": 1,
+ "sellers": 1
+}
+--- run 2: materialized view state ---
+{
+ "mv_q1_monthly_category_sales": {
+  "ispopulated": true,
+  "rows": 0
+ },
+ "mv_q3_delay_satisfaction": {
+  "ispopulated": true,
+  "rows": 0
+ },
+ "mv_q4_seller_dashboard": {
+  "ispopulated": true,
+  "rows": 0
+ },
+ "mv_q5_payment_distribution": {
+  "ispopulated": true,
+  "rows": 0
+ }
+}
+[exit 0] phase-0 scenario: two consecutive --reset runs
