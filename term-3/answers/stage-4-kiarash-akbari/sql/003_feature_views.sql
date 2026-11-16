@@ -23,6 +23,7 @@
 
 -- The as-of history, in one pass over approved orders. D1 (`drop_before_training`) is
 -- applied here, once, so no aggregate downstream can silently meet an unanchored row.
+-- customer_id identifies an order customer; customer_unique_id links repeat orders.
 CREATE OR REPLACE VIEW capstone.v_customer_order_history AS
 SELECT
     o.order_id,
@@ -33,7 +34,7 @@ SELECT
     -- value, so same-instant peers are excluded and the count is exactly "strictly
     -- earlier approvals by this customer".
     COUNT(*) OVER (
-        PARTITION BY o.customer_id
+        PARTITION BY c.customer_unique_id
         ORDER BY o.order_approved_at
         RANGE BETWEEN UNBOUNDED PRECEDING AND INTERVAL '1 microsecond' PRECEDING
     ) AS prior_orders_by_customer,
@@ -41,13 +42,14 @@ SELECT
         EPOCH FROM (
             o.order_approved_at
             - MAX(o.order_approved_at) OVER (
-                  PARTITION BY o.customer_id
+                  PARTITION BY c.customer_unique_id
                   ORDER BY o.order_approved_at
                   RANGE BETWEEN UNBOUNDED PRECEDING AND INTERVAL '1 microsecond' PRECEDING
               )
         )
     ) / 86400.0 AS days_since_prior_order
 FROM olist.orders AS o
+JOIN olist.customers AS c ON c.customer_id = o.customer_id
 WHERE o.order_approved_at IS NOT NULL;
 
 -- Centroid per ZIP prefix. The source carries many points per prefix (738,332 rows over

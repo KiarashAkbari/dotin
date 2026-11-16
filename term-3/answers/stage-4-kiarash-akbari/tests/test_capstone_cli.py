@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import helpers
 from capstone import features, model, predict
@@ -61,13 +62,21 @@ class ChainPlanTest(unittest.TestCase):
         self.assertTrue(all("reason" in row for row in rows))
 
     def test_readiness_is_derived_from_the_code_not_from_a_status_table(self) -> None:
-        rows = {row["name"]: row for row in statuses()}
-        self.assertFalse(rows["features"]["ready"])
-        self.assertFalse(rows["model"]["ready"])
-        self.assertIn("placeholder", rows["features"]["reason"])
-        # stage 1 is not on this interpreter's path, so the chain stops earlier and says so
-        self.assertEqual(first_blocked().name, "ingest")
-        self.assertIn("not importable", rows["ingest"]["reason"])
+        with patch("capstone.chain.find_spec", return_value=None):
+            rows = {row["name"]: row for row in statuses()}
+            self.assertFalse(rows["ingest"]["ready"])
+            self.assertFalse(rows["features"]["ready"])
+            self.assertFalse(rows["model"]["ready"])
+            self.assertIn("placeholder", rows["features"]["reason"])
+            self.assertEqual(first_blocked().name, "ingest")
+            self.assertIn("not importable", rows["ingest"]["reason"])
+
+        with patch("capstone.chain.find_spec", return_value=object()):
+            rows = {row["name"]: row for row in statuses()}
+            self.assertTrue(rows["ingest"]["ready"])
+            self.assertTrue(rows["load-database"]["ready"])
+            self.assertFalse(rows["features"]["ready"])
+            self.assertEqual(first_blocked().name, "features")
 
     def test_the_placeholders_refuse_with_their_phase(self) -> None:
         for function in (features.build, model.train, predict._score_rows):
@@ -341,11 +350,18 @@ class ErrorShapeTest(unittest.TestCase):
         own docstring says 1 must stay reserved for that. So the assertion is exact now, and
         the test below keeps it exact for every deliberate error class.
         """
-        code, out, err = run("predict", "--input", "/nonexistent/orders.csv")
+        # Isolate input-error handling from config-policy validation.
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "orders.csv"
+            with patch(
+                "capstone.cli._load",
+                return_value=helpers.load_example_contract(),
+            ):
+                code, out, err = run("predict", "--input", str(missing))
         self.assertEqual(out, "")
         self.assertIn("error:", err)
         self.assertEqual(code, int(ExitCode.DATA))
-        self.assertIn("/nonexistent/orders.csv", err)
+        self.assertIn(str(missing), err)
 
     def test_no_deliberate_error_exits_with_the_crash_code(self) -> None:
         """Every ``CapstoneError`` subclass names a code of its own, and none names ``1``."""

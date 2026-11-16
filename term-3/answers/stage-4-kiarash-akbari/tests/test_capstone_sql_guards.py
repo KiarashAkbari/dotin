@@ -441,23 +441,49 @@ class LiveSqlContractTests(unittest.TestCase):
             )
         ]
 
-    def frame_source_columns(self) -> list[tuple[str, str]]:
-        """The columns the frame really reads, from ``pg_depend``, capstone objects excluded."""
-        rows = self.query(
+    def frame_dependencies(self) -> list[tuple[str, str | None]]:
+        """Follow rewrite-rule dependencies through intermediate views."""
+        return self.query(
             """
-            SELECT DISTINCT ns.nspname, dep_rel.relname, attr.attname
-            FROM pg_depend AS dep
-            JOIN pg_class AS view ON view.oid = dep.objid
-            JOIN pg_namespace AS vn ON vn.oid = view.relnamespace
-            JOIN pg_class AS dep_rel ON dep_rel.oid = dep.refobjid
-            JOIN pg_namespace AS ns ON ns.oid = dep_rel.relnamespace
-            JOIN pg_attribute AS attr ON attr.attrelid = dep.refobjid AND attr.attnum = dep.refobjsubid
-            WHERE vn.nspname = 'capstone'
-              AND view.relname = 'v_feature_frame'
-              AND dep.refobjsubid > 0
+            WITH RECURSIVE view_tree(oid) AS (
+                SELECT 'capstone.v_feature_frame'::regclass::oid
+                UNION
+                SELECT referenced.oid
+                FROM view_tree AS tree
+                JOIN pg_rewrite AS rule ON rule.ev_class = tree.oid
+                JOIN pg_depend AS dep
+                  ON dep.classid = 'pg_rewrite'::regclass
+                 AND dep.objid = rule.oid
+                 AND dep.refclassid = 'pg_class'::regclass
+                JOIN pg_class AS referenced ON referenced.oid = dep.refobjid
+                WHERE referenced.relkind IN ('v', 'm')
+            )
+            SELECT DISTINCT source.relname, attribute.attname
+            FROM view_tree AS tree
+            JOIN pg_rewrite AS rule ON rule.ev_class = tree.oid
+            JOIN pg_depend AS dep
+              ON dep.classid = 'pg_rewrite'::regclass
+             AND dep.objid = rule.oid
+             AND dep.refclassid = 'pg_class'::regclass
+            JOIN pg_class AS source ON source.oid = dep.refobjid
+            JOIN pg_namespace AS namespace ON namespace.oid = source.relnamespace
+            LEFT JOIN pg_attribute AS attribute
+              ON attribute.attrelid = source.oid
+             AND attribute.attnum = dep.refobjsubid
+             AND attribute.attnum > 0
+             AND NOT attribute.attisdropped
+            WHERE namespace.nspname = 'olist'
+            ORDER BY source.relname, attribute.attname
             """
         )
-        return [(table, column) for space, table, column in rows if space == "olist"]
+
+    def frame_source_columns(self) -> list[tuple[str, str]]:
+        """Return audited source columns from the full view dependency closure."""
+        return [
+            (table, column)
+            for table, column in self.frame_dependencies()
+            if column is not None
+        ]
 
     def test_the_frame_reads_no_column_the_audit_forbids(self):
         columns = sorted({f"{table}.{column}" for table, column in self.frame_source_columns()})
@@ -470,8 +496,9 @@ class LiveSqlContractTests(unittest.TestCase):
         """The negative control for the test above, on the same database."""
         from psycopg2 import errors as pg_errors  # type: ignore[attr-defined]
 
+        self.query("SELECT capstone.require_allowed(ARRAY['orders.order_approved_at'])")
         with self.assertRaises(pg_errors.RaiseException):
-            self.query("SELECT capstone.require_allowed(ARRAY['olist.order_reviews.review_score'])")
+            self.query("SELECT capstone.require_allowed(ARRAY['order_reviews.review_score'])")
 
     def test_the_frame_meets_the_minimum_size_rules(self):
         technical = {"order_id", "customer_id", "order_approved_at", "order_status"}
@@ -483,17 +510,11 @@ class LiveSqlContractTests(unittest.TestCase):
     def test_the_frame_carries_no_answer(self):
         names = self.frame_columns()
         self.assertFalse([name for name in names if "negative" in name or "review" in name])
-        reviews = self.query(
-            """
-            SELECT DISTINCT dep_rel.relname
-            FROM pg_depend AS dep
-            JOIN pg_class AS view ON view.oid = dep.objid
-            JOIN pg_namespace AS vn ON vn.oid = view.relnamespace
-            JOIN pg_class AS dep_rel ON dep_rel.oid = dep.refobjid
-            WHERE vn.nspname = 'capstone' AND view.relname = 'v_feature_frame'
-              AND dep_rel.relname LIKE '%%review%%'
-            """
-        )
+        dependencies = self.frame_dependencies()
+        self.assertGreater(len(dependencies), 0, msg="no source dependencies found")
+        reviews = sorted({
+            table for table, _ in dependencies if "review" in table
+        })
         self.assertEqual(reviews, [])
 
     def test_the_window_and_the_plain_as_of_query_agree(self):
