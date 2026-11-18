@@ -12,6 +12,25 @@
 -- ROADMAP phase 4 item 2 asks for the as-of condition to be *in* the SQL. A function body
 -- is the smallest possible place for such a condition to live, and the largest possible
 -- audience: it can be run, grepped and read in psql without touching Python.
+--
+-- `p_at` is `timestamp`, not `timestamp with time zone`, and that is a measured choice rather
+-- than a preference. `olist.orders.order_approved_at` is `TIMESTAMP` -- naive, no offset -- as
+-- `stage-2/sql/001_create_olist_schema.sql` defines it, and 003's window compares naive values
+-- to each other. Ask the same question through a `timestamptz` parameter and PostgreSQL resolves
+-- the *column* side through the session zone first, so a session sitting in a zone with
+-- daylight time shifts the answer by an hour for part of the year. The live run in
+-- live run on the student's own PostgreSQL is what found it, on order
+-- `003a7f59d7e08a9c61d9e2881fe6459c` the frame's window said 175.902280 days and this file's
+-- function said 175.860613: exactly 0.041667 of a day, one hour, which is the size of the shift
+-- between the two offsets those two instants carry in that zone. The window cannot produce that number, because a
+-- window over a naive column never leaves the naive domain: it is the parameter's type, not the
+-- arithmetic, that decides.
+--
+-- The narrow reading is that the parameter is only a cutoff instant, so the safe rule is: nothing
+-- in this directory converts. `001`'s bookkeeping keeps `TIMESTAMPTZ` (`build_run.built_at`,
+-- `external_municipio.fetched_at`), because those columns record when *we* wrote a row and there
+-- is no naive counterpart to be inconsistent with. What must stay naive is every comparison
+-- against an `olist` timestamp.
 
 -- How many orders this buyer had already had, strictly before the decision instant.
 --
@@ -107,7 +126,7 @@ AS $$
       AND o.order_approved_at < p_at;
 $$;
 
-COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamptz) IS
+COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamp) IS
     'the as-of specification behind v_feature_frame.prior_orders_by_customer, on '
     'customer_unique_id; slow on purpose, and compared to the window implementation by '
     'tests/test_capstone_sql_guards.py';

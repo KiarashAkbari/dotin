@@ -4,8 +4,9 @@
 Every check in ``tests/test_capstone_sql_guards.py`` that runs without a database is a claim
 about text: "no star expansion", "every object is replaceable", "no feature reads a column the
 audit does not allow". A green run proves such a claim only if the check would have fired on a
-file that breaks it, and nobody knows that without trying. So this script writes three
-forbidden files, runs the matching test, and restores the bytes.
+file that breaks it, and nobody knows that without trying. So this script writes the forbidden
+variants listed in ``MUTATIONS``, runs the matching test for each, and restores the bytes -- the
+count is printed from the list, so this paragraph cannot go out of date.
 
 It mutates the real ``stage-4/sql`` directory because that is what the tests read -- there is
 no "load from here" switch to pull, and adding one would be a second, untested path. The
@@ -31,6 +32,7 @@ STAGE = Path(__file__).resolve().parents[2]
 SQL = STAGE / "sql"
 FRAME_FILE = SQL / "003_feature_views.sql"
 SCHEMA_FILE = SQL / "001_capstone_schema.sql"
+FUNCTIONS_FILE = SQL / "004_as_of_functions.sql"
 
 #: (what is broken, which file, the old text, the new text, which test must notice)
 MUTATIONS = [
@@ -63,8 +65,15 @@ MUTATIONS = [
         "CREATE TABLE capstone.build_run (",
         "tests.test_capstone_sql_guards.StaticSqlContractTests.test_every_object_is_replaceable",
     ),
+    (
+        "a comment naming a signature nothing creates",
+        FUNCTIONS_FILE,
+        "COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamp) IS",
+        "COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamptz) IS",
+        "tests.test_capstone_sql_guards.StaticSqlContractTests"
+        ".test_a_comment_never_names_a_signature_the_directory_does_not_create",
+    ),
 ]
-
 
 def run_test(dotted: str) -> tuple[int, str]:
     proc = subprocess.run(
@@ -82,12 +91,12 @@ def main() -> int:
     original = {}
     failures = 0
     try:
-        for file in (FRAME_FILE, SCHEMA_FILE):
+        for file in (FRAME_FILE, SCHEMA_FILE, FUNCTIONS_FILE):
             original[file] = file.read_text(encoding="utf-8")
             shutil.copy2(file, backup / file.name)
 
         print("=" * 72)
-        print("RED: three forbidden files, each should break exactly its own guard")
+        print(f"RED: {len(MUTATIONS)} forbidden files, each should break exactly its own guard")
         print("=" * 72)
         for what, file, old, new, dotted in MUTATIONS:
             dotted_list = dotted if isinstance(dotted, list) else [dotted]
@@ -141,7 +150,8 @@ def main() -> int:
             file.write_text(text, encoding="utf-8")
         shutil.rmtree(backup, ignore_errors=True)
 
-    print(f"\nverdict: {'guards fired on all three; suite green' if not failures else f'{failures} problem(s)'}")
+    verdict = f"all {len(MUTATIONS)} guards fired; suite green" if not failures else f"{failures} problem(s)"
+    print(f"\nverdict: {verdict}")
     return 0 if failures == 0 else 1
 
 

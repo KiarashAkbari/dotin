@@ -169,6 +169,101 @@ AUDIT_CSV = STAGE / "docs" / "evidence" / "column_audit.csv"
 NON_FEATURE_VIEWS = ("v_order_label", "v_d1_excluded_orders", "v_d2_unlabelled_orders")
 
 
+#: how a ``COMMENT ON FUNCTION`` can spell a type the ``CREATE OR REPLACE FUNCTION`` spelled
+#: differently, and mean the same function: these are the catalog's own names for the short forms
+#: the shipped files use. Anything outside this table is treated as a different type, on purpose --
+#: a guard that resolves every difference away stops being a guard.
+_TYPE_SYNONYMS = {
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamptz",
+    "double precision": "float8",
+    "character varying": "varchar",
+}
+
+
+def split_arguments(text: str) -> list[str]:
+    """One parameter list, split on the commas that are not inside parentheses.
+
+    ``p_price numeric(10, 2)`` has a comma that belongs to the type, and counting it as a second
+    parameter would make the guard report a signature that never was.
+    """
+    parts, depth, current = [], 0, ""
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+            continue
+        current += char
+    parts.append(current)
+    return [part for part in parts if part.strip()]
+
+
+def _inside_parens(text: str, open_index: int) -> str:
+    """The balanced group that starts at this ``(`` -- the argument list of one statement."""
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_index + 1 : index]
+    raise AssertionError("unbalanced parentheses in a function signature")
+
+
+def _param_types(raw: str) -> tuple[str, ...]:
+    """The types of a parameter list, in order, with names and modes dropped.
+
+    ``IN``/``OUT``/``VARIADIC`` are not types and a parameter's own name comes before its type, so
+    a parameter of the shape ``p_at timestamp`` resolves to one word. An empty list is a real
+    answer, not a parse failure: ``capstone.assert_no_source_writes()`` takes nothing.
+    """
+    types: list[str] = []
+    for part in split_arguments(raw):
+        tokens = part.replace("\n", " ").split()
+        while tokens and tokens[0].upper() in {"IN", "OUT", "INOUT", "VARIADIC"}:
+            tokens.pop(0)
+        if len(tokens) > 1:
+            tokens.pop(0)
+        spelled = " ".join(tokens).lower().replace("pg_catalog.", "").strip()
+        types.append(_TYPE_SYNONYMS.get(spelled, spelled))
+    return tuple(types)
+
+
+def created_signatures(sql: str) -> dict[str, set[tuple[str, ...]]]:
+    """Every ``CREATE OR REPLACE FUNCTION`` header here, as ``{name: {parameter types}}``."""
+    found: dict[str, set[tuple[str, ...]]] = {}
+    pattern = re.compile(
+        r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+([A-Za-z_][\w.]*)\s*\(", re.IGNORECASE
+    )
+    for match in pattern.finditer(sql):
+        name = match.group(1).lower()
+        types = _param_types(_inside_parens(sql, match.end() - 1))
+        found.setdefault(name, set()).add(types)
+    return found
+
+
+def commented_signatures(sql: str) -> list[tuple[str, tuple[str, ...], int]]:
+    """Every ``COMMENT ON FUNCTION`` here, with its line number for the failure message."""
+    found: list[tuple[str, tuple[str, ...], int]] = []
+    pattern = re.compile(
+        r"COMMENT\s+ON\s+FUNCTION\s+([A-Za-z_][\w.]*)\s*\(", re.IGNORECASE
+    )
+    for match in pattern.finditer(sql):
+        inner = _inside_parens(sql, match.end() - 1)
+        rest = sql[match.end() + len(inner) + 1 :]
+        if not re.match(r"\s*IS\b", rest, re.IGNORECASE):
+            # a ``COMMENT ON FUNCTION`` inside prose, or a multi-statement line that is not this one
+            continue
+        line = sql[: match.start()].count("\n") + 1
+        found.append((match.group(1).lower(), _param_types(inner), line))
+    return found
+
+
 def blocks_of(sql: str) -> list[tuple[str, str]]:
     """``[(object name, body)]``, split on ``CREATE``.
 
@@ -276,6 +371,45 @@ class StaticSqlContractTests(unittest.TestCase):
             for path in sql_files()
             for offence in unreplaceable_creates(body_of(path.read_text(encoding="utf-8")))
         ]
+        self.assertEqual(offenders, [])
+
+    def test_a_comment_never_names_a_signature_the_directory_does_not_create(self) -> None:
+        """A ``COMMENT ON FUNCTION`` is resolved by exact signature, so a stale one is a defect.
+
+        The mirror's ``fix/stage4-live-guards`` commit of 2026-11-18 is why this exists: it made all
+        four as-of parameters ``p_at timestamp`` and left
+        ``COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamptz)`` under them.
+        On a database that had never held the old signature, that statement aborts the migration. On
+        one that had, it succeeds -- and comments a stale overload the ``CREATE OR REPLACE`` could
+        not replace, because a changed argument type creates a second function rather than editing
+        the first. The second outcome is the dangerous one: a green apply, a comment that looks
+        right, and a frame whose call resolves by argument types to whichever overload the
+        planner prefers.
+        """
+        for path in sql_files():
+            spoken = len(
+                re.findall(r"COMMENT\s+ON\s+FUNCTION", body_of(path.read_text(encoding="utf-8")))
+            )
+            seen = len(commented_signatures(body_of(path.read_text(encoding="utf-8"))))
+            self.assertEqual(
+                spoken,
+                seen,
+                f"{path.name}: {spoken} COMMENT ON FUNCTION statements in the text, "
+                f"{seen} parsed -- a guard that reads none would pass for the wrong reason",
+            )
+
+        created: dict[str, set[tuple[str, ...]]] = {}
+        for path in sql_files():
+            body = body_of(path.read_text(encoding="utf-8"))
+            for name, options in created_signatures(body).items():
+                created.setdefault(name, set()).update(options)
+        offenders: list[str] = []
+        for path in sql_files():
+            body = body_of(path.read_text(encoding="utf-8"))
+            for name, types, line in commented_signatures(body):
+                if types not in created.get(name, set()):
+                    spelled = ", ".join(types)
+                    offenders.append(f"{path.name}:{line}: nothing creates {name}({spelled})")
         self.assertEqual(offenders, [])
 
     def test_no_star_expansion_and_no_write_against_the_source_schema(self):
