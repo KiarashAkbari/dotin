@@ -628,16 +628,24 @@ class LiveSqlContractTests(unittest.TestCase):
     def test_the_frame_reads_no_column_the_audit_forbids(self):
         columns = sorted({f"{table}.{column}" for table, column in self.frame_source_columns()})
         self.assertGreater(len(columns), 0, msg="the catalog reported no dependencies at all")
-        # ``require_allowed`` raises on any refusal; psycopg2 turning that into an error is
-        # the failure this test exists to produce.
+        # ``require_allowed`` raises on any refusal, and the driver the URI names turns that into a
+        # python exception -- whichever driver that is. This test only asserts that the query runs or
+        # raises, so it has no opinion about the class; the negative control below does, and it asks
+        # the resolver instead of guessing.
         self.query("SELECT capstone.require_allowed(%s::text[])", (columns,))
 
     def test_the_guard_below_bites_on_a_forbidden_column(self):
         """The negative control for the test above, on the same database."""
-        from psycopg2 import errors as pg_errors  # type: ignore[attr-defined]
+        # the exception class comes from the URI, not from an import here:
+        # ``capstone.features.raise_exception_type`` records why a hard-coded ``psycopg2`` import
+        # made this test error on a psycopg-3 connection -- the guard's own exception escaped
+        # ``assertRaises``, which looks like a broken test and leaves the leak unproved
+        from capstone.features import raise_exception_type
+
+        raise_error = raise_exception_type(database_uri())
 
         self.query("SELECT capstone.require_allowed(ARRAY['orders.order_approved_at'])")
-        with self.assertRaises(pg_errors.RaiseException):
+        with self.assertRaises(raise_error):
             self.query("SELECT capstone.require_allowed(ARRAY['order_reviews.review_score'])")
 
     def test_the_frame_meets_the_minimum_size_rules(self):

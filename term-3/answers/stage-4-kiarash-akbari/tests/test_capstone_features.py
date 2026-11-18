@@ -454,5 +454,91 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(probe.autocommit)
 
 
+class DriverErrorTypeTests(unittest.TestCase):
+    """Which exception class a guard test should expect, decided by the URI and nothing else.
+
+    A live test that wants to assert on a refused ``RAISE EXCEPTION`` needs the driver's class for
+    it, and the obvious code -- try ``psycopg``, else ``psycopg2`` -- reads the interpreter. On a
+    machine with both installed, the connection follows ``CAPSTONE_DATABASE_URI`` and the assertion
+    follows whichever module imported first, so the guard's exception escapes ``assertRaises`` and
+    the failure looks like a broken test. Reported from the student's database after the stale
+    ``timestamptz`` overloads were dropped: one red test, and it was not the leak that was wrong.
+    """
+
+    @staticmethod
+    def _driver(name: str, *, with_errors: bool = True):
+        """A stand-in for a driver module: one exception class, no database behind it."""
+        from types import ModuleType, SimpleNamespace
+
+        module = ModuleType(name)
+        if with_errors:
+            module.errors = SimpleNamespace(RaiseException=type(f"{name}.RaiseException", (Exception,), {}))
+        module.ProgrammingError = type(f"{name}.ProgrammingError", (Exception,), {})
+        return module
+
+    def resolve_with(self, **modules):
+        """Point :func:`capstone.features._driver_and_dsn` at fakes instead of an import."""
+        from unittest import mock
+
+        return mock.patch.object(
+            features.importlib, "import_module", side_effect=lambda name: modules[name]
+        )
+
+    def test_the_uri_picks_the_class_not_the_interpreter(self):
+        """Two URIs, two drivers, two different classes -- from the same installed interpreter."""
+        psycopg3 = self._driver("psycopg")
+        psycopg2 = self._driver("psycopg2")
+        modules = {"psycopg": psycopg3, "psycopg2": psycopg2}
+        with self.resolve_with(**modules):
+            got_new = features.raise_exception_type("postgresql+psycopg://u@h/db")
+            got_old = features.raise_exception_type("postgresql+psycopg2://u@h/db")
+            bare = features.raise_exception_type("postgresql://u@h/db")
+        self.assertIs(got_new, psycopg3.errors.RaiseException)
+        self.assertIs(got_old, psycopg2.errors.RaiseException)
+        self.assertIsNot(got_new, got_old, msg="the two drivers share a class, so one resolves")
+        self.assertIs(bare, got_new, msg="a bare URI follows the lock, as `driver_for` already says")
+
+    def test_a_driver_without_an_errors_module_falls_back(self):
+        """``psycopg2.errors`` is a 2.8 thing; older releases raise ``ProgrammingError``."""
+        ancient = self._driver("psycopg2", with_errors=False)
+        with self.resolve_with(psycopg2=ancient):
+            self.assertIs(
+                features.raise_exception_type("postgresql+psycopg2://u@h/db"), ancient.ProgrammingError
+            )
+
+    def test_the_refusal_when_no_driver_is_installed_names_the_uri(self):
+        """The same error a connection would raise, so a guard fails for the reason it really has."""
+        from unittest import mock
+
+        from capstone.errors import ConfigError
+
+        def missing(_name):
+            raise ModuleNotFoundError("No module named 'psycopg'")
+
+        with mock.patch.object(features.importlib, "import_module", side_effect=missing):
+            with self.assertRaises(ConfigError) as caught:
+                features.raise_exception_type("postgresql+psycopg://u@h/db")
+        self.assertIn("postgresql+psycopg2://", str(caught.exception))
+
+    def test_the_guard_file_imports_no_driver_of_its_own(self):
+        """The regression check, offline: the live tests may not go back to guessing.
+
+        Prose may name a driver -- the docstrings explaining this very bug have to -- so only import
+        statements are read. This is the half that can run without a database, which is the half that
+        keeps the other half honest.
+        """
+        import re
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parent / "test_capstone_sql_guards.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            [],
+            re.findall(r"^\s*(?:from|import)\s+psycopg\w*", source, flags=re.MULTILINE),
+            msg="resolve it through `capstone.features.raise_exception_type` instead",
+        )
+        self.assertIn("raise_exception_type", source)
+
 if __name__ == "__main__":
     unittest.main()

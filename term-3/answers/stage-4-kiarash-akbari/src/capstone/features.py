@@ -234,17 +234,17 @@ def driver_for(uri: str) -> tuple[str, str]:
     return module, f"postgresql://{rest}"
 
 
-def connect(uri: str, *, autocommit: bool = False, purpose: str = "read and write the feature layer") -> Any:
-    """Open the URI with the driver the URI names; imported late so the guards run without one.
+def _driver_and_dsn(uri: str, *, purpose: str) -> tuple[Any, str]:
+    """``(the module the URI names, the dsn that module accepts)``, resolved in one place.
 
-    ``autocommit`` is for the live test suite, which issues DDL and cannot wrap a whole migration in a
-    transaction it never rolls back. Production paths commit explicitly -- ``features.build`` commits
-    after the DDL, ``audit.load_from_csv`` after the mirror -- because a partially applied SQL
-    directory is the state this stage refuses to leave behind.
+    The pair is the reason this is a function: a caller that picks the module itself and forwards the
+    config value verbatim hands the driver a ``postgresql+psycopg://`` URI and gets an error about
+    schemes. Importing late is the other half -- the offline suite has neither driver installed, and
+    a module-level import would turn "no database here" into "this file does not import".
     """
     module_name, dsn = driver_for(uri)
     try:
-        module = importlib.import_module(module_name)
+        return importlib.import_module(module_name), dsn
     except ModuleNotFoundError as exc:  # pragma: no cover - depends on the interpreter
         raise ConfigError(
             f"capstone needs to {purpose} over {module_name} and the module is not installed"
@@ -253,10 +253,45 @@ def connect(uri: str, *, autocommit: bool = False, purpose: str = "read and writ
             " e.g. postgresql+psycopg2://…",
             context={"module": module_name, "uri_scheme": uri.split("://", 1)[0]},
         ) from exc
+
+
+def connect(uri: str, *, autocommit: bool = False, purpose: str = "read and write the feature layer") -> Any:
+    """Open the URI with the driver the URI names; imported late so the guards run without one.
+
+    ``autocommit`` is for the live test suite, which issues DDL and cannot wrap a whole migration in a
+    transaction it never rolls back. Production paths commit explicitly -- ``features.build`` commits
+    after the DDL, ``audit.load_from_csv`` after the mirror -- because a partially applied SQL
+    directory is the state this stage refuses to leave behind.
+    """
+    module, dsn = _driver_and_dsn(uri, purpose=purpose)
     connection = module.connect(dsn)
     if autocommit:
         connection.autocommit = True
     return connection
+
+
+def raise_exception_type(uri: str, *, purpose: str = "run the live SQL guards") -> type:
+    """The class *this* URI's driver raises for a PL/pgSQL ``RAISE EXCEPTION``.
+
+    A guard test that wants to assert on a refusal used to write ``from psycopg2 import errors`` at
+    the top of the test. That asks the interpreter which driver is installed, while the connection
+    asks the URI which driver to open, and those are different questions: with ``postgresql+psycopg``
+    in ``CAPSTONE_DATABASE_URI`` the guard raised ``psycopg.errors.RaiseException``, ``assertRaises``
+    had been handed ``psycopg2``'s, and the escaped exception read as a broken test -- while quietly
+    un-proving the leak the test exists to catch. Deriving the class from the same resolution as the
+    connection makes it one decision, the one that is actually open.
+
+    ``psycopg2`` grew its ``errors`` module in 2.8; older releases surface a ``RAISE`` as
+    ``ProgrammingError``, which is what the fallback returns -- the parent, so an assertion still
+    recognises what it catches instead of inventing a class.
+    """
+    module, _dsn = _driver_and_dsn(uri, purpose=purpose)
+    errors = getattr(module, "errors", None)
+    candidate = getattr(errors, "RaiseException", None) if errors is not None else None
+    if isinstance(candidate, type) and issubclass(candidate, BaseException):
+        return candidate
+    fallback = getattr(module, "ProgrammingError", None)
+    return fallback if isinstance(fallback, type) else BaseException
 
 
 def _connect(uri: str, *, purpose: str = "read and write the feature layer") -> Any:

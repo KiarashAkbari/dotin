@@ -33,6 +33,8 @@ SQL = STAGE / "sql"
 FRAME_FILE = SQL / "003_feature_views.sql"
 SCHEMA_FILE = SQL / "001_capstone_schema.sql"
 FUNCTIONS_FILE = SQL / "004_as_of_functions.sql"
+#: the live guard file, snapshotted too: one mutation there is a mutation of the tests themselves
+LIVE_TESTS = STAGE / "tests" / "test_capstone_sql_guards.py"
 
 #: (what is broken, which file, the old text, the new text, which test must notice)
 MUTATIONS = [
@@ -73,6 +75,16 @@ MUTATIONS = [
         "tests.test_capstone_sql_guards.StaticSqlContractTests"
         ".test_a_comment_never_names_a_signature_the_directory_does_not_create",
     ),
+    (
+        "a live guard that guesses which driver is installed",
+        LIVE_TESTS,
+        "        from capstone.features import raise_exception_type\n\n"
+        "        raise_error = raise_exception_type(database_uri())\n",
+        "        from psycopg2 import errors as pg_errors\n\n"
+        "        raise_error = pg_errors.RaiseException\n",
+        "tests.test_capstone_features.DriverErrorTypeTests"
+        ".test_the_guard_file_imports_no_driver_of_its_own",
+    ),
 ]
 
 def run_test(dotted: str) -> tuple[int, str]:
@@ -91,7 +103,7 @@ def main() -> int:
     original = {}
     failures = 0
     try:
-        for file in (FRAME_FILE, SCHEMA_FILE, FUNCTIONS_FILE):
+        for file in (FRAME_FILE, SCHEMA_FILE, FUNCTIONS_FILE, LIVE_TESTS):
             original[file] = file.read_text(encoding="utf-8")
             shutil.copy2(file, backup / file.name)
 
