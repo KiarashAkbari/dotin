@@ -13,10 +13,15 @@
 -- is the smallest possible place for such a condition to live, and the largest possible
 -- audience: it can be run, grepped and read in psql without touching Python.
 
--- How many orders this customer had already had, strictly before the decision instant.
+-- How many orders this buyer had already had, strictly before the decision instant.
+--
+-- `p_customer_id` is an `olist.customers.customer_id` -- the one the frame carries -- but the
+-- match is made through `customer_unique_id`, because `customer_id` is per order. Written this
+-- way, the function is the specification of `003`'s window rather than a second opinion: same
+-- key, same exclusion, one of them in a WHERE clause where a reader can check it.
 CREATE OR REPLACE FUNCTION capstone.customer_order_volume_before(
     p_customer_id text,
-    p_at timestamp with time zone
+    p_at timestamp
 )
 RETURNS bigint
 LANGUAGE sql
@@ -25,12 +30,9 @@ PARALLEL SAFE
 AS $$
     SELECT COUNT(*)
     FROM olist.orders AS o
-    JOIN olist.customers AS previous_customer
-      ON previous_customer.customer_id = o.customer_id
-    JOIN olist.customers AS current_customer
-      ON current_customer.customer_id = p_customer_id
-     AND current_customer.customer_unique_id = previous_customer.customer_unique_id
-    WHERE TRUE
+    JOIN olist.customers AS prior_buyer ON prior_buyer.customer_id = o.customer_id
+    JOIN olist.customers AS this_buyer ON this_buyer.customer_id = p_customer_id
+    WHERE this_buyer.customer_unique_id = prior_buyer.customer_unique_id
       -- the as-of condition, in the WHERE clause rather than in a window frame
       AND o.order_approved_at IS NOT NULL
       AND o.order_approved_at < p_at;
@@ -40,21 +42,22 @@ $$;
 -- earlier order, which is reported as NULL and never as 0 (decisions.md item 7).
 CREATE OR REPLACE FUNCTION capstone.customer_days_since_prior_order(
     p_customer_id text,
-    p_at timestamp with time zone
+    p_at timestamp
 )
 RETURNS double precision
 LANGUAGE sql
 STABLE
 PARALLEL SAFE
 AS $$
-    SELECT EXTRACT(EPOCH FROM (p_at - MAX(o.order_approved_at))) / 86400.0
+    -- the cast is written out rather than left to RETURNS, so the two paths agree where the
+    -- value is produced and not on the way out: EXTRACT gives numeric, and the frame's window
+    -- column is `::float8` too (see 003). A declared return type is easy to keep while editing
+    -- the body away from it; a cast in the expression is not.
+    SELECT (EXTRACT(EPOCH FROM (p_at - MAX(o.order_approved_at))) / 86400.0)::float8
     FROM olist.orders AS o
-    JOIN olist.customers AS previous_customer
-      ON previous_customer.customer_id = o.customer_id
-    JOIN olist.customers AS current_customer
-      ON current_customer.customer_id = p_customer_id
-     AND current_customer.customer_unique_id = previous_customer.customer_unique_id
-    WHERE TRUE
+    JOIN olist.customers AS prior_buyer ON prior_buyer.customer_id = o.customer_id
+    JOIN olist.customers AS this_buyer ON this_buyer.customer_id = p_customer_id
+    WHERE this_buyer.customer_unique_id = prior_buyer.customer_unique_id
       AND o.order_approved_at IS NOT NULL
       AND o.order_approved_at < p_at;
 $$;
@@ -66,7 +69,7 @@ $$;
 -- forbidden by the audit, and this function cannot see one even if edited to try.
 CREATE OR REPLACE FUNCTION capstone.seller_order_volume_before(
     p_seller_id text,
-    p_at timestamp with time zone
+    p_at timestamp
 )
 RETURNS bigint
 LANGUAGE sql
@@ -87,14 +90,16 @@ $$;
 -- by construction and needs no cap.
 CREATE OR REPLACE FUNCTION capstone.seller_mean_price_before(
     p_seller_id text,
-    p_at timestamp with time zone
+    p_at timestamp
 )
 RETURNS double precision
 LANGUAGE sql
 STABLE
 PARALLEL SAFE
 AS $$
-    SELECT AVG(i.price)
+    -- ::numeric inside and ::float8 outside: the cast on the way in is what makes the sum
+    -- reproducible, the cast on the way out is what makes the type match the frame.
+    SELECT AVG(i.price::numeric)::float8
     FROM olist.order_items AS i
     JOIN olist.orders AS o ON o.order_id = i.order_id
     WHERE i.seller_id = p_seller_id
@@ -103,5 +108,6 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamptz) IS
-    'the as-of specification behind v_feature_frame.prior_orders_by_customer; slow on '
-    'purpose, and compared to the window implementation by tests/test_capstone_sql_guards.py';
+    'the as-of specification behind v_feature_frame.prior_orders_by_customer, on '
+    'customer_unique_id; slow on purpose, and compared to the window implementation by '
+    'tests/test_capstone_sql_guards.py';

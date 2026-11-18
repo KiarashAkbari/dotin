@@ -14,6 +14,13 @@
 --
 -- If the lift is not reproducible locally, the whole file is dropped (item 8's exit
 -- clause) and nothing else in the stage has to be rewritten.
+--
+-- Applying this file writes no rows: it creates one table and four views. Re-running the
+-- directory can therefore never add a row -- which matters, because the idempotency guard in
+-- `tests/test_capstone_sql_guards.py` compares the frame before and after a second apply, and
+-- a migration that inserts is indistinguishable from a frame whose values drifted. Any load of
+-- external data goes through the two functions at the bottom of this file instead, so the
+-- choice between "refresh" and "upsert" is made once, here, and not in a notebook cell.
 
 CREATE TABLE IF NOT EXISTS capstone.external_municipio (
     ibge_code   CHAR(7)     NOT NULL,
@@ -102,3 +109,49 @@ LEFT JOIN capstone.v_external_municipio_pivot AS x
 WHERE x.city_state IS NULL
 GROUP BY 1, 2
 ORDER BY orders DESC, city;
+
+-- The only two legal ways to change `capstone.external_municipio`, both idempotent.
+--
+-- `upsert` is keyed on the primary key the table already has, so running the same fetch twice
+-- rewrites the same row instead of adding a second one. `refresh` is for a full reload: it
+-- deletes exactly the rows of one source and nothing else, which keeps a rejected hypothesis
+-- (item 8's exit clause) from wiping a table a later experiment may have filled with something
+-- else. A loader that invents its own `INSERT` bypasses both, and the re-apply test is what
+-- catches it.
+CREATE OR REPLACE FUNCTION capstone.upsert_external_municipio(
+    p_ibge_code text,
+    p_city_state text,
+    p_indicator text,
+    p_period text,
+    p_value numeric,
+    p_source text
+)
+RETURNS void
+LANGUAGE sql
+AS $$
+    INSERT INTO capstone.external_municipio AS e
+        (ibge_code, city_state, indicator, period, value, source, fetched_at)
+    VALUES
+        (p_ibge_code, p_city_state, p_indicator, p_period, p_value, p_source, now())
+    ON CONFLICT (ibge_code, indicator, period) DO UPDATE
+        SET city_state = EXCLUDED.city_state,
+            value      = EXCLUDED.value,
+            source     = EXCLUDED.source,
+            fetched_at = EXCLUDED.fetched_at;
+$$;
+
+CREATE OR REPLACE FUNCTION capstone.refresh_external_municipio(p_source text)
+RETURNS bigint
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    removed bigint;
+BEGIN
+    IF p_source IS NULL OR length(btrim(p_source)) = 0 THEN
+        RAISE EXCEPTION 'refresh_external_municipio needs the source it is replacing; an empty name would delete every row';
+    END IF;
+    DELETE FROM capstone.external_municipio AS e WHERE e.source = p_source;
+    GET DIAGNOSTICS removed = ROW_COUNT;
+    RETURN removed;
+END;
+$$;

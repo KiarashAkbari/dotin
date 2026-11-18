@@ -23,7 +23,12 @@
 
 -- The as-of history, in one pass over approved orders. D1 (`drop_before_training`) is
 -- applied here, once, so no aggregate downstream can silently meet an unanchored row.
--- customer_id identifies an order customer; customer_unique_id links repeat orders.
+--
+-- The partition key is `customer_unique_id`, not `customer_id`. `olist.customers.customer_id`
+-- is one row *per order* (99,441 rows, 99,441 distinct), so a history built on it is always
+-- empty -- the feature would have been a constant zero, silently. `customer_unique_id` is the
+-- returning-buyer key, which is what "prior orders by this customer" claims to measure. Found
+-- by the live run reported in `docs/evidence/live-guards-dotin-run.txt`.
 CREATE OR REPLACE VIEW capstone.v_customer_order_history AS
 SELECT
     o.order_id,
@@ -38,7 +43,11 @@ SELECT
         ORDER BY o.order_approved_at
         RANGE BETWEEN UNBOUNDED PRECEDING AND INTERVAL '1 microsecond' PRECEDING
     ) AS prior_orders_by_customer,
-    EXTRACT(
+    -- ::float8 on every duration in this directory. EXTRACT(EPOCH FROM interval) returns
+    -- numeric on PostgreSQL 14+, and a numeric column beside a double-precision one is how
+    -- the two implementations of the same number stop comparing equal in Python: the same
+    -- value arrives as Decimal('0.000012') from one path and 1.2e-05 from the other.
+    (EXTRACT(
         EPOCH FROM (
             o.order_approved_at
             - MAX(o.order_approved_at) OVER (
@@ -47,7 +56,7 @@ SELECT
                   RANGE BETWEEN UNBOUNDED PRECEDING AND INTERVAL '1 microsecond' PRECEDING
               )
         )
-    ) / 86400.0 AS days_since_prior_order
+    ) / 86400.0)::float8 AS days_since_prior_order
 FROM olist.orders AS o
 JOIN olist.customers AS c ON c.customer_id = o.customer_id
 WHERE o.order_approved_at IS NOT NULL;
@@ -55,11 +64,18 @@ WHERE o.order_approved_at IS NOT NULL;
 -- Centroid per ZIP prefix. The source carries many points per prefix (738,332 rows over
 -- 19,015 prefixes), so "the" coordinate of a prefix is an aggregate; averaging is written
 -- here so it is a stated choice and not an accident of a join fanning out.
+-- Averaging `float8` is not reproducible run to run: the partial sums of a parallel or
+-- hash aggregate are added back in an order the planner chooses, and the last bit of a float
+-- depends on it. The frame's only float8 aggregate is this centroid, and a last-bit change
+-- here rewrites the text of `customer_seller_span_sq` in every row that touches it -- which is
+-- what made the idempotency digest move while no row had actually changed. Aggregating as
+-- `numeric` is exact, so order stops mattering, and rounding to six decimals (about 0.11 m,
+-- far below the error a ZIP-prefix centroid already has) makes the rendered value stable.
 CREATE OR REPLACE VIEW capstone.v_zip_centroid AS
 SELECT
     g.geolocation_zip_code_prefix,
-    AVG(g.geolocation_lat) AS lat,
-    AVG(g.geolocation_lng) AS lng,
+    ROUND(AVG(g.geolocation_lat::numeric), 6) AS lat,
+    ROUND(AVG(g.geolocation_lng::numeric), 6) AS lng,
     COUNT(*) AS rows_behind_centroid
 FROM olist.geolocation AS g
 GROUP BY g.geolocation_zip_code_prefix;
@@ -67,6 +83,10 @@ GROUP BY g.geolocation_zip_code_prefix;
 -- Item aggregates at order grain. `primary_*` is the single most expensive item row of the
 -- order, ties broken by order_item_id: one deterministic row, so the seller and product
 -- features of an order cannot change between two runs of the same data.
+-- The rollup is grouped by order, and every value in it is set when the order is placed or
+-- approved -- `shipping_limit_days` measures the promise against the anchor, never against
+-- delivery. `first_shipping_limit_date` is the MIN over the order's items, so a multi-item
+-- order is held to its tightest promise rather than its loosest.
 CREATE OR REPLACE VIEW capstone.v_order_item_rollup AS
 WITH agg AS (
     SELECT
@@ -101,7 +121,7 @@ SELECT
     agg.freight_share,
     agg.n_sellers,
     agg.n_products,
-    EXTRACT(EPOCH FROM (agg.first_shipping_limit_date - a.order_approved_at)) / 86400.0
+    (EXTRACT(EPOCH FROM (agg.first_shipping_limit_date - a.order_approved_at)) / 86400.0)::float8
         AS shipping_limit_days,
     primary_row.primary_seller_id,
     primary_row.primary_product_id
@@ -149,8 +169,8 @@ SELECT
     i.shipping_limit_days,
     COALESCE(i.n_sellers, 0) AS n_sellers,
     COALESCE(i.n_products, 0) AS n_products,
-    EXTRACT(EPOCH FROM (o.order_estimated_delivery_date - o.order_purchase_timestamp))
-        / 86400.0 AS promise_days,
+    (EXTRACT(EPOCH FROM (o.order_estimated_delivery_date - o.order_purchase_timestamp))
+        / 86400.0)::float8 AS promise_days,
     EXTRACT(DAY FROM o.order_approved_at)::int AS approval_day_of_month,
     EXTRACT(HOUR FROM o.order_approved_at)::int AS approval_hour,
 
@@ -165,8 +185,8 @@ SELECT
     -- where it goes, and who sends it
     c.customer_state,
     (c.customer_zip_code_prefix::int / 1000) AS customer_zip_region,
-    ((cust_geo.lat - seller_geo.lat) * (cust_geo.lat - seller_geo.lat)
-        + (cust_geo.lng - seller_geo.lng) * (cust_geo.lng - seller_geo.lng))
+    (((cust_geo.lat - seller_geo.lat) * (cust_geo.lat - seller_geo.lat)
+        + (cust_geo.lng - seller_geo.lng) * (cust_geo.lng - seller_geo.lng))::float8)
         AS customer_seller_span_sq,
     s.seller_state,
 

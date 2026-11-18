@@ -83,11 +83,19 @@ BEGIN
     SELECT string_agg(offence, '; ' ORDER BY offence)
       INTO offenders
       FROM (
-        SELECT c AS offence
-          FROM unnest(p_columns) AS c
+        -- the audit is keyed on (table, column); a caller may hand us 'olist.orders.x' as
+        -- easily as 'orders.x', and the version that silently finds no audit row is the
+        -- dangerous one -- so the schema prefix is dropped here rather than missed there
+        SELECT ref.raw AS offence
+          FROM (
+            SELECT c AS raw,
+                   (string_to_array(c, '.'))[
+                       array_length(string_to_array(c, '.'), 1) - 1] AS tbl,
+                   (string_to_array(c, '.'))[array_length(string_to_array(c, '.'), 1)] AS col
+              FROM unnest(p_columns) AS c
+          ) AS ref
           LEFT JOIN capstone.column_audit AS a
-            ON a."table" = split_part(c, '.', 1)
-           AND a."column" = split_part(c, '.', 2)
+            ON a."table" = ref.tbl AND a."column" = ref.col
          WHERE a."table" IS NULL
             OR a.verdict <> 'allowed'
             OR NOT a.at_approval
@@ -107,5 +115,12 @@ LANGUAGE sql
 STABLE
 PARALLEL SAFE
 AS $$
-    SELECT capstone.audit_is_allowed(split_part(p_column, '.', 1), split_part(p_column, '.', 2));
+    -- last two dotted parts win, so 'olist.order_reviews.review_score' and
+    -- 'order_reviews.review_score' ask the same question; a one-part name has no column to
+    -- look up and is refused, which is the safe direction
+    SELECT capstone.audit_is_allowed(
+        (string_to_array(p_column, '.'))[
+            array_length(string_to_array(p_column, '.'), 1) - 1],
+        (string_to_array(p_column, '.'))[array_length(string_to_array(p_column, '.'), 1)]
+    );
 $$;
