@@ -22,6 +22,7 @@ from .audit import (
     columns_from_ddl,
     coverage,
     load_audit,
+    load_from_csv,
     summarise,
     template_rows,
 )
@@ -111,8 +112,27 @@ def command_doctor(args: argparse.Namespace) -> int:
 
 
 def command_audit(args: argparse.Namespace) -> int:
-    """Validate the column audit, and say how much of the schema it covers."""
+    """Validate the column audit, say how much of the schema it covers, and mirror it into the DB.
+
+    ``--load`` is the subcommand the chain depends on: ``sql/001`` creates ``capstone.column_audit``,
+    ``sql/002``'s guard reads it and refuses everything when it is empty, and nothing else in this
+    stage writes it. Without this the one-command chain dies at its third step on a missing
+    prerequisite, which is a setup error a reviewer should never have to diagnose from a leak message.
+    """
     config = _load(args, decided=False)
+    if args.load:
+        report = load_from_csv(config, csv_path=Path(args.audit) if args.audit else None)
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        else:
+            print(
+                f"{report['table']}: {report['rows']} rows from {Path(report['csv']).name}"
+                f" -- {report['inserted']} inserted, {report['unchanged']} unchanged,"
+                f" {report['rewritten']} rewritten, {report['removed']} removed"
+            )
+            for key in report["changed_keys"]:
+                print(f"  changed: {key}")
+        return ExitCode.OK
     if args.print_header:
         print(",".join(AUDIT_HEADER))
         return ExitCode.OK
@@ -183,6 +203,67 @@ def command_chain(args: argparse.Namespace) -> int:
     return ExitCode.OK
 
 
+def _run_features(config: CapstoneConfig) -> dict:
+    """The one step whose inputs are self-contained: the config, and the audit beside it.
+
+    The audit is handed over as a cross-check, not as the permission mechanism -- ``build`` asks
+    the database for the frame's real column set and refuses there. The reading of the file moved
+    into ``features.run``, which is what ``capstone.chain.run_step`` calls, so this command and
+    the runner ask one question of one file instead of two.
+    """
+    from .features import run  # late: a step the interpreter may not be able to run
+
+    return run(config)
+
+
+def _run_load_audit(config: CapstoneConfig) -> dict:
+    """The audit mirror as a chain step, so a fresh database is not a mystery at step three.
+
+    Deliberately not folded into ``features``: the frame's guard treats the table as settled truth,
+    and a layer that quietly repopulates the thing that decides its own permissions is how an audit
+    stops being an audit. Separate step, separate timing line, separate exit code.
+    """
+    from .audit import load_from_csv  # late, for the same reason as features.build
+
+    return load_from_csv(config)
+
+
+#: step name -> how the CLI runs it. Absent means "implemented, but the state it needs has no
+#: carrier yet", which is a phase-6 decision rather than something to guess at in a dispatcher.
+STEP_ADAPTERS = {"load-audit": _run_load_audit, "features": _run_features}
+
+
+def command_step(args: argparse.Namespace) -> int:
+    """Run one layer of the chain from the command line, and print what it measured.
+
+    Two front-ends, one implementation: ``scripts/run_chain.py`` walks the chain in-process through
+    ``capstone.chain.run_step``, and this command is what a person types. Both go through
+    ``STEP_ADAPTERS``, so a step cannot be runnable from the shell and broken from the runner, or
+    the other way round. Readiness comes from ``require_ready``, so a placeholder answers with the
+    roadmap phase and the checklist items it belongs to instead of an ``AttributeError``.
+
+    One asymmetry, deliberate: this command loads the *decided* config, while ``audit --load`` gets
+    by without the four student decisions. A mirror load is safe either way, but a chain step is
+    part of a run that cannot finish without them -- and a step that accepted less than its runner
+    would let the same work report two different readiness states.
+    """
+    from .chain import require_ready
+
+    config = _load(args, decided=True)
+    step = require_ready(args.step)
+    adapter = STEP_ADAPTERS.get(step.name)
+    if adapter is None:
+        raise ConfigError(
+            f"step {step.name!r} exists but has no command adapter: its inputs are not "
+            "self-contained (model needs the frame, capacity-list needs the scores the model "
+            "produced), and what carries that state -- the database, the manifest, or one process "
+            "walking the whole chain -- is phase 6's decision, not a guess made here",
+            context={"step": step.name, "phase": step.phase},
+        )
+    print(json.dumps(adapter(config), ensure_ascii=False, sort_keys=True, default=str))
+    return ExitCode.OK
+
+
 def command_predict(args: argparse.Namespace) -> int:
     """Validate a fresh order file and hand it to the scoring layer."""
     config = _load(args, decided=True)
@@ -233,6 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument(
         "--template-out", help="write one unverified row per DDL column to this path"
     )
+    audit.add_argument(
+        "--load",
+        action="store_true",
+        help="mirror the CSV into capstone.column_audit through CAPSTONE_DATABASE_URI (replaces"
+        " the table, so a re-run is a no-op and a deleted CSV row disappears)",
+    )
     audit.add_argument("--json", action="store_true")
     audit.set_defaults(func=command_audit)
 
@@ -240,6 +327,24 @@ def build_parser() -> argparse.ArgumentParser:
     chain.add_argument("--dry-run", action="store_true", help="print the plan without running it")
     chain.add_argument("--json", action="store_true")
     chain.set_defaults(func=command_chain)
+
+    # one command per step this stage owns, generated from the chain itself: adding a step to
+    # CHAIN without a command would leave scripts/run_chain.py calling a name argparse rejects
+    from .chain import CHAIN
+
+    for step in CHAIN:
+        if step.owner != "capstone":
+            continue
+        name = step.name.replace("-", "_")
+        # the underscore form is what argparse names a function; the hyphenated one is what
+        # ``--dry-run`` prints and what a person copies out of the plan, so both have to parse
+        step_parser = sub.add_parser(
+            name,
+            parents=(_CONFIG_PARENT,),
+            aliases=[] if name == step.name else [step.name],
+            help=f"run the {step.name!r} step of the chain (roadmap phase {step.phase})",
+        )
+        step_parser.set_defaults(func=command_step, step=step.name)
 
     predict = sub.add_parser("predict", parents=(_CONFIG_PARENT,), help="rank a fresh order file")
     predict.add_argument("--input", required=True, help="a CSV with the orders schema")

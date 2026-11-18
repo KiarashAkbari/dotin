@@ -38,10 +38,17 @@ def run(*argv: str) -> tuple[int, str, str]:
 
 
 class ChainPlanTest(unittest.TestCase):
-    def test_the_plan_is_the_five_steps_the_brief_describes(self) -> None:
+    def test_the_plan_is_the_six_steps_the_brief_describes(self) -> None:
+        """The order is the point, and so is the step that was missing from it.
+
+        ``load-audit`` sits between stage 1's load and this stage's frame: ``sql/001`` creates
+        ``capstone.column_audit``, the guard in ``sql/002`` reads that table and refuses everything
+        while it is empty, and nothing else in this stage writes it. A chain that starts from a fresh
+        database therefore died at its third command on a setup error dressed up as a leak.
+        """
         self.assertEqual(
             [step.name for step in CHAIN],
-            ["ingest", "load-database", "features", "model", "capacity-list"],
+            ["ingest", "load-database", "load-audit", "features", "model", "capacity-list"],
         )
 
     def test_the_prediction_path_is_not_part_of_the_training_chain(self) -> None:
