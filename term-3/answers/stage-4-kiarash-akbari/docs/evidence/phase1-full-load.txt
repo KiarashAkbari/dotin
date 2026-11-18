@@ -1,0 +1,119 @@
+phase1-full-load.txt -- a complete Olist database in the sandbox, reconciled to the
+phase-0 baseline table by table. This is the database every later measurement in this
+stage runs against, so its provenance is written down once, here.
+
+
+Why this file exists
+--------------------
+ROADMAP phase 2's audit, phase 4's timings and phase 5's metrics are all claims about a
+database. Until this round the sandbox had none: no Kaggle access, no CSVs, nothing
+tracked in Git (by rule). So the first job was to build one and prove it is the same
+data the student measures on -- not to trust a mirror.
+
+What was done:
+  * the nine Olist CSVs were fetched from two GitHub mirrors (no Kaggle from here);
+  * stage-2/sql/001_create_olist_schema.sql was applied verbatim to a throwaway
+    pgserver cluster (PostgreSQL 16.2), so every CHECK and foreign key is live;
+  * the rows went in through data_factory.database.load_csv -- the same typed loader
+    stage 1's load_olist calls per table, including the product_name_lenght ->
+    product_name_length aliases and the geolocation de-duplication;
+  * load order was parents-before-children, so no foreign key was ever bypassed.
+
+
+The reconciliation, which is the point of this file
+----------------------------------------------------
+All nine in-database counts equal section A.1 of docs/evidence/phase0-baseline.txt, the
+student's own load on his PostgreSQL:
+
+    product_category_name_translation  71          customers  99,441       sellers  3,095
+    products                           32,951       orders     99,441       order_items  112,650
+    payments                           103,886      order_reviews  99,224  geolocation  738,332
+
+geolocation is the strongest of the nine: the CSV carries 1,000,163 records and the
+loader removed 261,831 exact duplicates by (zip, lat, lng, city, state), leaving
+738,332 -- the same number the baseline records. A copy of the file that had been
+re-saved or trimmed would not reproduce that subtraction.
+
+
+Two refusals, both correct, and what they say about the mirrors
+---------------------------------------------------------------
+    customers ... CheckViolation ... Failing row contains (..., 9790, sao be
+    sellers   ... CheckViolation ... Failing row contains (..., 4195, sao paulo, SP)
+
+The Olist-org mirror has lost the leading zero of the ZIP prefixes in 23,995 customer
+rows and some seller rows, and ck_customers_zip / ck_sellers_zip require 5 to 8 digits.
+The versioned DDL is right to refuse: a four-character prefix is a different identifier
+than the padded one, and joining it to geolocation would silently miss rows. Those two
+tables were loaded from the second mirror, whose prefixes are padded; the other seven
+came from the first. The id sets of the two customer files are the same 99,441
+customers, so nothing was quietly swapped underneath a join.
+
+Recorded because it is a real trap: anyone who points `--reset` at a re-saved copy of the
+Kaggle files gets a load that fails on customers, not on the schema, and the error names
+a check constraint rather than the file. The fix is the file, not the DDL.
+
+
+Numbers this load produced that later phases need anyway
+---------------------------------------------------------
+    21          order_items rows in the largest single order (so a per-order feature is
+                an aggregate over up to 21 rows, and "the" item price is a decision)
+    14          orders that have an item row but no order_approved_at
+    175         payment rows belonging to orders with no order_approved_at
+    19,015      distinct geolocation_zip_code_prefix values in geolocation
+    3,095 / 32,951   distinct sellers / products
+
+The middle two matter for the audit: an order can be missing its approval moment and
+still have money and logistics rows, so a feature built on those tables must define what
+it does with them (D1 again), and "unavailable" is not the same as "zero".
+
+
+How to reproduce, and what is NOT claimed
+-----------------------------------------
+The load harness is deliberately not committed -- the same reason sql/README.md refuses a
+--run flag: a script that executes its own evidence. The commands, in order, are:
+
+    git clone --depth 1 https://github.com/olist/work-at-olist-data
+    git clone --depth 1 https://github.com/spdrio/Brazilian-E-Commerce-Public-Dataset-by-Olist
+    # apply stage-2/sql/001_create_olist_schema.sql to a fresh cluster, then per table,
+    # in the order printed below, data_factory.database.load_csv(...)
+
+Timings in this file are sandbox timings (PostgreSQL 16.2 bundled by pgserver, four
+shared cores, unix socket, no concurrent load). 46.4 s wall for 1,289,091 inserted rows.
+They are not a claim about the student's machine and no ceiling in the checklist is
+judged against them. Nothing here measures a feature query, a chain run or a model: those
+come in their own rounds with their own labels.
+
+
+Transcript
+----------
+PostgreSQL 16.2  |  DDL: stage-2/sql/001_create_olist_schema.sql
+  product_category_name_translation olist   raw=      71 loaded=      71 dup=      0     0.1s  OK
+  customers                         olist   refused: IntegrityError: (psycopg2.errors.CheckViolation) new row for relation "custo | DETAIL:  Failing row contains (18955e83d337fd6b2def6b18a428ac77, 290c77bc529b7ac935b93aa66c333dc3, 9
+  customers                         spdrio  raw=   99441 loaded=   99441 dup=      0     3.1s  OK
+  sellers                           olist   refused: IntegrityError: (psycopg2.errors.CheckViolation) new row for relation "selle | DETAIL:  Failing row contains (c0f3eea2e14555b6faeea3dd58c1b1c3, 4195, sao paulo, SP).
+  sellers                           spdrio  raw=    3095 loaded=    3095 dup=      0     0.1s  OK
+  products                          olist   raw=   32951 loaded=   32951 dup=      0     1.1s  OK
+  orders                            olist   raw=   99441 loaded=   99441 dup=      0     4.9s  OK
+  order_items                       olist   raw=  112650 loaded=  112650 dup=      0     6.8s  OK
+  payments                          olist   raw=  103886 loaded=  103886 dup=      0     3.3s  OK
+  order_reviews                     olist   raw=   99224 loaded=   99224 dup=      0     4.5s  OK
+  geolocation                       olist   raw= 1000163 loaded=  738332 dup= 261831    22.4s  OK
+load wall time 46.4s   rows raw=1550922 loaded=1289091
+
+in-database counts:
+  product_category_name_translation         71   OK
+  customers                              99441   OK
+  sellers                                 3095   OK
+  products                               32951   OK
+  orders                                 99441   OK
+  order_items                           112650   OK
+  payments                              103886   OK
+  order_reviews                          99224   OK
+  geolocation                           738332   OK
+
+referential questions the audit will depend on:
+  orders whose customer_id is missing from customers 0
+  order_items rows per order (max)                   21
+  orders with an item but no approval stamp          14
+  payments rows for unapproved orders                175
+  sellers / products / geolocation distinct keys     3095 / 32951 / 19015

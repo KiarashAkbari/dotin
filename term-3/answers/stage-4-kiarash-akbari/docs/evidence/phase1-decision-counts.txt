@@ -1,0 +1,295 @@
+phase1-decision-counts.txt -- the D1/D2/D3 counts, measured on a database
+=========================================================================
+
+What this file is: the four counts ROADMAP phase 1 item 2 asks for (checklist 3.9),
+taken from a PostgreSQL that holds the real Olist rows. Not from memory, not from a
+notebook, not from a documentation figure. Every number below is a line of output from
+the run described in section 1, and the SQL that produced it is printed with it.
+
+Headline, so a reader does not have to dig:
+
+    D1  orders with no order_approved_at        160 of 99,441   = 0.1609 %
+    D2  orders with no review at all            768 of 99,441   = 0.7723 %
+    D2  negative reviews (score <= 2)        14,575 rows over 14,533 orders
+    D3  orders with more than one review        547  (543 with two, 4 with three)
+
+The last row is not a rounding detail: 543 + 4 = 547, and 98,126 + 547 + 768 = 99,441.
+The three counts add up to the table they came from, which is the only internal check
+available without a second database.
+
+
+1. HOW THE DATABASE CAME TO EXIST
+---------------------------------
+    cluster        pgserver (bundled PostgreSQL 16.2), data dir created for this run and
+                   destroyed by it; unix socket only; nothing of the student's olist_db
+    schema         stage-2/sql/001_create_olist_schema.sql, applied verbatim -- every
+                   CHECK and every foreign key in that file was therefore enforced while
+                   the rows went in (that is a finding, see section 2)
+    load path      data_factory.database.load_csv, the function stage 1's load_olist is
+                   built from: same typed conversion, same column reflection, same
+                   product_name_lenght/product_description_lenght aliases
+    tables loaded  customers, orders, order_reviews -- the three the counts need.
+                   The other six were not loaded, and no number in this file depends
+                   on them.
+    interpreter    the sandbox python 3.11; sqlalchemy 2.1.8, psycopg2 as the driver
+
+Load order matters and was respected: customers before orders (fk_orders_customer),
+orders before order_reviews (fk_reviews_order).
+
+The harness that drove all of this is not committed: the round asked for the counts, and
+a script that executes its own evidence is what sql/README.md refuses to be. What is
+committed is everything needed to re-measure by hand -- the SQL is printed in section 3
+and the file names and sha256 values in section 2 pin the inputs.
+
+
+2. WHICH COPY OF THE DATA THE NUMBERS COME FROM
+-----------------------------------------------
+There is no Kaggle access in this sandbox, so the CSVs were taken from GitHub, and two
+candidate mirrors disagreed. This is recorded because the disagreement changes D2.
+
+    olist/work-at-olist-data@master, datasets/         Olist's own repository
+    spdrio/Brazilian-E-Commerce-Public-Dataset-by-Olist@master, files/
+
+    olist_orders_dataset.csv        sha256 identical in both mirrors
+                                    8df58ef3d2d7e9944010f7beecd9b75367f5588ec6e3c91
+                                    ec19ae3345ef9ecf   ->  orders is not in question
+    olist_order_reviews_dataset.csv differs: 99,224 rows (Olist) vs 100,000 (spdrio),
+                                    and the 99,224 are a strict subset of the 100,000
+    olist_customers_dataset.csv     both 99,441 rows and the same customer_id set; the
+                                    Olist copy has lost the leading zero of
+                                    customer_zip_code_prefix in 23,995 rows, so it
+                                    violates ck_customers_zip ('^[0-9]{5,8}$') and the
+                                    versioned DDL refuses it. The padded copy was used.
+
+Which review file the student's own database holds is answered without asking him:
+section A.1 of docs/evidence/phase0-baseline.txt records order_reviews loaded=99,224 on
+his PostgreSQL, and the same baseline records 99,441 orders, 112,650 order_items,
+103,886 payments, 32,951 products, 3,095 sellers, 71 translations -- every one of which
+matches the Olist mirror's file. One more corroboration, from this run and not from
+memory: stage-2's DDL comment says review_id is not unique and 789 review ids are
+reused; the query below, on this file, returns exactly 789 ids appearing more than once
+(814 surplus rows). So the Olist copy is the file that produced both the DDL's note and
+the student's row counts, and it is the one measured here.
+
+Consequence, stated so nobody has to rediscover it: with this file D2 = 768 orders
+without a review. With the other mirror's 100,000-row file every order has a review and
+D2 would be 0. Before writing the no-review policy, run the one query in section 4
+against olist_db; the decision is not the same in the two worlds.
+
+
+3. THE MEASUREMENT, VERBATIM
+----------------------------
+$ python3 /tmp/load_and_count.py     (the script that did all of the above)
+
+dataset: github.com/olist/work-at-olist-data (master) for orders and reviews;
+  github.com/spdrio/Brazilian-E-Commerce-Public-Dataset-by-Olist (master) for
+  customers, for the reason stated in CSV_SOURCE. Both repos' orders files are
+  byte-identical (sha256 8df58ef3d2d7e994...); the reviews files are not, so the
+  reconciliation with the phase-0 baseline below is what picks between them.
+  csv records product_category_name_translation       71
+  csv records customers                            99441
+  csv records sellers                               3095
+  csv records products                             32951
+  csv records geolocation                        1000163   (diff +261831, see the note)
+  csv records orders                               99441
+  csv records order_items                         112650
+  csv records payments                            103886
+  csv records order_reviews                        99224
+
+DDL applied: stage-2/sql/001_create_olist_schema.sql
+PostgreSQL 16.2
+  loaded customers      raw=  99441 loaded=  99441  in    2.5s
+  loaded orders         raw=  99441 loaded=  99441  in    4.4s
+  loaded order_reviews  raw=  99224 loaded=  99224  in    3.9s
+  load total 10.9s
+  in-database customers        99441   OK
+  in-database orders           99441   OK
+  in-database order_reviews    99224   OK
+
+=== D1 orders with no order_approved_at ===
+  SELECT COUNT(*) AS orders_total,
+  COUNT(*) FILTER (WHERE order_approved_at IS NULL) AS missing_approved_at,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE order_approved_at IS NULL) / COUNT(*), 4)
+  AS missing_pct
+  FROM olist.orders
+  orders_total | missing_approved_at | missing_pct
+  99441 | 160 | 0.1609
+
+=== D1 which statuses carry the missing approval ===
+  SELECT order_status, COUNT(*) AS rows_total,
+  COUNT(*) FILTER (WHERE order_approved_at IS NULL) AS missing_approved_at,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE order_approved_at IS NULL) / COUNT(*), 2)
+  AS missing_pct
+  FROM olist.orders
+  GROUP BY order_status
+  HAVING COUNT(*) FILTER (WHERE order_approved_at IS NULL) > 0
+  ORDER BY missing_approved_at DESC
+  order_status | rows_total | missing_approved_at | missing_pct
+  canceled | 625 | 141 | 22.56
+  delivered | 96478 | 14 | 0.01
+  created | 5 | 5 | 100.00
+
+=== D2 orders with no review at all ===
+  SELECT COUNT(*) AS orders_total,
+  COUNT(*) FILTER (WHERE r.order_id IS NULL) AS orders_without_review,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE r.order_id IS NULL) / COUNT(*), 4)
+  AS without_review_pct
+  FROM olist.orders o
+  LEFT JOIN (SELECT DISTINCT order_id FROM olist.order_reviews) r USING (order_id)
+  orders_total | orders_without_review | without_review_pct
+  99441 | 768 | 0.7723
+
+=== D2 review score distribution over all review rows ===
+  SELECT review_score, COUNT(*) AS reviews,
+  ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct
+  FROM olist.order_reviews
+  GROUP BY review_score
+  ORDER BY review_score
+  review_score | reviews | pct
+  1 | 11424 | 11.51
+  2 | 3151 | 3.18
+  3 | 8179 | 8.24
+  4 | 19142 | 19.29
+  5 | 57328 | 57.78
+
+=== D2 negative rows (score <= 2) by order, and how many orders they touch ===
+  SELECT COUNT(*) AS negative_reviews,
+  COUNT(DISTINCT order_id) AS orders_with_a_negative
+  FROM olist.order_reviews
+  WHERE review_score <= 2
+  negative_reviews | orders_with_a_negative
+  14575 | 14533
+
+=== D3 orders by number of reviews ===
+  SELECT reviews_per_order, COUNT(*) AS orders
+  FROM (
+  SELECT order_id, COUNT(*) AS reviews_per_order
+  FROM olist.order_reviews
+  GROUP BY order_id
+  ) t
+  GROUP BY reviews_per_order
+  ORDER BY reviews_per_order
+  reviews_per_order | orders
+  1 | 98126
+  2 | 543
+  3 | 4
+
+=== D3 multi-review orders and whether the score disagrees inside them ===
+  SELECT COUNT(*) AS orders_with_more_than_one_review,
+  COUNT(*) FILTER (WHERE distinct_scores > 1) AS scores_disagree,
+  COUNT(*) FILTER (WHERE has_negative) AS contains_a_negative,
+  SUM(rows_total) AS review_rows_inside_them
+  FROM (
+  SELECT order_id,
+  COUNT(*) AS rows_total,
+  COUNT(DISTINCT review_score) AS distinct_scores,
+  BOOL_OR(review_score <= 2) AS has_negative
+  FROM olist.order_reviews
+  GROUP BY order_id
+  HAVING COUNT(*) > 1
+  ) t
+  orders_with_more_than_one_review | scores_disagree | contains_a_negative | review_rows_inside_them
+  547 | 202 | 137 | 1098
+
+=== review_id is not unique: reused ids and the (review_id, order_id) key ===
+  SELECT COUNT(*) AS review_rows,
+  COUNT(DISTINCT review_id) AS distinct_review_ids,
+  COUNT(*) - COUNT(DISTINCT review_id) AS reused_id_rows,
+  (SELECT COUNT(*) FROM (
+  SELECT review_id FROM olist.order_reviews GROUP BY review_id HAVING COUNT(*) > 1
+  ) d) AS ids_appearing_more_than_once
+  FROM olist.order_reviews
+  review_rows | distinct_review_ids | reused_id_rows | ids_appearing_more_than_once
+  99224 | 98410 | 814 | 789
+
+=== the window: purchases and approvals per month, with review coverage ===
+  SELECT date_trunc('month', order_purchase_timestamp)::date AS month,
+  COUNT(*) AS orders,
+  COUNT(*) FILTER (WHERE order_approved_at IS NULL) AS missing_approved_at,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE order_approved_at IS NULL) / COUNT(*), 2)
+  AS missing_pct
+  FROM olist.orders
+  GROUP BY 1
+  ORDER BY 1
+  month | orders | missing_approved_at | missing_pct
+  2016-09-01 | 4 | 0 | 0.00
+  2016-10-01 | 324 | 6 | 1.85
+  2016-12-01 | 1 | 0 | 0.00
+  2017-01-01 | 800 | 3 | 0.38
+  2017-02-01 | 1780 | 14 | 0.79
+  2017-03-01 | 2682 | 2 | 0.07
+  2017-04-01 | 2404 | 4 | 0.17
+  2017-05-01 | 3700 | 9 | 0.24
+  2017-06-01 | 3245 | 4 | 0.12
+  2017-07-01 | 4026 | 5 | 0.12
+  2017-08-01 | 4331 | 6 | 0.14
+  2017-09-01 | 4285 | 4 | 0.09
+  2017-10-01 | 4631 | 5 | 0.11
+  2017-11-01 | 7544 | 9 | 0.12
+  2017-12-01 | 5673 | 7 | 0.12
+  2018-01-01 | 7269 | 1 | 0.01
+  2018-02-01 | 6728 | 4 | 0.06
+  2018-03-01 | 7211 | 3 | 0.04
+  2018-04-01 | 6939 | 0 | 0.00
+  2018-05-01 | 6873 | 1 | 0.01
+  2018-06-01 | 6167 | 0 | 0.00
+  2018-07-01 | 6292 | 1 | 0.02
+  2018-08-01 | 6512 | 53 | 0.81
+  2018-09-01 | 16 | 15 | 93.75
+  2018-10-01 | 4 | 4 | 100.00
+
+=== review creation vs the decision moment (what the label can be written from) ===
+  SELECT COUNT(*) AS review_rows,
+  COUNT(*) FILTER (WHERE review_creation_date <= order_approved_at) AS at_or_before_approval,
+  COUNT(*) FILTER (WHERE order_approved_at IS NULL) AS reviews_of_unapproved_orders
+  FROM olist.order_reviews r
+  JOIN olist.orders o USING (order_id)
+  review_rows | at_or_before_approval | reviews_of_unapproved_orders
+  99224 | 33 | 156
+
+3b. THE MIRROR QUESTION, CLOSED BY A RUN ON THE STUDENT'S DATABASE
+------------------------------------------------------------------
+The query in section 4 was run by the student against `olist_phase0_test` after this log
+was written, and it returned **768** -- the same figure measured here. So the file his
+database holds is the 99,224-row revision, D2 = 768 stands on both databases, and the
+100,000-row copy is not in play.
+
+Provenance of this paragraph, stated as precisely as the rest: it is a number the student
+reported in chat, run on his own PostgreSQL. No raw output of that run was uploaded here,
+so it is a transcribed confirmation, not a byte copy of a log -- the same treatment section
+A of phase0-baseline.txt gives his numbers. What this sandbox verified independently is
+the 99,224-row side of the comparison: row count, the 789 reused review ids that
+stage-2's DDL comment predicts, and the internal sum 98,126 + 547 + 768 = 99,441.
+
+
+4. WHAT THIS DOES NOT SAY, AND THE ONE COMMAND THAT WOULD
+----------------------------------------------------------
+It does not say what olist_db contains. It says what the public Olist files that agree
+with the phase-0 baseline contain, in a database built from the versioned DDL. Those are
+the same rows only if his raw dir holds the same revision -- which the row counts
+suggest and the reused-id figure (789) nearly proves, but which he should confirm in
+ten seconds:
+
+    SELECT COUNT(*) FILTER (WHERE order_approved_at IS NULL)      AS d1_missing_approval,
+           (SELECT COUNT(*) FROM olist.orders)                    AS orders_total,
+           (SELECT COUNT(*) FROM olist.orders o
+              LEFT JOIN (SELECT DISTINCT order_id FROM olist.order_reviews) r
+              USING (order_id)
+             WHERE r.order_id IS NULL)                            AS d2_orders_without_review,
+           (SELECT COUNT(*) FROM (SELECT order_id FROM olist.order_reviews
+                                  GROUP BY order_id HAVING COUNT(*) > 1) m)
+                                                                  AS d3_multi_review_orders
+    FROM olist.orders;
+
+Three more limits, so the numbers are not over-read:
+
+* order_reviews.review_creation_date is later than order_approved_at in 99,191 of the
+  99,224 rows (only 33 are at or before it). The label therefore exists strictly after
+  the decision moment, always -- which is why the whole challenge is about what the
+  features may look at, and why the leakage audit is worth 25 % of the grade.
+* 156 reviews belong to the 160 orders that have no approval timestamp, so D1 and D2
+  overlap; a policy for one is a policy for part of the other.
+* the window is truncated at the end: 2018-09 has 16 orders and 2018-10 has 4, and the
+  missing-approval rate in those months is 93.75 % and 100 %. A boundary placed on
+  "the last month of the file" evaluates on 16 rows. This is measured, not argued, and
+  it belongs to checklist 3.6.

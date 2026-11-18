@@ -1,0 +1,42 @@
+leak-green-run.txt -- the anti-leak gate and its test, unmodified source, all three checks as expected.
+reproduce: python3 stage-4/docs/evidence/leak-run-red-green.py green
+executed in the agent sandbox on 2026-11-16 (sandbox clock); python 3.11.2.
+see docs/evidence/README.md for what the red file below is and what it is not.
+-------------------------------------------------------------------------------
+green source : /home/user/data-factory-v2/stage-4/src/capstone/audit.py sha256=b7056b4cfd41 (unmodified)
+mode         : green
+python       : 3.11.2
+audit file   : docs/evidence/column_audit.csv sha256=756b0f2a1d14
+-------------------------------------------------------------------------------
+audit read   : 43 allowed, 10 forbidden of 53 columns
+
+### 1. the clean frame: every column the audit allows
+   accepted (43 columns)
+
+### 2. the leak: order_reviews.review_score added to that frame
+   refused: the column audit rejects this feature frame: order_reviews.review_score: audited and forbidden (after delivery)
+
+### 3. the test module: tests/test_leak_gate.py
+test_it_covers_every_column_the_schema_defines (test_leak_gate.CommittedAuditTest.test_it_covers_every_column_the_schema_defines)
+ROADMAP phase 2 widened the audit to all 53 columns; this is what catches a ... ok
+test_it_is_self_consistent (test_leak_gate.CommittedAuditTest.test_it_is_self_consistent) ... ok
+test_the_decision_moment_itself_is_allowed (test_leak_gate.CommittedAuditTest.test_the_decision_moment_itself_is_allowed)
+``order_approved_at`` is the anchor, not a prediction; forbidding it would make ... ok
+test_the_label_columns_are_forbidden (test_leak_gate.CommittedAuditTest.test_the_label_columns_are_forbidden)
+The three columns a leak would be most tempting to smuggle in, named here so ... ok
+test_an_unaudited_column_is_refused_too (test_leak_gate.LeakGateTest.test_an_unaudited_column_is_refused_too)
+No row means no column, which is the half of the rule that keeps a new schema ... ok
+test_each_forbidden_column_is_refused_by_name (test_leak_gate.LeakGateTest.test_each_forbidden_column_is_refused_by_name) ... ok
+test_the_allowed_frame_passes (test_leak_gate.LeakGateTest.test_the_allowed_frame_passes) ... ok
+test_there_is_something_to_refuse (test_leak_gate.LeakGateTest.test_there_is_something_to_refuse)
+A vacuous red is worse than no red: if the audit ever forbids nothing, this ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.002s
+
+OK
+   Ran 8 tests: failures=0 errors=0
+
+expectation  : clean_frame_accepted=TrueOK leak_refused=TrueOK tests_passed=TrueOK
+-------------------------------------------------------------------------------
+exit code    : 0  (0 = this mode behaved as its expectation says)

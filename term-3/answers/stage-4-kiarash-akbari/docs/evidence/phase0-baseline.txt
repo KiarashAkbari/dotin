@@ -1,0 +1,186 @@
+PHASE-0 BASELINE - the materialized-view gap, as measured
+=========================================================
+assembled by the agent on 2026-11-14. Everything below is a measurement, not an
+argument: section A is what the student measured on his own PostgreSQL 16, section B
+is what the agent measured on a PostgreSQL 16.2 inside the agent sandbox, and section
+C is what neither of them says.
+
+Provenance, stated plainly: the two raw log files `~/Code/PROJECTS/phase0-logs/p1.log`
+and `~/Code/PROJECTS/phase0-logs/p2.log` were never uploaded into this repository, so
+section A is a transcription of those logs as the student reported them, not a byte copy
+of the files. Their sha256 is recorded in section A.2, so a copy added later can be matched
+against them. Every number in it is his; nothing in it was invented here. The only timing
+recorded here is the post-fix run in the closing paragraph of A.2; no timing is recorded for
+the two pre-fix logs. A verbatim copy replaces this section as soon as the two files are
+dropped into this directory.
+
+
+A. STUDENT'S RUNS ON HIS OWN PostgreSQL 16 (Ubuntu 24.04, Python 3.12.3)
+-------------------------------------------------------------------------
+Both runs used `--skip-factory-sink`, so the factory sink group never entered the
+picture. Repo: `data-factory-v2`, branch `arena/9448ddf0-data-factory-v2`.
+Database under test: `olist_phase0_test`, the disposable copy - NOT `olist_db`, which
+`--reset` would empty. No number in this file was measured on `olist_db`.
+
+A.1  P1 - a SECOND `load-database --reset` on the same database
+     The base tables are loaded correctly, nine tables, no error, exit 0:
+
+         table=product_category_name_translation loaded=71
+         table=customers                        loaded=99441
+         table=sellers                          loaded=3095
+         table=products                         loaded=32951
+         table=geolocation                      loaded=738332
+         table=orders                           loaded=99441
+         table=order_items                      loaded=112650
+         table=payments                         loaded=103886
+         table=order_reviews                    loaded=99224
+
+     The four snapshot views, read from the same database right after that run:
+
+         view                          ispopulated   rows
+         mv_q1_monthly_category_sales  t                0
+         mv_q3_delay_satisfaction      t                0
+         mv_q4_seller_dashboard        t                0
+         mv_q5_payment_distribution    t                0
+
+     => prediction P1 held. A rebuild from an empty schema leaves every view
+        committed, marked populated, and empty.
+
+A.2  P2 - the same command WITHOUT `--reset`  ==> CONFIRMED BY A LOG (student-reported;
+     raw log kept local, sha256 recorded below; database `olist_phase0_test`)
+
+     Raw logs, as reported by the student, with the hashes needed to re-verify them if the
+     files are ever added here (they are not: stage-4/.gitignore keeps *-real-run*.txt and
+     *.log out of Git):
+
+         p1.log  sha256 07237825d8af2f7b46176a599b01e9840c39ec37472158741e7d4d880534697d   (the `--reset` run, A.1)
+         p2.log  sha256 047f6f8ebc245dec2455571c9c662b7298d13eee7160530a7fb4d83b0f32ad76   (this run, without `--reset`)
+
+     The migration ledgers skip everything, because nothing changed:
+
+         sql_migrations=0 files=
+         sql_snapshots=0  files=
+
+     and the four views are filled:
+
+         view                          rows
+         mv_q1_monthly_category_sales  1282
+         mv_q3_delay_satisfaction      4
+         mv_q4_seller_dashboard        3053
+         mv_q5_payment_distribution    27
+
+     => CONSISTENT WITH p2.log: the defect is specific to the `--reset` path, not to the
+        views, not to the queries inside them, and not to `REFRESH` itself. Whether this run
+        used the same database state as A.1 is not in the log and is not claimed here.
+
+     Kept as an unreconciled counter-report, neither confirmed nor refuted: a later message
+     from the same machine says the no-`--reset` run did not finish (`DELETE FROM
+     olist.customers` still running after 2:41 - reported, not measured, and not the runtime
+     of the run in p2.log). Nothing here resolves which run or which database state that
+     message described. The only timing recorded here is the post-fix run in the paragraph
+     below; no wall-clock or per-run timing is recorded for the two pre-fix logs, by decision.
+
+     One further run, reported later and kept apart from the two logs above because it is not
+     evidence about the pre-fix defect: the same no-`--reset` shape on `dotin/main` at
+     `d8651dc` (the fixed code), with `--skip-factory-sink` - 13:42.32 elapsed (35.90 s user,
+     12.29 s system, 5% cpu), against P1 at 1:18.45 and 67% cpu. All four MVs are populated
+     (1282/4/3053/27). This run was on the fixed code, not on the pre-fix code, so it is a
+     regression and timing check only. The cause of the slowness is still unproven; the
+     FK/full-scan-on-orders hypothesis was refuted by an EXPLAIN (Index Only Scan, 0.062 ms).
+
+A.3  P3 - NOT RUN
+     P3 asked whether a run without `--reset` also leaves the views empty when the
+     refresh is skipped. Moot as a test: the mechanism was pinned from `cli.py` line
+     numbers (see PHASE0_REPORT.md section 3) and A.1 carries the reproducible half.
+     With A.2 unverified, A.3 no longer "splits the two paths" on evidence - only A.1
+     and the sandbox runs in section B do.
+
+A.4  Group ordering and file list, from the same logs
+     Base group, applied on its own engine and committed there:
+
+         001_create_olist_schema.sql, 002_analytical_views.sql,
+         003_functions_and_snapshots.sql
+
+     Snapshot group, applied on a second engine after the load:
+
+         005_q4_seller_snapshot.sql, 006_q5_payment_snapshot.sql,
+         007_q1_monthly_category_snapshot.sql, 008_q3_delay_satisfaction_snapshot.sql
+
+     Note the order: the files run in lexical order, so Q4 and Q5 are created before
+     Q1 and Q3. This matters for anyone reading the log for timing, not for correctness.
+
+
+B. AGENT'S REPRODUCTION IN THE SANDBOX (PostgreSQL 16.2, unix socket only)
+--------------------------------------------------------------------------
+Same shape, minimum data: one row per olist table, fixture CSVs built by reflecting
+the real schema, so the load exercises the real loader. Full logs live next to this
+file: `phase0-red-run.txt` (pre-fix `cli.py`) and `phase0-green-run.txt` (with the
+fix). Both are reproduced by `phase0-run-red-green.py`.
+
+B.1  RED, `load-database --reset --skip-factory-sink`, twice in a row (the student's
+     P1, reproduced):
+
+         --- run 1: table counts ---            --- run 1: materialized view state ---
+          customers                     1        mv_q1_monthly_category_sales  t / 0
+          geolocation                   1        mv_q3_delay_satisfaction      t / 0
+          order_items                   1        mv_q4_seller_dashboard        t / 0
+          order_reviews                 1        mv_q5_payment_distribution    t / 0
+          orders                        1
+          payments                      1       run 2: identical, still t / 0
+          products                      1
+          sellers                       1
+          product_category_name_translation 1
+
+     The load itself was never the problem: the rows are there, the views are empty,
+     and a second reset repeats it. Reproducing P1 was the point of this section.
+
+B.2  GREEN, same scenario with the fix applied, first run already:
+
+         mv_q1_monthly_category_sales  ispopulated=t  rows=1
+         mv_q3_delay_satisfaction      ispopulated=t  rows=1
+         mv_q4_seller_dashboard        ispopulated=t  rows=1
+         mv_q5_payment_distribution    ispopulated=t  rows=1
+
+     and the two tests in `stage-1/tests/test_load_database_snapshots.py` that assert
+     exactly this (no empty view after a reset, and a view that agrees with its base
+     tables) go from FAIL to OK, as do the three ordering tests on the fake-connection
+     ledger. `phase0-red-run.txt` line "FAILED (failures=5)" -> `phase0-green-run.txt`
+     line "OK".
+
+B.3  What the sandbox run added, that code reading could not
+     The first version of the fix was the naive one: `refresh_olist_snapshots()`
+     after `lock_connection.commit()`. On the real database it still left all four
+     views at 0 rows. The reason is a transaction, not an order: executing the refresh
+     reopens a transaction on the lock connection, and the `finally` block closes that
+     connection with the transaction still open, so SQLAlchemy rolls the refresh back.
+     The committed view is empty again, `ispopulated = t`, exactly the symptom.
+     The fix therefore commits after refreshing as well, and `phase0-run-red-green.py`
+     was the instrument that showed it. Trace excerpt (red, then the naive fix):
+
+         TRACE refresh done: q1=1 in_tx=True      <- refreshed, but inside an open tx
+         FINAL q1 rows: 0                          <- discarded on close
+
+B.4  Limits of B
+     PostgreSQL 16.2 rather than the student's 16.x minor, one fixture row per table
+     rather than 99k orders, and the pgserver build of postgres, which returns bytes to
+     psycopg3 (so the runs use `postgresql+psycopg2`). B proves the mechanism and the
+     fix on a real engine; it does not measure anything about the delivery, and it is
+     not a substitute for the student's own run of the new tests against `olist_db`.
+
+
+C. WHAT THIS BASELINE DOES NOT SAY
+---------------------------------
+* It does not say the `--reset` path is broken for the factory sink: the sink group
+  (009 plus `load_stage1_sink`) was skipped in every run above. NOT RUN, marked so.
+* It does not say anything about performance. No timing claim appears in this file, and
+  none should be inferred from the fact that four `REFRESH` statements now run after the
+  commit: the view definitions are unchanged, so the work is the same work that used to
+  happen at creation time - except that it now happens against committed data. Measure
+  before repeating that as a fact.
+* It does not close the phase-0 acceptance gate. The gate needs the student's own run of
+  the new test module and of `load-database --reset` against a **disposable** database
+  (`olist_phase0_test` - never `olist_db`, which `--reset` empties), plus `decisions.md`
+  entries; see stage-4/ROADMAP.md section 9.
+* The module is 8 tests as of `fa812b4` plus this round's locator test; the run recorded
+  above counted 7. `Ran 8 ... OK` in the sandbox, 2 skips (no PostgreSQL driver in that
+  venv) - see PHASE0_REPORT.md section 8 item 4.

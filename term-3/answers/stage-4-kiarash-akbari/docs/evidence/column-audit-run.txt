@@ -1,0 +1,553 @@
+column-audit-run.txt -- the audit table's evidence, column by column.
+
+Every number below is the output of a witness emitted by
+scripts/audit_columns.py and executed against the sandbox Olist database
+(docs/evidence/phase1-full-load.txt records how it was built and reconciled to
+the phase-0 baseline). The verdicts and their reasons are the student's
+artefact: the numbers do not decide them, they constrain them. The CSV at
+docs/evidence/column_audit.csv is the machine-readable version of the same
+table and is what capstone.audit.require_allowed reads at feature-build time.
+
+Two measured facts change how the witnesses must be read, and both are about
+the audit's own method rather than about any column:
+
+1. `at_or_before_approval` is the right question for a column that records an
+   event, and the wrong question for a column that records a promise.
+   order_estimated_delivery_date is filled 99,441 times and is dated about 23
+   days after approval by construction; shipping_limit_date is filled 112,650
+   times and sits 6.2 days after approval on average. Neither is a leak. The
+   test that separates them from a real one is whether orders that never
+   advanced carry the value at all: 630 of 630 created/canceled orders have an
+   estimated delivery date and 542 of 542 of their item rows have a shipping
+   limit date, while delivered-carrier and delivered-customer stamps are 0 on
+   every one of those statuses except the 6 canceled rows that carry a delivery
+   stamp (source data noise; recorded rather than smoothed over).
+2. Fill rate by itself hides the survivorship trap the brief points at: 96,478
+   of 99,441 orders are delivered (97.02 %), so any column filled at delivery
+   looks 97 % present. The audit therefore treats 'present for the statuses that
+   never completed' as the test, not 'present overall'.
+
+Per-column witnesses, then the verdict taken for that column:
+
+customers.customer_city
+    nullability at table grain (no timestamp exists in this table): rows_total=99441; filled_rows=99441; null_rows=0; distinct_values=4119
+    how many orders can see a customers row at all: orders_total=99441; orders_without_a_row=0
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=99441; rows_of_unapproved_orders=160; rows_of_created_orders=5; filled_rows=99441
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: given at checkout
+
+customers.customer_id
+    nullability at table grain (no timestamp exists in this table): rows_total=99441; filled_rows=99441; null_rows=0; distinct_values=99441
+    how many orders can see a customers row at all: orders_total=99441; orders_without_a_row=0
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=99441; rows_of_unapproved_orders=160; rows_of_created_orders=5; filled_rows=99441
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: join key
+
+customers.customer_state
+    nullability at table grain (no timestamp exists in this table): rows_total=99441; filled_rows=99441; null_rows=0; distinct_values=27
+    how many orders can see a customers row at all: orders_total=99441; orders_without_a_row=0
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=99441; rows_of_unapproved_orders=160; rows_of_created_orders=5; filled_rows=99441
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: given at checkout
+
+customers.customer_unique_id
+    nullability at table grain (no timestamp exists in this table): rows_total=99441; filled_rows=99441; null_rows=0; distinct_values=96096
+    how many orders can see a customers row at all: orders_total=99441; orders_without_a_row=0
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=99441; rows_of_unapproved_orders=160; rows_of_created_orders=5; filled_rows=99441
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: grouping key for repeat-customer history
+
+customers.customer_zip_code_prefix
+    nullability at table grain (no timestamp exists in this table): rows_total=99441; filled_rows=99441; null_rows=0; distinct_values=14994
+    how many orders can see a customers row at all: orders_total=99441; orders_without_a_row=0
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=99441; rows_of_unapproved_orders=160; rows_of_created_orders=5; filled_rows=99441
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: given at checkout
+
+geolocation.geolocation_city
+    nullability at table grain (no timestamp exists in this table): rows_total=738332; filled_rows=738332; null_rows=0; distinct_values=8011
+    how many orders can see a geolocation row at all: orders_total=99441; orders_without_a_row=278
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: 278 orders reach no row
+
+geolocation.geolocation_id
+    nullability at table grain (no timestamp exists in this table): rows_total=738332; filled_rows=738332; null_rows=0; distinct_values=738332
+    how many orders can see a geolocation row at all: orders_total=99441; orders_without_a_row=278
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: surrogate; carries no signal
+
+geolocation.geolocation_lat
+    nullability at table grain (no timestamp exists in this table): rows_total=738332; filled_rows=738332; null_rows=0; distinct_values=717372
+    how many orders can see a geolocation row at all: orders_total=99441; orders_without_a_row=278
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: 278 orders reach no row
+
+geolocation.geolocation_lng
+    nullability at table grain (no timestamp exists in this table): rows_total=738332; filled_rows=738332; null_rows=0; distinct_values=717615
+    how many orders can see a geolocation row at all: orders_total=99441; orders_without_a_row=278
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: 278 orders reach no row
+
+geolocation.geolocation_state
+    nullability at table grain (no timestamp exists in this table): rows_total=738332; filled_rows=738332; null_rows=0; distinct_values=27
+    how many orders can see a geolocation row at all: orders_total=99441; orders_without_a_row=278
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: 278 orders reach no row
+
+geolocation.geolocation_zip_code_prefix
+    nullability at table grain (no timestamp exists in this table): rows_total=738332; filled_rows=738332; null_rows=0; distinct_values=19015
+    how many orders can see a geolocation row at all: orders_total=99441; orders_without_a_row=278
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: join key
+
+order_items.freight_value
+    fill and presence at approval: rows_total=112650; filled_rows=112650; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: fixed at checkout
+
+order_items.order_id
+    fill and presence at approval: rows_total=112650; filled_rows=112650; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: join key to the grain
+
+order_items.order_item_id
+    fill and presence at approval: rows_total=112650; filled_rows=112650; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: position within the order
+
+order_items.price
+    fill and presence at approval: rows_total=112650; filled_rows=112650; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: paid amount fixed at checkout
+
+order_items.product_id
+    fill and presence at approval: rows_total=112650; filled_rows=112650; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: join key to the catalog
+
+order_items.seller_id
+    fill and presence at approval: rows_total=112650; filled_rows=112650; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: join key to the seller
+
+order_items.shipping_limit_date
+    fill and presence at approval: rows_total=112650; filled_rows=112650; at_or_before_approval=127; rows_of_unapproved_orders=15
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=110197  filled=110197  100.0%
+        shipped      rows=1185    filled=1185    100.0%
+        canceled     rows=542     filled=542     100.0%
+        invoiced     rows=359     filled=359     100.0%
+        processing   rows=357     filled=357     100.0%
+        unavailable  rows=7       filled=7       100.0%
+        approved     rows=3       filled=3       100.0%
+    minutes between approval and this stamp: comparable_rows=112635; avg_minutes_after_approval=8932.6; min_minutes=-26701.683333333334; at_or_before_approval=127
+    verdict: allowed | at_approval=true | available_at=at purchase (a deadline; not an event)
+    reason: forward-dated so the approval comparison is expected to fail; NOT NULL for every status including the ones that never shipped
+
+order_reviews.order_id
+    fill and presence at approval: rows_total=99224; filled_rows=99224; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=96361   100.0%
+        shipped      rows=1043    filled=1043    100.0%
+        canceled     rows=609     filled=609     100.0%
+        unavailable  rows=597     filled=597     100.0%
+        invoiced     rows=313     filled=313     100.0%
+        processing   rows=296     filled=296     100.0%
+        created      rows=3       filled=3       100.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: forbidden | at_approval=false | available_at=after delivery
+    reason: legal as the join path to the label; never a feature; a row's existence is late
+
+order_reviews.review_answer_timestamp
+    fill and presence at approval: rows_total=99224; filled_rows=99224; at_or_before_approval=20; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=96361   100.0%
+        shipped      rows=1043    filled=1043    100.0%
+        canceled     rows=609     filled=609     100.0%
+        unavailable  rows=597     filled=597     100.0%
+        invoiced     rows=313     filled=313     100.0%
+        processing   rows=296     filled=296     100.0%
+        created      rows=3       filled=3       100.0%
+        approved     rows=2       filled=2       100.0%
+    minutes between approval and this stamp: comparable_rows=99068; avg_minutes_after_approval=22173.1; min_minutes=-203736.58333333334; at_or_before_approval=20
+    verdict: forbidden | at_approval=false | available_at=days after the review
+    reason: the seller's reply is later still
+
+order_reviews.review_comment_message
+    fill and presence at approval: rows_total=99224; filled_rows=40977; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=39099    40.6%
+        shipped      rows=1043    filled=634      60.8%
+        canceled     rows=609     filled=406      66.7%
+        unavailable  rows=597     filled=415      69.5%
+        invoiced     rows=313     filled=214      68.4%
+        processing   rows=296     filled=207      69.9%
+        created      rows=3       filled=2        66.7%
+        approved     rows=2       filled=0         0.0%
+    verdict: forbidden | at_approval=false | available_at=after delivery
+    reason: free text written by the customer later
+
+order_reviews.review_comment_title
+    fill and presence at approval: rows_total=99224; filled_rows=11568; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=11208    11.6%
+        shipped      rows=1043    filled=149      14.3%
+        canceled     rows=609     filled=113      18.6%
+        unavailable  rows=597     filled=38        6.4%
+        invoiced     rows=313     filled=49       15.7%
+        processing   rows=296     filled=11        3.7%
+        created      rows=3       filled=0         0.0%
+        approved     rows=2       filled=0         0.0%
+    verdict: forbidden | at_approval=false | available_at=after delivery
+    reason: free text written by the customer later
+
+order_reviews.review_creation_date
+    fill and presence at approval: rows_total=99224; filled_rows=99224; at_or_before_approval=33; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=96361   100.0%
+        shipped      rows=1043    filled=1043    100.0%
+        canceled     rows=609     filled=609     100.0%
+        unavailable  rows=597     filled=597     100.0%
+        invoiced     rows=313     filled=313     100.0%
+        processing   rows=296     filled=296     100.0%
+        created      rows=3       filled=3       100.0%
+        approved     rows=2       filled=2       100.0%
+    minutes between approval and this stamp: comparable_rows=99068; avg_minutes_after_approval=17637.6; min_minutes=-206837.63333333333; at_or_before_approval=33
+    verdict: forbidden | at_approval=false | available_at=after delivery
+    reason: when the label appeared
+
+order_reviews.review_id
+    fill and presence at approval: rows_total=99224; filled_rows=99224; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=96361   100.0%
+        shipped      rows=1043    filled=1043    100.0%
+        canceled     rows=609     filled=609     100.0%
+        unavailable  rows=597     filled=597     100.0%
+        invoiced     rows=313     filled=313     100.0%
+        processing   rows=296     filled=296     100.0%
+        created      rows=3       filled=3       100.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: forbidden | at_approval=false | available_at=after delivery
+    reason: row existence is itself late
+
+order_reviews.review_score
+    fill and presence at approval: rows_total=99224; filled_rows=99224; rows_of_unapproved_orders=156
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96361   filled=96361   100.0%
+        shipped      rows=1043    filled=1043    100.0%
+        canceled     rows=609     filled=609     100.0%
+        unavailable  rows=597     filled=597     100.0%
+        invoiced     rows=313     filled=313     100.0%
+        processing   rows=296     filled=296     100.0%
+        created      rows=3       filled=3       100.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: forbidden | at_approval=false | available_at=after delivery
+    reason: this is the label; handing it to the model is the cheating model of 4.5
+
+orders.customer_id
+    fill and presence at approval: rows_total=99441; filled_rows=99441; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96478   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=625     100.0%
+        unavailable  rows=609     filled=609     100.0%
+        invoiced     rows=314     filled=314     100.0%
+        processing   rows=301     filled=301     100.0%
+        created      rows=5       filled=5       100.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: set when the order is placed
+
+orders.order_approved_at
+    fill and presence at approval: rows_total=99441; filled_rows=99281; at_or_before_approval=99281; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96464   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=484      77.4%
+        unavailable  rows=609     filled=609     100.0%
+        invoiced     rows=314     filled=314     100.0%
+        processing   rows=301     filled=301     100.0%
+        created      rows=5       filled=0         0.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: allowed | at_approval=true | available_at=is the decision moment
+    reason: anchor not prediction; hour-of-day derived from it is legal and the nulls are D1
+
+orders.order_delivered_carrier_date
+    fill and presence at approval: rows_total=99441; filled_rows=97658; at_or_before_approval=1359; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96476   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=75       12.0%
+        unavailable  rows=609     filled=0         0.0%
+        invoiced     rows=314     filled=0         0.0%
+        processing   rows=301     filled=0         0.0%
+        created      rows=5       filled=0         0.0%
+        approved     rows=2       filled=0         0.0%
+    minutes between approval and this stamp: comparable_rows=97644; avg_minutes_after_approval=4039.3; min_minutes=-246555.36666666667; at_or_before_approval=1359
+    verdict: forbidden | at_approval=false | available_at=at carrier pickup
+    reason: post-approval event
+
+orders.order_delivered_customer_date
+    fill and presence at approval: rows_total=99441; filled_rows=96476; at_or_before_approval=61; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96470   100.0%
+        shipped      rows=1107    filled=0         0.0%
+        canceled     rows=625     filled=6         1.0%
+        unavailable  rows=609     filled=0         0.0%
+        invoiced     rows=314     filled=0         0.0%
+        processing   rows=301     filled=0         0.0%
+        created      rows=5       filled=0         0.0%
+        approved     rows=2       filled=0         0.0%
+    minutes between approval and this stamp: comparable_rows=96462; avg_minutes_after_approval=17467.7; min_minutes=-10065.1; at_or_before_approval=61
+    verdict: forbidden | at_approval=false | available_at=at delivery
+    reason: post-approval event and the delay label itself
+
+orders.order_estimated_delivery_date
+    fill and presence at approval: rows_total=99441; filled_rows=99441; at_or_before_approval=12; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96478   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=625     100.0%
+        unavailable  rows=609     filled=609     100.0%
+        invoiced     rows=314     filled=314     100.0%
+        processing   rows=301     filled=301     100.0%
+        created      rows=5       filled=5       100.0%
+        approved     rows=2       filled=2       100.0%
+    minutes between approval and this stamp: comparable_rows=99281; avg_minutes_after_approval=33601.4; min_minutes=-209717.63333333333; at_or_before_approval=12
+    verdict: allowed | at_approval=true | available_at=at purchase (a promise; not an event)
+    reason: forward-dated by meaning so the fill-at-approval test does not apply; the criterion used instead is that orders which never advanced still carry it
+
+orders.order_id
+    fill and presence at approval: rows_total=99441; filled_rows=99441; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96478   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=625     100.0%
+        unavailable  rows=609     filled=609     100.0%
+        invoiced     rows=314     filled=314     100.0%
+        processing   rows=301     filled=301     100.0%
+        created      rows=5       filled=5       100.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: identifier of the decision row
+
+orders.order_purchase_timestamp
+    fill and presence at approval: rows_total=99441; filled_rows=99441; at_or_before_approval=99281; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96478   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=625     100.0%
+        unavailable  rows=609     filled=609     100.0%
+        invoiced     rows=314     filled=314     100.0%
+        processing   rows=301     filled=301     100.0%
+        created      rows=5       filled=5       100.0%
+        approved     rows=2       filled=2       100.0%
+    minutes between approval and this stamp: comparable_rows=99281; avg_minutes_after_approval=-625.1; min_minutes=-270550.8333333333; at_or_before_approval=99281
+    verdict: allowed | at_approval=true | available_at=at purchase
+    reason: the pre-decision clock
+
+orders.order_status
+    fill and presence at approval: rows_total=99441; filled_rows=99441; rows_of_unapproved_orders=160
+    filled share by order_status (rows at this table's own grain):
+        delivered    rows=96478   filled=96478   100.0%
+        shipped      rows=1107    filled=1107    100.0%
+        canceled     rows=625     filled=625     100.0%
+        unavailable  rows=609     filled=609     100.0%
+        invoiced     rows=314     filled=314     100.0%
+        processing   rows=301     filled=301     100.0%
+        created      rows=5       filled=5       100.0%
+        approved     rows=2       filled=2       100.0%
+    verdict: forbidden | at_approval=false | available_at=rewritten through the order's life
+    reason: its value space contains delivered which is only true after delivery; a raw status at scoring time is the outcome wearing a feature's clothes
+
+payments.order_id
+    nullability at table grain (no timestamp exists in this table): rows_total=103886; filled_rows=103886; null_rows=0; distinct_values=99440
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=103886; rows_of_unapproved_orders=175; rows_of_created_orders=5; filled_rows=103886
+    verdict: allowed | at_approval=true | available_at=at checkout
+    reason: join key; rows exist pre-approval
+
+payments.payment_installments
+    nullability at table grain (no timestamp exists in this table): rows_total=103886; filled_rows=103886; null_rows=0; distinct_values=24
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=103886; rows_of_unapproved_orders=175; rows_of_created_orders=5; filled_rows=103886
+    verdict: allowed | at_approval=true | available_at=at checkout
+    reason: chosen at checkout
+
+payments.payment_sequential
+    nullability at table grain (no timestamp exists in this table): rows_total=103886; filled_rows=103886; null_rows=0; distinct_values=29
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=103886; rows_of_unapproved_orders=175; rows_of_created_orders=5; filled_rows=103886
+    verdict: allowed | at_approval=true | available_at=at checkout
+    reason: position in the split
+
+payments.payment_type
+    nullability at table grain (no timestamp exists in this table): rows_total=103886; filled_rows=103886; null_rows=0; distinct_values=5
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=103886; rows_of_unapproved_orders=175; rows_of_created_orders=5; filled_rows=103886
+    verdict: allowed | at_approval=true | available_at=at checkout
+    reason: chosen at checkout
+
+payments.payment_value
+    nullability at table grain (no timestamp exists in this table): rows_total=103886; filled_rows=103886; null_rows=0; distinct_values=29077
+    rows on orders that were never approved (pre-approval existence): rows_at_order_grain=103886; rows_of_unapproved_orders=175; rows_of_created_orders=5; filled_rows=103886
+    verdict: allowed | at_approval=true | available_at=at checkout
+    reason: amount charged at checkout
+
+product_category_name_translation.product_category_name
+    nullability at table grain (no timestamp exists in this table): rows_total=71; filled_rows=71; null_rows=0; distinct_values=71
+    how many orders can see a product_category_name_translation row at all: orders_total=99441; orders_without_a_row=2185
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: join key; 2,185 orders reach no row
+
+product_category_name_translation.product_category_name_english
+    nullability at table grain (no timestamp exists in this table): rows_total=71; filled_rows=71; null_rows=0; distinct_values=71
+    how many orders can see a product_category_name_translation row at all: orders_total=99441; orders_without_a_row=2185
+    verdict: allowed | at_approval=true | available_at=static lookup
+    reason: 2,185 orders reach no row; missing is not zero
+
+products.product_category_name
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32341; null_rows=610; distinct_values=73
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: 610 products have none
+
+products.product_description_length
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32341; null_rows=610; distinct_values=2960
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+products.product_height_cm
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32949; null_rows=2; distinct_values=102
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+products.product_id
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32951; null_rows=0; distinct_values=32951
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: join key
+
+products.product_length_cm
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32949; null_rows=2; distinct_values=99
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+products.product_name_length
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32341; null_rows=610; distinct_values=66
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+products.product_photos_qty
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32341; null_rows=610; distinct_values=19
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+products.product_weight_g
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32949; null_rows=2; distinct_values=2204
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+products.product_width_cm
+    nullability at table grain (no timestamp exists in this table): rows_total=32951; filled_rows=32949; null_rows=2; distinct_values=95
+    how many orders can see a products row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=catalog
+    reason: static attribute
+
+sellers.seller_city
+    nullability at table grain (no timestamp exists in this table): rows_total=3095; filled_rows=3095; null_rows=0; distinct_values=611
+    how many orders can see a sellers row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=seller registry
+    reason: static
+
+sellers.seller_id
+    nullability at table grain (no timestamp exists in this table): rows_total=3095; filled_rows=3095; null_rows=0; distinct_values=3095
+    how many orders can see a sellers row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=seller registry
+    reason: join key
+
+sellers.seller_state
+    nullability at table grain (no timestamp exists in this table): rows_total=3095; filled_rows=3095; null_rows=0; distinct_values=23
+    how many orders can see a sellers row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=seller registry
+    reason: static
+
+sellers.seller_zip_code_prefix
+    nullability at table grain (no timestamp exists in this table): rows_total=3095; filled_rows=3095; null_rows=0; distinct_values=2246
+    how many orders can see a sellers row at all: orders_total=99441; orders_without_a_row=775
+    verdict: allowed | at_approval=true | available_at=seller registry
+    reason: static
+
+
+Wiring: the audit is not a document the code ignores
+-----------------------------------------------------
+`capstone.audit.load_audit` reads exactly this CSV, at the path the tracked contract
+names (`audit_file = "../docs/evidence/column_audit.csv"`), and `doctor` refuses to
+call the stage ready while it is missing or self-contradictory. Before this round that
+check printed a FAIL (`missing audit file`); after it, verbatim:
+
+    [FAIL] python: 3.11 (stage 1 declares >=3.12; tomllib needs 3.11 at minimum) (checklist 2.9)
+    [FAIL] config: capstone.example.toml still carries undecided keys: model.no_review, model.no_approved_at, model.multi_review, split.boundary, external.name (checklist 3.3, 3.4, 3.6, 12.1)
+    [FAIL] feature SQL: no versioned .sql under /home/user/data-factory-v2/stage-4/sql; the feature layer has no home yet (a hand-built view in pgAdmin does not count) (checklist 5.1, 5.5)
+    [FAIL] chain steps: not ready yet: ingest, load-database, features, model, capacity-list (checklist 11.3)
+    [FAIL] requirements.txt: missing (checklist 2.9)
+    [warn] 01_exploration.ipynb: missing (checklist 9.1)
+    [warn] 02_system.ipynb: missing (checklist 9.2)
+    [ok  ] column audit: column_audit.csv: 53 rows over 9 tables, 43 usable, 10 forbidden, 0 unverified (checklist 4.1)
+    [ok  ] input schema: 8 columns expected in a fresh order file, read from the stage-2 DDL (checklist 8.2)
+
+The FAILs above are the other open items, quoted unchanged so this log cannot be read
+as a bill of health. Two of them are the reason the next rounds exist: no versioned
+feature SQL (checklist 5.1) and five chain steps still unready (11.3). The `input
+schema` line reads the same stage-2 DDL this audit is built over, which is what makes
+the coverage assertion in `tests/test_leak_gate.py` a check rather than a tautology.
