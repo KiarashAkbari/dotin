@@ -60,28 +60,34 @@ ANCHOR_MARKERS = (
 def database_uri() -> str | None:
     """Where a loaded ``olist`` schema lives, or ``None`` when this machine says nothing.
 
-    An environment variable and nothing else, on purpose: stage 4 has no loader of its own
-    (phase 4 borrows stage 1's), so the only honest way to find a database is to be told where
-    one is. Guessing a localhost socket would turn "not verified" into "passed".
+    An environment variable and nothing else, on purpose: guessing a localhost socket would
+    turn "not verified" into "passed", and a skip that names no variable leaves a reader
+    looking for a config file that was never consulted.
     """
     return (os.environ.get("CAPSTONE_DATABASE_URI") or "").strip() or None
 
 
 def _connect():
-    """A connection to that database, or ``None`` -- a missing driver is not a failure."""
-    try:
-        import psycopg2
-    except ModuleNotFoundError:  # pragma: no cover - depends on the machine
-        return None
+    """A connection to that database, or ``None`` -- a missing driver is not a failure.
+
+    The driver is resolved by ``capstone.features.connect``, the same path the feature layer
+    uses. Hard-coding one module here was a second opinion that wasn't: a test pinned to
+    ``psycopg2`` skips quietly on the psycopg-3 environment this project ships, and "skipped
+    because no driver" reads exactly like "skipped because no database" -- which is how a
+    green run of 145 offline tests came to say nothing about the eleven live ones. The two
+    answers now come from one resolver, and a refusal is a different outcome from an absent
+    variable: see tests/test_capstone_features.py, where a step that reaches for a connection
+    is treated as having reached it.
+    """
     uri = database_uri()
     if uri is None:
         return None
     try:
-        connection = psycopg2.connect(uri)
+        from capstone.features import connect
+
+        return connect(uri, autocommit=True, purpose="run the live SQL guards")
     except Exception:  # pragma: no cover - depends on the machine
         return None
-    connection.autocommit = True
-    return connection
 
 
 def sql_files() -> list[Path]:
