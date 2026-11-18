@@ -42,14 +42,7 @@ CSV_PATH = STAGE / "docs" / "evidence" / "column_audit.csv"
 #: the row these tests edit and delete -- `allowed` today, and read by the frame through
 #: the order_items rollups, so changing its verdict has to reach the guard in the same run
 VICTIM = ("order_items", "freight_value")
-def guard_sql() -> str:
-    """The frame's guard statement, spelled by ``capstone.features``.
-
-    Read lazily on purpose: in this tree ``features`` does not own that constant yet -- it arrives
-    with the real ``build`` -- and a module-level reference would turn "not ported yet" into an
-    ``AttributeError`` for every test in the file.
-    """
-    return features.AUDIT_GUARD_SQL.format(frame=features.FRAME_VIEW, schema="olist")
+GUARD_SQL = features.AUDIT_GUARD_SQL.format(frame=features.FRAME_VIEW, schema="olist")
 
 
 class RaiseException(Exception):
@@ -361,11 +354,6 @@ class LoaderTests(unittest.TestCase):
         self.assertLess(names.index("load-audit"), names.index("features"))
 
 
-@unittest.skipIf(
-    is_pending(features.build),
-    "these tests compare the loader with features.build, and build is a placeholder here: "
-    "a guard that runs against a stub proves nothing",
-)
 class FramePreCheckTests(unittest.TestCase):
     """``features.build`` may ask one question about the audit table, and it is "is it empty"."""
 
@@ -389,7 +377,7 @@ class FramePreCheckTests(unittest.TestCase):
         self.assertIn(audit.AUDIT_COUNT_STATEMENT, table.statements)
         # the DDL that *defines* require_allowed is applied, of course; what must not happen is the
         # guard query running against a table the loader knows is empty
-        self.assertNotIn(guard_sql(), table.statements, msg="the guard ran anyway")
+        self.assertNotIn(GUARD_SQL, table.statements, msg="the guard ran anyway")
 
     def test_a_populated_table_that_rejects_a_column_is_not_relabelled(self):
         """The mirror is full and the frame still leaks: that is a finding, and it stays one."""
@@ -411,11 +399,11 @@ class FramePreCheckTests(unittest.TestCase):
         except Exception:  # noqa: BLE001 - the frame is fake past this point; the ordering is the claim
             pass
         self.assertEqual(
-            table.statements.count(guard_sql()), 1, msg="the guard ran a different number of times"
+            table.statements.count(GUARD_SQL), 1, msg="the guard ran a different number of times"
         )
         self.assertLess(
             table.statements.index(audit.AUDIT_COUNT_STATEMENT),
-            table.statements.index(guard_sql()),
+            table.statements.index(GUARD_SQL),
             msg="the pre-check ran after the guard, which is the ordering it exists to avoid",
         )
 

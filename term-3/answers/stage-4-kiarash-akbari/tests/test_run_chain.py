@@ -116,11 +116,8 @@ class EntrypointContractTests(unittest.TestCase):
                 except (NotReadyError, CapstoneError) as exc:
                     self.assertTrue(str(exc).strip(), "a refusal with no message routes nobody")
                     refused += 1
-        # load-audit reaches its connection; features does not, because this tree's build is still
-        # the pending placeholder. The count is the tree: the commit that lands the real build moves
-        # this to 2 and 2, and no earlier commit may claim a step it cannot run.
-        self.assertEqual(reached, 1, msg="load-audit should reach its connection")
-        self.assertEqual(refused, 3, msg="features, model and capacity-list should refuse before that")
+        self.assertEqual(reached, 2, msg="load-audit and features should reach their connection")
+        self.assertEqual(refused, 2, msg="model and capacity-list should refuse before that")
 
     def test_the_uri_comes_from_the_environment_the_config_never_stores_it(self):
         """Sealed here, unsealed on the student's machine: the refusal must be about the URI.
@@ -166,15 +163,14 @@ class EntrypointContractTests(unittest.TestCase):
         self.assertIn("ghost", str(caught.exception))
         self.assertIn("not_there", str(caught.exception))
 
-    def test_the_ready_steps_are_the_one_the_runner_can_finish(self):
-        """load-audit exists; features, model and capacity-list do not, and each says so.
+    def test_the_ready_steps_are_the_two_the_runner_can_finish(self):
+        """load-audit and features exist; model and capacity-list do not, and each says so.
 
-        The sibling tree pins this set to two. Here ``capstone.features:run`` does not exist yet, and
-        readiness is derived from the code -- reporting it as ready would be the mistake this chain
-        exists to prevent.
+        Readiness is derived from the code, not declared: this row moved when ``build`` stopped being
+        a placeholder, and it moves back if the body is ever hollowed out again.
         """
         ready = {step.name for step in capstone_steps() if step.implemented()}
-        self.assertEqual(ready, {"load-audit"})
+        self.assertEqual(ready, {"load-audit", "features"})
 
 
 class RunnerTests(unittest.TestCase):

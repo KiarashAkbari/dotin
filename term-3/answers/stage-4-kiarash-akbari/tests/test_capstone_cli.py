@@ -57,9 +57,12 @@ class ChainPlanTest(unittest.TestCase):
     def test_dry_run_reports_what_blocks_and_why(self) -> None:
         code, out, _ = run("chain", "--dry-run")
         self.assertEqual(code, int(ExitCode.OK))
-        self.assertIn("features", out)
-        self.assertIn("phase 4", out)
-        self.assertIn("5.1", out)
+        # phase 4 landed, so the plan now blocks on the model layer and names the phase that owns
+        # it; the features line has to say "ready" rather than merely appear
+        self.assertIn("[ready  ] features", out)
+        self.assertIn("[blocked] model", out)
+        self.assertIn("phase 5", out)
+        self.assertIn("6.1", out)
 
     def test_dry_run_json_is_machine_readable(self) -> None:
         code, out, _ = run("chain", "--dry-run", "--json")
@@ -69,24 +72,21 @@ class ChainPlanTest(unittest.TestCase):
         self.assertTrue(all("reason" in row for row in rows))
 
     def test_readiness_is_derived_from_the_code_not_from_a_status_table(self) -> None:
-        with patch("capstone.chain.find_spec", return_value=None):
-            rows = {row["name"]: row for row in statuses()}
-            self.assertFalse(rows["ingest"]["ready"])
-            self.assertFalse(rows["features"]["ready"])
-            self.assertFalse(rows["model"]["ready"])
-            self.assertIn("placeholder", rows["features"]["reason"])
-            self.assertEqual(first_blocked().name, "ingest")
-            self.assertIn("not importable", rows["ingest"]["reason"])
-
-        with patch("capstone.chain.find_spec", return_value=object()):
-            rows = {row["name"]: row for row in statuses()}
-            self.assertTrue(rows["ingest"]["ready"])
-            self.assertTrue(rows["load-database"]["ready"])
-            self.assertFalse(rows["features"]["ready"])
-            self.assertEqual(first_blocked().name, "features")
+        rows = {row["name"]: row for row in statuses()}
+        # features flipped to ready when phase 4 wrote its body, and nothing in this file or in
+        # chain.py was edited to make that happen -- which is the whole point of deriving it
+        self.assertTrue(rows["features"]["ready"])
+        self.assertEqual(rows["features"]["reason"], "")
+        self.assertFalse(rows["model"]["ready"])
+        self.assertIn("placeholder", rows["model"]["reason"])
+        # stage 1 is not on this interpreter's path, so the chain stops earlier and says so
+        self.assertEqual(first_blocked().name, "ingest")
+        self.assertIn("not importable", rows["ingest"]["reason"])
 
     def test_the_placeholders_refuse_with_their_phase(self) -> None:
-        for function in (features.build, model.train, predict._score_rows):
+        # features.build is absent on purpose: its body landed with phase 4, and
+        # LayerStatusTests in test_capstone_features.py pins that it no longer carries the marker
+        for function in (model.train, predict._score_rows):
             with self.assertRaises(NotReadyError) as caught:
                 function(None, [])  # type: ignore[arg-type]
             self.assertIn("ROADMAP phase", str(caught.exception))
