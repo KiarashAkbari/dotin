@@ -181,6 +181,42 @@ _TYPE_SYNONYMS = {
 }
 
 
+#: how far back a ``DROP FUNCTION`` has to look for the check that guards it. The width is borrowed
+#: from ``unreplaceable_creates`` for the same reason: a guard two pages away belongs to a different
+#: statement, and a window keeps this a per-statement claim.
+_DROP_WINDOW = 1600
+
+
+def stale_drops(sql: str) -> list[dict]:
+    """Every ``DROP FUNCTION`` in *sql*, with the two properties that make it safe.
+
+    ``dynamic`` is the closer one and it is deliberately strict: the drop has to be written as
+    ``EXECUTE format(...)``, i.e. asked of ``pg_proc`` for whichever stale signatures are present,
+    because a literal ``DROP FUNCTION capstone.f(text, timestamptz)`` in a migration is a different
+    claim -- it names one signature and assumes the database is the one that has it.
+
+    ``guarded`` then wants the dependents count and the refusal in front of it. The window is text
+    proximity, not analysis: this cannot judge whether ``dependents > 0`` is the right test, only
+    whether the file shows a reader that a dependent object stops the drop. ``CASCADE`` is refused
+    outright by the test that calls this, which is what keeps the window from being a joke.
+    """
+    body = body_of(sql)
+    found: list[dict] = []
+    for match in re.finditer(r"\bDROP\s+FUNCTION\b", body, re.IGNORECASE):
+        start = match.start()
+        window = body[max(0, start - _DROP_WINDOW) : start]
+        found.append(
+            {
+                "line": body[:start].count("\n") + 1,
+                # the keyword is inside the format string, so the quote in front of it is the seam
+                "dynamic": re.search(r"\bEXECUTE\s+format\(\s*['\"]$", window, re.IGNORECASE)
+                is not None,
+                "guarded": all(marker in window for marker in ("pg_depend", "RAISE EXCEPTION")),
+            }
+        )
+    return found
+
+
 def split_arguments(text: str) -> list[str]:
     """One parameter list, split on the commas that are not inside parentheses.
 
@@ -411,6 +447,53 @@ class StaticSqlContractTests(unittest.TestCase):
                     spelled = ", ".join(types)
                     offenders.append(f"{path.name}:{line}: nothing creates {name}({spelled})")
         self.assertEqual(offenders, [])
+
+    def test_a_stale_overload_is_dropped_only_when_nothing_depends_on_it(self) -> None:
+        """The clean-up that leaves four as-of functions on a re-applied database, not eight.
+
+        Three claims. The drop exists and `004` owns exactly one of them; it is guarded, meaning a
+        dependents count and a refusal are written in front of it; and no `CASCADE` appears anywhere
+        in the directory, so the guard cannot be satisfied by the one keyword that makes it optional.
+        The last is why this is a static test rather than a live one: a `CASCADE` would have to be
+        written down, and what a reader of `004` has to be able to trust is the text.
+        """
+        for path in sql_files():
+            with self.subTest(name=path.name):
+                body = body_of(path.read_text(encoding="utf-8"))
+                self.assertEqual([], re.findall(r"\bCASCADE\b", body, re.IGNORECASE))
+        offenders = [
+            f"{path.name}:{drop['line']}: DROP FUNCTION "
+            + ("with no dependents guard" if not drop["guarded"] else "not asked of pg_proc")
+            for path in sql_files()
+            for drop in stale_drops(path.read_text(encoding="utf-8"))
+            if not (drop["guarded"] and drop["dynamic"])
+        ]
+        self.assertEqual(offenders, [])
+        self.assertEqual(
+            len(stale_drops((SQL_DIR / "004_as_of_functions.sql").read_text(encoding="utf-8"))),
+            1,
+            msg="004 drops the stale overload once, and no other file drops one at all",
+        )
+        # the parser reads what is there: a bare drop has to look different to it, and the safe
+        # spelling has to look like the safe spelling
+        self.assertEqual(
+            [{"line": 1, "dynamic": False, "guarded": False}],
+            stale_drops("DROP FUNCTION capstone.f(text, timestamptz);"),
+            msg="the guard's own tripwire: an unguarded literal drop must not read as a guarded one",
+        )
+        self.assertEqual(
+            [{"line": 3, "dynamic": True, "guarded": True}],
+            stale_drops(
+                "SELECT COUNT(*) INTO dependents FROM pg_depend;\n"
+                "RAISE EXCEPTION 'still used';\n"
+                "EXECUTE format('DROP FUNCTION %I.%I(%s)', n, p, a);"
+            ),
+        )
+        self.assertEqual(
+            [],
+            stale_drops("SELECT COUNT(*) FROM pg_depend;\nRAISE EXCEPTION 'x';\n"),
+            msg="the markers alone are not a drop, and a check that invents offences is not a check",
+        )
 
     def test_no_star_expansion_and_no_write_against_the_source_schema(self):
         offenders: list[str] = []

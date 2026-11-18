@@ -32,6 +32,51 @@
 -- is no naive counterpart to be inconsistent with. What must stay naive is every comparison
 -- against an `olist` timestamp.
 
+-- The stale-overload clean-up, conditional on purpose.
+--
+-- `CREATE OR REPLACE FUNCTION` does not edit a signature, it adds one. A database that ran this
+-- file while `p_at` was `timestamptz` holds eight as-of functions -- the naive four beside the
+-- zoned four -- and `COMMENT ON FUNCTION` attaches to whichever the text names, which is how the
+-- "green" live run of an earlier round proved nothing. The state is not only untidy: on such a
+-- database `003` was applied when only the zoned overload existed, so the frame's view resolves
+-- through `timestamptz` and casts the naive column side through the session zone -- the exact one-hour
+-- disagreement `docs/evidence/live-guards-dotin-run.txt` section 6 measured. Removing the zoned signatures is
+-- therefore part of the fix.
+--
+-- Doing it blindly is not. `003` runs before this file in the same directory, so an unqualified
+-- `DROP … CASCADE` would take the frame with it, and a plain `DROP` would abort the migration with
+-- 2BP01 while looking like a broken file. So the drop is asked, not ordered: no dependents, it
+-- goes quietly (which is every database that has already run this file once); dependents exist, the
+-- migration stops with the order that fixes it -- this file, then `003`, then this file again --
+-- instead of deleting objects nobody asked it to delete.
+DO $drop_stale_as_of_overloads$
+DECLARE
+    stale record;
+    dependents integer;
+BEGIN
+    FOR stale IN
+        SELECT p.oid, p.proname, n.nspname, pg_get_function_identity_arguments(p.oid) AS arguments
+        FROM pg_proc AS p
+        JOIN pg_namespace AS n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'capstone'
+          AND p.proargtypes = ARRAY['text', 'timestamptz']::regtype[]
+    LOOP
+        SELECT COUNT(*) INTO dependents
+        FROM pg_depend
+        WHERE refclassid = 'pg_proc'::regclass AND refobjid = stale.oid;
+        IF dependents > 0 THEN
+            RAISE EXCEPTION
+                'capstone.% is depended on by % object(s), so the stale overload cannot be dropped '
+                'without taking them with it; re-apply sql/004_as_of_functions.sql, then '
+                'sql/003_feature_views.sql, then this file again -- only once the frame resolves '
+                'through the naive signatures can the zoned ones go',
+                stale.proname, dependents;
+        END IF;
+        EXECUTE format('DROP FUNCTION %I.%I(%s)', stale.nspname, stale.proname, stale.arguments);
+    END LOOP;
+END
+$drop_stale_as_of_overloads$;
+
 -- How many orders this buyer had already had, strictly before the decision instant.
 --
 -- `p_customer_id` is an `olist.customers.customer_id` -- the one the frame carries -- but the

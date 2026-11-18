@@ -85,7 +85,23 @@ MUTATIONS = [
         "tests.test_capstone_features.DriverErrorTypeTests"
         ".test_the_guard_file_imports_no_driver_of_its_own",
     ),
-]
+    (
+        "a stale overload dropped with CASCADE",
+        FUNCTIONS_FILE,
+        "        EXECUTE format('DROP FUNCTION %I.%I(%s)', stale.nspname, stale.proname, stale.arguments);",
+        "        EXECUTE format('DROP FUNCTION %I.%I(%s) CASCADE', stale.nspname, stale.proname,"
+        " stale.arguments);",
+        "tests.test_capstone_sql_guards.StaticSqlContractTests"
+        ".test_a_stale_overload_is_dropped_only_when_nothing_depends_on_it",
+    ),
+    (
+        "a stale overload dropped as a literal, not asked of pg_proc",
+        FUNCTIONS_FILE,
+        "        EXECUTE format('DROP FUNCTION %I.%I(%s)', stale.nspname, stale.proname, stale.arguments);",
+        "        DROP FUNCTION IF EXISTS capstone.customer_order_volume_before(text, timestamptz);",
+        "tests.test_capstone_sql_guards.StaticSqlContractTests"
+        ".test_a_stale_overload_is_dropped_only_when_nothing_depends_on_it",
+    ),]
 
 def run_test(dotted: str) -> tuple[int, str]:
     proc = subprocess.run(
