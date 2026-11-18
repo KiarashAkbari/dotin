@@ -627,7 +627,8 @@ class LiveSqlContractTests(unittest.TestCase):
             raise unittest.SkipTest(
                 "CAPSTONE_DATABASE_URI is unset (or no driver/connection), so the live SQL "
                 "guards were NOT verified: the frame's column dependencies, the feature and "
-                "source counts, the label separation and the as-of agreement stay unverified"
+                "source counts, the label separation, the as-of agreement, the audit mirror "
+                "beside its CSV and the type of every number both paths produce stay unverified"
             )
         with cls.connection.cursor() as cursor:
             cursor.execute("SELECT to_regclass('capstone.v_feature_frame')")
@@ -708,6 +709,39 @@ class LiveSqlContractTests(unittest.TestCase):
             if column is not None
         ]
 
+    def test_the_audit_table_holds_the_rows_the_repository_ships(self):
+        """``capstone.column_audit`` and ``docs/evidence/column_audit.csv`` are the same table.
+
+        The guards are fail-closed by design: an empty ``column_audit`` refuses every column, and
+        a live run then reports errors about the feature frame that have nothing to do with it --
+        two ERRORs naming `v_feature_frame`, with the cause one ``RAISE`` deep inside
+        ``require_allowed``. So the precondition is a test now, and it fails with the command that
+        fixes it. Row by row rather than by count, because a count agrees while verdicts disagree,
+        and that is the version of this that would actually mislead someone.
+        """
+        rows = self.query(
+            'SELECT "table", "column", verdict FROM capstone.column_audit'
+            ' ORDER BY "table", "column"'
+        )
+        self.assertGreater(
+            len(rows),
+            0,
+            msg="capstone.column_audit is empty; the guards refuse everything by design. Load"
+                " it with: python3 scripts/load_column_audit.py | psql"
+                ' "$CAPSTONE_DATABASE_URI" -v ON_ERROR_STOP=1 -f -',
+        )
+        from capstone import audit
+
+        expected = [
+            (row.table, row.column, row.verdict)
+            for row in sorted(audit.load_audit(AUDIT_CSV), key=lambda row: (row.table, row.column))
+        ]
+        self.assertEqual(
+            [tuple(str(value) for value in row) for row in rows],
+            [tuple(row) for row in expected],
+            msg="the table does not match the CSV; reload it, do not edit the table",
+        )
+
     def test_the_frame_reads_no_column_the_audit_forbids(self):
         columns = sorted({f"{table}.{column}" for table, column in self.frame_source_columns()})
         self.assertGreater(len(columns), 0, msg="the catalog reported no dependencies at all")
@@ -771,6 +805,76 @@ class LiveSqlContractTests(unittest.TestCase):
                 (expected[0], round(expected[1], 6) if expected[1] is not None else None),
                 msg=order_id,
             )
+
+    def test_the_two_paths_agree_in_type_as_well_as_value(self):
+        """The same number out of both implementations, and the same type.
+
+        ``test_the_window_and_the_plain_as_of_query_agree`` above catches a wrong formula. It does
+        not catch a frame column that arrives as ``Decimal`` while the function's ``RETURNS double
+        precision`` arrives as ``float``, because ``assertAlmostEqual`` forgives that; and a view's
+        column types come from its expressions, not from a declaration, so they move whenever
+        someone rewrites a view. Cheap to check, and it is the check that has to sit next to the
+        value comparison for either of them to mean anything.
+        """
+        types = {
+            str(row[0]): str(row[1])
+            for row in self.query(
+                """
+                SELECT a.attname, t.typname
+                FROM pg_attribute AS a
+                JOIN pg_type AS t ON t.oid = a.atttypid
+                WHERE a.attrelid = 'capstone.v_feature_frame'::regclass
+                  AND a.attname IN ('days_since_prior_order', 'shipping_limit_days', 'promise_days')
+                """
+            )
+        }
+        self.assertEqual(sorted(types), [
+            "days_since_prior_order",
+            "promise_days",
+            "shipping_limit_days",
+        ], msg=str(sorted(types)))
+        for name in sorted(types):
+            self.assertEqual(
+                types[name],
+                "float8",
+                msg=f"{name} is {types[name]}; a float8 beside a numeric is how one value"
+                    " becomes Decimal from one path and a float from the other",
+            )
+        for signature in (
+            "capstone.customer_days_since_prior_order(text, timestamp)",
+            "capstone.seller_mean_price_before(text, timestamp)",
+        ):
+            self.assertEqual(
+                str(self.query(f"SELECT pg_get_function_result('{signature}'::regprocedure)")[0][0]),
+                "double precision",
+                msg=f"{signature} no longer returns the type the frame stores",
+            )
+            # and it takes the instant in the same type the frame stores it in. A `timestamp`
+            # column compared against a `timestamptz` parameter is resolved through the session
+            # zone, which is how the same number can differ by an hour between the two paths.
+            arguments = str(
+                self.query(f"SELECT pg_get_function_arguments('{signature}'::regprocedure)")[0][0]
+            )
+            self.assertIn("timestamp without time zone", arguments, msg=f"{signature}: {arguments}")
+        anchor_type = str(
+            self.query(
+                "SELECT t.typname FROM pg_attribute AS a JOIN pg_type AS t ON t.oid = a.atttypid"
+                " WHERE a.attrelid = 'capstone.v_feature_frame'::regclass"
+                " AND a.attname = 'order_approved_at'"
+            )[0][0]
+        )
+        self.assertEqual(
+            anchor_type,
+            "timestamp",
+            msg="the frame's anchor is naive, and every as-of comparison must stay naive with it",
+        )
+        # and the one float8 aggregate in the frame must not be a float8 aggregate
+        centroid = self.query(
+            "SELECT data_type FROM information_schema.columns"
+            " WHERE table_schema = 'capstone' AND table_name = 'v_zip_centroid'"
+            " AND column_name IN ('lat', 'lng') ORDER BY column_name"
+        )
+        self.assertEqual([str(row[0]) for row in centroid], ["numeric", "numeric"], msg=str(centroid))
 
     def test_reapplying_the_directory_changes_nothing(self):
         """Idempotency, tested rather than asserted: run the directory again, compare."""
