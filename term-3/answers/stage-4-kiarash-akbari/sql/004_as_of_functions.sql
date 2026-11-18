@@ -39,8 +39,7 @@
 -- zoned four -- and `COMMENT ON FUNCTION` attaches to whichever the text names, which is how the
 -- "green" live run of an earlier round proved nothing. The state is not only untidy: on such a
 -- database `003` was applied when only the zoned overload existed, so the frame's view resolves
--- through `timestamptz` and casts the naive column side through the session zone -- the exact one-hour
--- disagreement `docs/evidence/live-guards-dotin-run.txt` section 6 measured. Removing the zoned signatures is
+-- through `timestamptz` and casts the naive column side through the session zone -- the exact one-hour disagreement `docs/evidence/live-guards-dotin-run.txt` section 6 measured. Removing the zoned signatures is
 -- therefore part of the fix.
 --
 -- Doing it blindly is not. `003` runs before this file in the same directory, so an unqualified
@@ -49,6 +48,29 @@
 -- goes quietly (which is every database that has already run this file once); dependents exist, the
 -- migration stops with the order that fixes it -- this file, then `003`, then this file again --
 -- instead of deleting objects nobody asked it to delete.
+--
+--
+-- The predicate is `oidvector = oidvector`, and the three spellings that look equivalent are not:
+--
+--   proargtypes = ARRAY['text', 'timestamptz']::regtype[]      -- does not parse: there is no
+--                                                               -- `oidvector = regtype[]` operator, and
+--                                                               -- the apply aborts with
+--                                                               -- UndefinedFunction (42883)
+--   proargtypes::oid[] = ARRAY[...]::oid[]                      -- parses, and is always false: the
+--                                                               -- cast keeps the vector's zero-based
+--                                                               -- bounds, so `[0:1]` never equals the
+--                                                               -- `[1:2]` that ARRAY[] builds
+--   proargtypes = 'text'::regtype AND ...                       -- compares a two-element vector to one
+--                                                               -- scalar and matches nothing either
+--
+-- A predicate that only ever returns false is the worst of the three: the migration exits 0, prints
+-- the notice about what it converged, and leaves the database with eight functions behind an
+-- ambiguous view. The first two of these shipped in earlier revisions of this file and were caught
+-- only by running it. So the comparison stays on `oidvector`, whose `=` exists and ignores bounds, and
+-- the expected types are named through `regtype` so that no OID is hard-coded here.
+-- `tests/test_postgres_smoke.py` asserts both halves of this: that the block fires on a database that
+-- has stale overloads, and that the count it drops is the count the student's own database had (four, on
+-- the report of round 102 -- which is why `\df capstone.*` ending at four is the check to run).
 DO $drop_stale_as_of_overloads$
 DECLARE
     stale record;
@@ -59,7 +81,12 @@ BEGIN
         FROM pg_proc AS p
         JOIN pg_namespace AS n ON n.oid = p.pronamespace
         WHERE n.nspname = 'capstone'
-          AND p.proargtypes = ARRAY['text', 'timestamptz']::regtype[]
+          -- the four names this file owns, and only they: a sweep of "every capstone function with
+          -- that shape" would also drop a function added later on purpose, and a migration may not
+          -- delete what it never created
+          AND p.proname IN ('customer_order_volume_before', 'customer_days_since_prior_order',
+                            'seller_order_volume_before', 'seller_mean_price_before')
+          AND p.proargtypes = ARRAY['text'::regtype, 'timestamptz'::regtype]::oidvector
     LOOP
         SELECT COUNT(*) INTO dependents
         FROM pg_depend
@@ -73,6 +100,9 @@ BEGIN
                 stale.proname, dependents;
         END IF;
         EXECUTE format('DROP FUNCTION %I.%I(%s)', stale.nspname, stale.proname, stale.arguments);
+        -- out loud, because the silence is how this went unnoticed: a re-apply that changes the
+        -- database is not a re-apply that changes nothing, and the log line is what tells the two apart
+        RAISE NOTICE 'dropped the stale overload %.% (%)', stale.nspname, stale.proname, stale.arguments;
     END LOOP;
 END
 $drop_stale_as_of_overloads$;

@@ -21,3 +21,15 @@
 # not a contract about what this phase needs. They are in stage 3's file, unchanged, until then.
 psycopg==3.3.6
 psycopg-binary==3.3.6
+#
+# Optional, and only for tests/test_postgres_smoke.py, which starts a throwaway PostgreSQL so that a
+# catalog predicate is executed rather than read. Deliberately not pinned above: a bundled server is not
+# a dependency of the deliverable, and a reader who never runs that module needs nothing.
+#
+#   python3 -m venv .venv && .venv/bin/pip install "pgserver==0.1.4" "psycopg2-binary==2.9.13"
+#
+# psycopg 3, pinned above, is the driver the smoke module also uses; psycopg2 is there only so
+# DriverAgreementTests can name two exception classes and compare them. With no extra installed the
+# module skips and prints why -- and `CAPSTONE_SMOKE_DATABASE_URI=<uri>
+# CAPSTONE_SMOKE_ALLOW_DESTROY=1` runs the same ten tests against a server you chose, which is the
+# shorter path if you already have one.
