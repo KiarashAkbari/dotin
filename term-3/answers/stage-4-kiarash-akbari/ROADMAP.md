@@ -279,7 +279,11 @@
    روی پایگاهی که نسخهٔ زون‌دار از قبل داشت، `CREATE OR REPLACE FUNCTION` تابعِ با نوعِ آرگومان
    عوض‌شده را ویرایش نمی‌کند بلکه دومی می‌سازد، پس `COMMENT` به همانِ کهنه می‌چسبد و هیچ خطایی
    نمی‌دهد؛ روی پایگاه تازه همان statement با 42704 می‌شکند. «سبز بودنِ اجرای زنده» روی state کهنه
-   شاهد نیست. اصلاح در همین شاخه (commit `335d740`) و گارد ایستای `test_a_comment_never_names_a_signature_the_directory_does_not_create`.
+   شاهد نیست. اصلاح در patchset این دور آمده — دومین patch از چهارتا، با subject
+   `fix(stage4): a COMMENT must name a signature this directory creates, and 004's did not` — و
+   گارد ایستای `test_a_comment_never_names_a_signature_the_directory_does_not_create` همان‌جا هست.
+   عمداً هشِ commit نیامده: `git am` دوباره‌شان می‌سازد و همان تغییرِ sha، هر ارجاع هش‌دار را در
+   مستنداتِ تحویلی می‌شکند؛ subject، نشانیِ ماندگار است.
 10. «`004` را جدا دوباره اعمال کن» کافی نیست: چون دیدهای `003` می‌توانند به اورلود کهنه وابسته
     باشند، `DROP FUNCTION … CASCADE` عمداً در `004` ننوشته شده. روی پایگاه آلوده، `003` و `004` را
     با هم دوباره اعمال کن و بعد `\df capstone.*` را ببین — باید دقیقاً چهار تابع با `timestamp`
