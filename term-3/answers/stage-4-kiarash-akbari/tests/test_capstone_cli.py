@@ -15,6 +15,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import patch
 
@@ -79,9 +80,22 @@ class ChainPlanTest(unittest.TestCase):
         self.assertEqual(rows["features"]["reason"], "")
         self.assertFalse(rows["model"]["ready"])
         self.assertIn("placeholder", rows["model"]["reason"])
-        # stage 1 is not on this interpreter's path, so the chain stops earlier and says so
-        self.assertEqual(first_blocked().name, "ingest")
-        self.assertIn("not importable", rows["ingest"]["reason"])
+        # Where the chain stops is a fact about the interpreter, not about this code: the two stage-1
+        # steps count as ready exactly when ``find_spec`` can see that package, so in a venv that has
+        # stage 1 installed the chain stops at ``model`` -- and the hard-coded "ingest" used to fail
+        # there, which punished a working setup. So the test asks the same question ``implemented()``
+        # asks and checks the answer that follows. Both branches assert: skipping the ready case
+        # would let a chain that ignores stage 1 pass unnoticed.
+        stage_one = find_spec("data_factory") is not None
+        if stage_one:
+            self.assertTrue(
+                rows["ingest"]["ready"],
+                msg="stage 1 is importable here, so ingest cannot be the blocker the chain names",
+            )
+            self.assertEqual(first_blocked().name, "model")
+        else:
+            self.assertEqual(first_blocked().name, "ingest")
+            self.assertIn("not importable", rows["ingest"]["reason"])
 
     def test_the_placeholders_refuse_with_their_phase(self) -> None:
         # features.build is absent on purpose: its body landed with phase 4, and
