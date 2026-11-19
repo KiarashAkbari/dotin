@@ -30,7 +30,9 @@ from .chain import statuses
 from .config import CapstoneConfig, load_config, load_contract
 from .doctor import report as doctor_report
 from .doctor import run as run_checks
+from . import external as external_signal
 from .errors import AuditError, CapstoneError, ConfigError
+from .features import database_uri
 from .exit_codes import ExitCode
 from .predict import score_file
 
@@ -264,6 +266,52 @@ def command_step(args: argparse.Namespace) -> int:
     return ExitCode.OK
 
 
+def command_external(args: argparse.Namespace) -> int:
+    """The external signal: what is configured, and -- if asked -- the fetch, the load, the match rate.
+
+    Four modes, in the order a person needs them. With no flags this prints the configuration and
+    stops, which is the answer on a machine that cannot reach the endpoint. ``--fetch`` performs one
+    request and reports how many rows came back, writing nothing and needing no database. ``--report``
+    reads ``capstone.v_external_match_rate`` from the server. ``--load`` does both, storing through
+    ``capstone.upsert_external_municipio`` first -- it fetches by itself rather than storing the empty
+    list it was never handed. Every failure is a ``SourceError`` or a ``NotReadyError`` with a sentence
+    attached, because an unavailable external source is a finding to report, not a crash to debug.
+    """
+    config = _load(args, decided=False)
+    if not (args.fetch or args.load or args.report):
+        try:
+            uri = database_uri(config, purpose="report the external signal")
+        except ConfigError:
+            # "no database on this machine" is a state this command reports, not a failure; the
+            # status block below says which half is missing instead of printing a traceback
+            uri = None
+        status = external_signal.status(config, uri=uri)
+        if args.json:
+            print(json.dumps(status, ensure_ascii=False, sort_keys=True))
+        else:
+            for key, value in status.items():
+                print(f"{key}: {value}")
+        return ExitCode.OK
+    report = external_signal.refresh(
+        config,
+        fetch_rows=args.fetch or args.load,
+        store=args.load,
+        report=args.report or args.load,
+    )
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return ExitCode.OK
+    fetched = report["fetched"]
+    print(f"fetched: {fetched} row(s)" if fetched is not None else "fetched: not attempted")
+    if report["match_rate"] is None:
+        print("match rate: not read (pass --report or --load to ask the database)")
+    else:
+        print(external_signal.describe(config, report["match_rate"], report["stored"]))
+        for row in report["unmatched_cities"] or []:
+            print(f"      unmatched: {row['city']}|{row['uf']} ({row['orders']} orders)")
+    return ExitCode.OK
+
+
 def command_predict(args: argparse.Namespace) -> int:
     """Validate a fresh order file and hand it to the scoring layer."""
     config = _load(args, decided=True)
@@ -345,6 +393,25 @@ def build_parser() -> argparse.ArgumentParser:
             help=f"run the {step.name!r} step of the chain (roadmap phase {step.phase})",
         )
         step_parser.set_defaults(func=command_step, step=step.name)
+
+    external = sub.add_parser(
+        "external",
+        parents=(_CONFIG_PARENT,),
+        help="the external signal: what is configured, then fetch and match rate on request",
+    )
+    external.add_argument("--fetch", action="store_true", help="call the configured endpoint once")
+    external.add_argument(
+        "--report",
+        action="store_true",
+        help="read capstone.v_external_match_rate from the database (implied by --load)",
+    )
+    external.add_argument(
+        "--load",
+        action="store_true",
+        help="store what the fetch returned through capstone.upsert_external_municipio",
+    )
+    external.add_argument("--json", action="store_true")
+    external.set_defaults(func=command_external)
 
     predict = sub.add_parser("predict", parents=(_CONFIG_PARENT,), help="rank a fresh order file")
     predict.add_argument("--input", required=True, help="a CSV with the orders schema")

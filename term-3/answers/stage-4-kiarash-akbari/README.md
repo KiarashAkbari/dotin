@@ -45,6 +45,7 @@ for f in sql/0*.sql; do psql "$CAPSTONE_DATABASE_URI" -v ON_ERROR_STOP=1 -f "$f"
 | `python -m capstone audit --print-header` | سرستون دقیق `column_audit.csv` را چاپ می‌کند | همین حالا |
 | `python -m capstone audit --template-out <path>` | برای هر ستونِ DDL یک سطر `unverified` می‌نویسد؛ هیچ ستونی با این فایل مجاز نمی‌شود | فاز ۲ |
 | `python -m capstone audit --coverage --require-complete` | می‌گوید کدام ستون‌ها هنوز ممیزی نشده‌اند و با کد `65` می‌ایستد | فاز ۲ |
+| `python -m capstone external [--fetch] [--report] [--load]` | لایهٔ منبع بیرونی، سه حالت جدا: بدون آرگومان فقط می‌گوید چه تنظیم شده و به دیتابیس نیازی ندارد؛ `--fetch` **یک** درخواست می‌زند (بی retry، بی pagination — سقف درخواستِ IBGE مستند نیست) و تعداد سطری که از قراردادِ پاسخ رد نشده‌اند را چاپ می‌کند؛ `--report` نرخ تطابق را از `capstone.v_external_match_rate` برمی‌دارد؛ `--load` اول می‌گیرد بعد می‌ریزد، و ریختن فقط از `capstone.upsert_external_municipio` است. منبعِ تنظیم‌نشده کد `67` می‌دهد نه traceback، نبودِ دیتابیس `78`، و مسیرِ شبکه اگر بست بود پیام می‌دهد نه استثنا | همین حالا؛ خودِ API از این محیط سنجیده نشده (`decisions.md` §۸) |
 | `python -m capstone chain --dry-run [--json]` | پنج گام زنجیره را با دلیلِ بلوکه‌شدن چاپ می‌کند | فاز ۶ |
 | `python -m capstone chain` | هر گام را با زمان‌گیر جدا اجرا می‌کند و manifest می‌نویسد | فاز ۶ |
 | `python -m capstone predict --input <csv>` | schema فایل تازه را می‌سنجد؛ اگر درست بود، جلوی مدلِ نوشته‌نشده می‌ایستد | فاز ۶ |
