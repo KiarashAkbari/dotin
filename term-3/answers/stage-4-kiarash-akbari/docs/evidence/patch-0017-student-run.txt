@@ -1,0 +1,48 @@
+student's own run of patch 0017 -- recorded, not reproduced
+============================================================
+
+Provenance. Supplied by Kiarash Akbari in chat on 2026-10-26, after applying
+`0017-docs-stage4-0017-the-key-s-city-comes-from-the-recor.patch` to his own clone. The local commit
+after `git am` is `5daba61`; the patch applied without conflict. Every line under the markers below is
+his, transcribed as sent. Nothing in this file was produced in the agent's sandbox, no number here was
+recomputed by anybody else, and the database it describes is his `olist_phase0_test` -- not a disposable
+cluster and not a fixture.
+
+The sandbox's own run of the same harness lives in `docs/evidence/patch-0017-run.txt` (112 lines, section
+4 included, because the sandbox has `pgserver` and this machine does not). That log is a separate record
+of a different question: it shows the key format flips `0 of 3` to `3 of 3` on a cluster the harness
+seeds itself. This file is the measurement on the project's own corpus.
+
+[harness, on his machine]
+  Ran 308 tests ... OK (skipped=14)
+  section 4 skipped: pgserver is not installed
+
+[real run on olist_phase0_test]
+  --fetch --load:
+    fetched: 5570 row(s)
+    uf map: 5570 of 5571 municipality codes and their names
+    stored: 5570 row(s)
+  --report:
+    match rate: 4014 of 4310 (city, uf) keys = 0.9313; the external table holds 4014 key(s)
+
+[key read back out of the database directly, after 0017]
+  1100015 -> alta floresta d'oeste|ro
+  3304557 -> rio de janeiro|rj
+  3550308 -> sao paulo|sp
+
+[unmatched keys -- recorded as a limitation, not as a defect to patch around]
+  296 keys of 4310 do not join (4310 - 4014, the two numbers above).
+  the examples he named are spelling / naming differences between the two sources:
+    mogi-guacu|sp
+    piumhii|mg
+    santana do livramento|rs
+  no fuzzy matching and no name guessing: a key that does not join stays unmatched.
+
+What this file deliberately does not claim. It is not a lift measurement and not a model result -- item
+12.5 asked for the signal to be fetched, stored and reported on the project's own database, and that is
+what is recorded here. The 296 unmatched keys are not split by cause: the list of them was not run, so
+no count per cause appears anywhere in this patch. One arithmetic consequence is worth a query, not a
+claim: `uf map: 5570 of 5571` says exactly one consulted code came back without a name from the
+administrative list, and such a row keeps the display spelling, suffix and all --
+`SELECT city_state FROM capstone.external_municipio WHERE city_state LIKE '% - %';` will say whether
+that one is among the 296. Whether it is has not been measured here.
