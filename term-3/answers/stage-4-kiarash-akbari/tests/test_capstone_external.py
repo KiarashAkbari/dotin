@@ -163,7 +163,8 @@ class NormalizeTests(unittest.TestCase):
                 self.assertIn("N<level>[<code>]", str(caught.exception))
 
     def test_a_locality_with_no_name_or_uf_cannot_be_keyed(self) -> None:
-        for field in ("nome", "uf"):
+        """Two refusals, because only one of them is a lookup away from a row."""
+        for field, expect in (("nome", "has no name"), ("uf", "carries no uf")):
             with self.subTest(field=field):
                 payload = json.loads(json.dumps(GOOD_PAYLOAD))
                 payload["result"][0]["localidades"][0][field] = None
@@ -171,7 +172,7 @@ class NormalizeTests(unittest.TestCase):
                     payload["result"][0]["localidades"][0]["uf"] = {}
                 with self.assertRaises(SourceError) as caught:
                     external.normalize(payload)
-                self.assertIn("name or uf", str(caught.exception))
+                self.assertIn(expect, str(caught.exception))
 
     def test_an_empty_answer_is_reported_as_empty(self) -> None:
         """A 200 with no rows is the classic dead-parameter case, and storing it silently is the harm.
@@ -513,13 +514,22 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(
             [line.strip() for line in header_lines],
             [
-                "credentials = token(config, environ if environ is not None else _environ())",
+                "credentials = token(config, environ)",
                 "if credentials:",
                 'headers["Authorization"] = f"Bearer {credentials}"',
             ],
             msg="the fetch reads the token once and puts it in exactly one place",
         )
         self.assertNotIn("--token", source, msg="a secret never becomes a command-line argument")
+        # the second GET is the new risk: a shared transport helper that authorises *both* URLs would
+        # send the token to whichever host the reference points at, so the two call sites are pinned by
+        # their own flag rather than by a message that happens not to mention the secret
+        self.assertEqual(
+            source.count("authorize=True"), 1, msg="only the configured URL is authenticated"
+        )
+        self.assertEqual(
+            source.count("authorize=False"), 1, msg="the reference is fetched without the token"
+        )
 
 class LiveExternalGuardTests(unittest.TestCase):
     """The one question offline tests cannot answer: does the join hold on a real server.
@@ -803,19 +813,20 @@ class IbgeDataShapeTests(unittest.TestCase):
     def test_a_missing_uf_names_the_keys_it_looked_for(self) -> None:
         """The join key is ``<city>|<uf>``, and 163 city names recur in two or more states.
 
-        So no UF is not a small omission: the alternative to refusing is inventing a state, and the
-        IBGE code's first two digits are exactly that invention -- a mapping this repository has no
-        witness for. The message lists the locality's own keys so one paste of a real object is enough
-        to teach the parser wherever the sigla actually lives.
+        So no UF is not a small omission: the alternative is inventing a state, which is what the
+        refusal says, and it lists the locality's own keys so one paste of a real object is enough to
+        teach the parser wherever the sigla actually lives. The lookup that resolves this is
+        ``UfReferenceTests``; this test pins that *without* the reference the run stops here.
         """
         payload = data_payload(**{"resultados.0.series.0.localidade.uf": _DROP})
         with self.assertRaises(SourceError) as caught:
             external.normalize(payload)
         message = str(caught.exception)
-        self.assertIn("name or uf", message)
+        self.assertIn("carries no uf", message)
         for key in ("id", "nome", "nivel"):
             self.assertIn(key, message, msg="the keys it had are the diagnosis")
         self.assertIn("decisions.md", message, msg="and the reason is a decision, not a bug")
+        self.assertEqual(caught.exception.context.get("missing_uf"), "1100015")
 
     def test_a_uf_may_ride_on_the_block_or_the_variable_element(self) -> None:
         """The sigla is looked for in a few documented places -- and only those."""
@@ -877,6 +888,237 @@ class IbgeDataShapeTests(unittest.TestCase):
                 with self.assertRaises(SourceError) as caught:
                     external.normalize(payload)
                 self.assertIn("is not the one this parser was written against", str(caught.exception))
+
+
+#: the municipality list's own shape, verbatim from the six leading entries of
+#``https://servicodados.ibge.gov.br/api/v1/localidades/municipios``: the code, the name, and the
+#: state two levels down. This is the witness the previous round did not have -- the first two digits
+#: of an IBGE code are a state code, and the list says so for every municipality instead of trusting
+#: a rule.
+UF_MAP_SAMPLE = [
+    {
+        "id": 1100015,
+        "nome": "Alta Floresta D'Oeste",
+        "microrregiao": {
+            "id": 11006,
+            "nome": "Cacoal",
+            "mesorregiao": {"id": 1102, "nome": "Leste Rondoniense", "UF": {"id": 11, "sigla": "RO"}},
+        },
+    },
+    {
+        "id": 1100023,
+        "nome": "Ariquemes",
+        "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}},
+    },
+    {"id": 1100031, "nome": "Cabixi", "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}},
+    {"id": 1100372, "nome": "Porto Velho", "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}},
+    {"id": 3550308, "nome": "Guarulhos", "microrregiao": {"mesorregiao": {"UF": {"sigla": "SP"}}}},
+    {"id": 3304557, "nome": "Rio de Janeiro", "microrregiao": {"mesorregiao": {"UF": {"sigla": "RJ"}}}},
+]
+
+
+class UfReferenceTests(unittest.TestCase):
+    """The municipality list that supplies the state the agregados response omits.
+
+    The exchange this class buys is one small GET for the whole run, spent only when the response
+    turned out to be missing a ``uf``. Everything else about it is refusal: an unknown code, a
+    non-list, a reference that parsed to nothing. A signal whose state was *guessed* is worse than a
+    signal that never arrived, because the guess joins confidently to orders in the wrong state.
+    """
+
+    def payload_without_uf(self) -> dict:
+        return data_payload(
+            **{
+                "resultados.0.series.0.localidade.uf": _DROP,
+                "resultados.0.series.1.localidade.uf": _DROP,
+            }
+        )
+
+    def test_the_reference_supplies_the_state_the_response_omits(self) -> None:
+        mapping, seen, with_uf = external.parse_uf_map(UF_MAP_SAMPLE)
+        self.assertEqual((seen, with_uf), (6, 6))
+        self.assertEqual(mapping["1100015"], "RO")
+        rows = external.normalize(self.payload_without_uf(), uf_by_code=mapping)
+        self.assertEqual(
+            [row.city_state for row in rows],
+            ["municipio um|ro", "municipio dois|sp"],
+            msg="the join key is built from the reference, per code",
+        )
+
+    def test_the_response_wins_when_it_does_name_a_uf(self) -> None:
+        """A table about the code never overrides an answer about the place.
+
+        The reference and the response can only disagree if one of them is stale, and the row that
+        joins to orders is the one the audit can be checked against -- so the response is trusted and
+        the disagreement stays visible in the row rather than being averaged away.
+        """
+        mapping = {"1100015": "SP"}
+        rows = external.normalize(IBGE_DATA_PAYLOAD, uf_by_code=mapping)
+        self.assertEqual(rows[0].city_state, "municipio um|ro", msg="the response said RO")
+
+    def test_a_code_the_reference_does_not_know_is_refused(self) -> None:
+        payload = data_payload(**{
+            "resultados.0.series.0.localidade.uf": _DROP,
+            "resultados.0.series.0.localidade.id": "9909999",
+            "resultados.0.series.1.localidade.uf": _DROP,
+        })
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(payload, uf_by_code={"1100015": "RO"})
+        message = str(caught.exception)
+        self.assertIn("9909999", message, msg="the code is the diagnosis")
+        self.assertIn(external.LOCALIDADES_URL, message, msg="and so is the list that did not know it")
+
+    def test_parse_accepts_both_spellings_of_the_id_and_skips_what_has_no_uf(self) -> None:
+        entries = [{"id": "1100015", "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}}]
+        mapping, seen, with_uf = external.parse_uf_map(entries)
+        self.assertEqual(mapping, {"1100015": "RO"})
+        self.assertEqual((seen, with_uf), (1, 1))
+        blank = [
+            {"id": 1100015, "nome": "no uf anywhere in this entry"},
+            {"id": 1100023, "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}},
+        ]
+        mapping, seen, with_uf = external.parse_uf_map(blank)
+        self.assertEqual(mapping, {"1100023": "RO"}, msg="one entry without a UF is not a broken list")
+        self.assertEqual((seen, with_uf), (2, 1))
+
+    def test_a_reference_that_is_not_a_list_is_refused_with_its_own_words(self) -> None:
+        for payload in ({"errors": ["no"]}, "<html>", None):
+            with self.subTest(payload=type(payload).__name__):
+                with self.assertRaises(SourceError) as caught:
+                    external.parse_uf_map(payload)
+                self.assertIn("municipality reference", str(caught.exception))
+        with self.assertRaises(SourceError) as caught:
+            external.parse_uf_map([{"nome": "sem código"}])
+        self.assertIn("no usable municipality code", str(caught.exception))
+        with self.assertRaises(SourceError) as caught:
+            external.parse_uf_map([])
+        self.assertIn("no usable", str(caught.exception))
+
+    def test_the_second_request_is_spent_only_when_a_state_is_missing(self) -> None:
+        calls: list[str] = []
+
+        def opener(url: str, headers: dict) -> str:
+            calls.append(url)
+            if url == external.LOCALIDADES_URL:
+                return json.dumps(UF_MAP_SAMPLE)
+            return json.dumps(IBGE_DATA_PAYLOAD)
+
+        config = config_with(
+            name=external.IBGE_AREGADOS, url="https://example.invalid/agregados", join_on="city_state"
+        )
+        rows = external.fetch(config, opener=opener, environ={})
+        self.assertEqual([row.city_state for row in rows][0], "municipio um|ro")
+        self.assertEqual(calls, ["https://example.invalid/agregados"], msg="the response had its siglas")
+
+        calls.clear()
+        external.fetch(config, opener=opener, environ={}, force_reference=True)
+        self.assertEqual(
+            calls,
+            ["https://example.invalid/agregados", external.LOCALIDADES_URL],
+            msg="one reference request per run, whatever the count of localities",
+        )
+
+    def test_the_reference_url_is_the_official_list_unless_the_environment_moves_it(self) -> None:
+        """The seam exists so this can be tested with no network; nothing else should set it."""
+        self.assertEqual(
+            external.LOCALIDADES_URL,
+            "https://servicodados.ibge.gov.br/api/v1/localidades/municipios",
+        )
+        calls: list[str] = []
+
+        def opener(url: str, headers: dict) -> str:
+            calls.append(url)
+            if url.endswith("/municipios"):
+                return json.dumps(
+                    [
+                        {"id": 1100015, "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}},
+                        {"id": 3550308, "microrregiao": {"mesorregiao": {"UF": {"sigla": "SP"}}}},
+                    ]
+                )
+            return json.dumps(self.payload_without_uf())
+
+        config = config_with(
+            name=external.IBGE_AREGADOS, url="https://example.invalid/agregados", join_on="city_state"
+        )
+        rows = external.fetch(
+            config,
+            opener=opener,
+            environ={"CAPSTONE_IBGE_LOCALIDADES_URL": "http://127.0.0.1:8099/municipios"},
+        )
+        self.assertEqual(rows[0].city_state, "municipio um|ro")
+        self.assertEqual(calls[1], "http://127.0.0.1:8099/municipios")
+
+    def test_a_failed_reference_leaves_the_first_refusal_visible(self) -> None:
+        def opener(url: str, headers: dict) -> str:
+            if url == external.LOCALIDADES_URL:
+                raise OSError("Network is unreachable")
+            return json.dumps(self.payload_without_uf())
+
+        config = config_with(
+            name=external.IBGE_AREGADOS, url="https://example.invalid/agregados", join_on="city_state"
+        )
+        with self.assertRaises(SourceError) as caught:
+            external.fetch(config, opener=opener, environ={})
+        message = str(caught.exception)
+        self.assertIn("could not fetch", message, msg="the transport failure is the finding")
+        self.assertIn("municipality reference", message, msg="and it says which fetch failed")
+
+    def test_the_cli_says_when_it_had_to_ask_for_the_map(self) -> None:
+        """One line, because a second request nobody mentions is indistinguishable from a bug.
+
+        ``refresh`` is replaced rather than the transport: the line under test is the print, and a
+        stubbed fetch would exercise the parser again while leaving the report format unpinned.
+        """
+        original = cli.external_signal.refresh
+        report = {
+            "fetched": 2,
+            "stored": None,
+            "match_rate": None,
+            "unmatched_cities": None,
+            "uf_reference": {
+                "url": "https://servicodados.ibge.gov.br/api/v1/localidades/municipios",
+                "entries": 5570,
+                "codes": 5568,
+            },
+        }
+        try:
+            cli.external_signal.refresh = lambda *args, **kwargs: report
+            with captured() as out:
+                code = cli.main(
+                    [
+                        "external",
+                        "--config", str(STAGE / "config" / "capstone.example.toml"),
+                        "--fetch",
+                    ]
+                )
+        finally:
+            cli.external_signal.refresh = original
+        self.assertEqual(int(code), 0)
+        self.assertIn("uf map: 5568 of 5570 municipality codes", out.getvalue())
+        report.pop("uf_reference")
+        try:
+            cli.external_signal.refresh = lambda *args, **kwargs: report
+            with captured() as quiet:
+                cli.main(["external", "--config", str(STAGE / "config" / "capstone.example.toml"), "--fetch"])
+        finally:
+            cli.external_signal.refresh = original
+        self.assertNotIn("uf map", quiet.getvalue(), msg="no line when no request was spent")
+
+    def test_refresh_reports_the_reference_it_used(self) -> None:
+        def opener(url: str, headers: dict) -> str:
+            if url == external.LOCALIDADES_URL:
+                return json.dumps(UF_MAP_SAMPLE)
+            return json.dumps(self.payload_without_uf())
+
+        notes: dict = {}
+        config = config_with(
+            name=external.IBGE_AREGADOS, url="https://example.invalid/agregados", join_on="city_state"
+        )
+        rows = external.fetch(config, opener=opener, environ={}, notes=notes)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(notes["uf_reference"]["codes"], 6)
+        self.assertEqual(notes["uf_reference"]["url"], external.LOCALIDADES_URL)
+
 
 
 if __name__ == "__main__":

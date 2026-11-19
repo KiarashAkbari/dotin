@@ -401,6 +401,58 @@ def _code_and_level(
     return bracketed.group("code") if bracketed is not None else text
 
 
+#: where a municipality's state lives in IBGE's own administrative list
+UF_IN_LIST_PATH = ("microrregiao", "mesorregiao", "UF", "sigla")
+#: the list that turns a seven-digit municipality code into the two letters ``005`` keys on. It is a
+#: module constant and not a config key because it is not the student's decision: which agregado and
+#: which variable to read is theirs, the shape and the plumbing of the source are this module's
+#: contract. Free, public and keyless -- the same three criteria item 8 applied to the signal, on the
+#: same host, so a mirror would be a new decision rather than a new default.
+LOCALIDADES_URL = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"
+#: the seam that lets the offline harness answer this URL without a network. Nothing else should set
+#: it, and a wrong value costs a refusal rather than a silent skip.
+LOCALIDADES_URL_ENV = "CAPSTONE_IBGE_LOCALIDADES_URL"
+
+
+def parse_uf_map(payload: Any) -> tuple[dict[str, str], int, int]:
+    """``[{ "id": 1100015, "microrregiao": { "mesorregiao": { "UF": { "sigla": "RO" } } } }, …]``.
+
+    Returns the map plus two counts -- entries seen, entries that carried a state -- because the report
+    has to be able to say ``5568 of 5570`` rather than imply a complete list. A missing entry is not a
+    broken list: the municipality it describes then hits the refusal in ``_row``, which is where a
+    unknown code belongs. A list that yields *nothing* is a broken list, and says so.
+    """
+    if not isinstance(payload, list):
+        raise SourceError(
+            "the municipality reference is not the one this parser was written against: the list at"
+            f" {LOCALIDADES_URL} answered with {type(payload).__name__} where an array of municipalities"
+            " was expected"
+        )
+    mapping: dict[str, str] = {}
+    with_uf = 0
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        raw_id = entry.get("id")
+        if isinstance(raw_id, bool) or not isinstance(raw_id, (str, int)):
+            continue
+        code = str(raw_id).strip()
+        if not IBGE_CODE_RE.match(code):
+            continue
+        sigla = _scalar(_dig(entry, UF_IN_LIST_PATH[:-1]), "sigla") or _scalar(entry, "UF", "sigla")
+        if not sigla or len(sigla) != 2:
+            continue
+        mapping[code] = sigla
+        with_uf += 1
+    if not mapping:
+        raise SourceError(
+            f"the municipality reference from {LOCALIDADES_URL} has no usable municipality code: it"
+            f" answered with {len(payload)} entries and none of them carried an id and"
+            f" {str(UF_IN_LIST_PATH)}; the response shape of the *reference* changed, not the signal's"
+        )
+    return mapping, len(payload), with_uf
+
+
 def _sigla(*holders: Any) -> str | None:
     """The state's two letters, from the first place they are found in -- and from no other place."""
     for holder in holders:
@@ -413,7 +465,7 @@ def _sigla(*holders: Any) -> str | None:
 
 def _row(
     locality: dict,
-    block: Any,
+    block: Any,  # the enclosing block, which sometimes carries the sigla the locality omits
     element: Any,
     indicator: str | None,
     period: str | None,
@@ -423,19 +475,37 @@ def _row(
     source: str,
     *,
     level_from_nivel: bool,
+    uf_by_code: dict[str, str] | None = None,
 ) -> SignalRow:
     """One locality record as one row of ``capstone.external_municipio``, or a refusal that says why."""
     raw_id = locality.get("id")
     code = _code_and_level(locality, raw_id, contract, position, source, from_nivel=level_from_nivel)
     name = next((_scalar(locality, key) for key in NAME_KEYS if _scalar(locality, key)), None)
     uf = _sigla(locality, block, element)
-    if not name or not uf:
+    if not name:
         raise SourceError(
-            f"{source} locality {raw_id!r} has no name or uf; the city_state key cannot be built"
-            " from a half-identified place, and the alternative is a silent NULL join (005 keys on"
-            " '<city>|<uf>' because 163 names recur in two states -- decisions.md §8)."
-            f" Keys this locality carried: {sorted(locality)}"
+            f"{source} locality {raw_id!r} has no name; the city_state key cannot be built from a"
+            f" half-identified place. Keys this locality carried: {sorted(locality)}"
         )
+    if not uf:
+        # the two cases are told apart because only one of them is worth a second request: a response
+        # that named the place but not its state is missing a field the administrative list has,
+        # while a response that named nothing has a shape problem no lookup can fix
+        if uf_by_code is None:
+            raise SourceError(
+                f"{source} locality {raw_id!r} ({name}) carries no uf, and no municipality reference"
+                " was supplied for this run; 005 keys on '<city>|<uf>' because 163 names recur in two"
+                " states (decisions.md §8), so the alternative to refusing is inventing a state."
+                f" Keys this locality carried: {sorted(locality)}",
+                context={"missing_uf": code},
+            )
+        uf = uf_by_code.get(code)
+        if uf is None:
+            raise SourceError(
+                f"{source} locality {raw_id!r} ({name}) has no uf and the municipality code is not in"
+                f" the reference list from {LOCALIDADES_URL}; a code IBGE's own administrative list"
+                " does not know is not a code to join orders onto"
+            )
     if indicator is None or period is None:
         raise SourceError(
             f"{source} result {position} has no indicator name or period year; a row that cannot be"
@@ -455,7 +525,12 @@ def _row(
     return row
 
 
-def normalize(payload: Any, *, source: str = IBGE_AREGADOS) -> list[SignalRow]:
+def normalize(
+    payload: Any,
+    *,
+    source: str = IBGE_AREGADOS,
+    uf_by_code: dict[str, str] | None = None,
+) -> list[SignalRow]:
     """The API's JSON, as rows. Pure, and the reason the contract is testable without a network.
 
     Two envelopes are understood, because this API has answered with both:
@@ -468,6 +543,11 @@ def normalize(payload: Any, *, source: str = IBGE_AREGADOS) -> list[SignalRow]:
     * the **envelope form** -- ``{"result": [{"localidades": [{"valor": …}]}]}``, which the first draft
       was written against and which the metadata-style answers still use. There the id is the bracketed
       ``N6[3518800]`` and a non-scalar where a scalar belongs is an error worth naming.
+
+    ``uf_by_code`` is the municipality list's ``{code: sigla}``, consulted **only** for a locality
+    that has a name but no state of its own -- which is what the endpoint actually sends. A sigla in
+    the response always wins over the reference, because the answer about a place beats a table about
+    its code.
 
     A shape surprise raises ``SourceError`` naming the key that is missing and where it was looked for.
     That sentence is the whole difference between "the API is down" and "the API answered with something
@@ -502,8 +582,17 @@ def normalize(payload: Any, *, source: str = IBGE_AREGADOS) -> list[SignalRow]:
         )
     return [
         _row(
-            locality, block, element, indicator, period, raw, contract, position, source,
+            locality,
+            block,
+            element,
+            indicator,
+            period,
+            raw,
+            contract,
+            position,
+            source,
             level_from_nivel=nivel,
+            uf_by_code=uf_by_code,
         )
         for position, locality, block, element, indicator, period, raw, nivel in samples
     ]
@@ -572,40 +661,102 @@ def token(config: CapstoneConfig, environ: dict[str, str]) -> str | None:
     return value
 
 
+def _get(
+    config: CapstoneConfig,
+    url: str,
+    *,
+    opener: Callable[[str, dict[str, str]], Any] | None,
+    environ: dict[str, str],
+    parse: Callable[[Any], Any],
+    label: str,
+    authorize: bool,
+) -> Any:
+    """One GET, one parse, and no more than one of each. ``opener`` is injectable so the path is testable.
+
+    The bearer token goes to the configured URL and nowhere else: a credential that rides along to a
+    second host because the code was feeling general is how a key leaks into a log. Every failure --
+    DNS, TLS, a proxy in the way, a 500, a body that is not JSON -- becomes a ``SourceError`` whose
+    message says which one, so that "access is absent" stays a state this project can report.
+    """
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "capstone-stage-4 (student project; contact in the repository)",
+    }
+    if authorize:
+        credentials = token(config, environ)
+        if credentials:
+            headers["Authorization"] = f"Bearer {credentials}"
+    try:
+        payload = (opener or _open)(url, headers)
+        body = payload if not isinstance(payload, (bytes, bytearray)) else payload.decode("utf-8")
+        return parse(body) if isinstance(body, (str, bytes, bytearray)) else body
+    except SourceError:
+        raise
+    except Exception as error:  # every transport failure, reported as one kind of sentence
+        raise SourceError(
+            f"could not fetch {label} from {url}: {type(error).__name__}:"
+            f" {str(error).strip() or '(the driver said nothing)'}"
+        ) from error
+
+
 def fetch(
     config: CapstoneConfig,
     *,
     opener: Callable[[str, dict[str, str]], Any] | None = None,
     environ: dict[str, str] | None = None,
     parse: Callable[[Any], Any] = json.loads,
+    notes: dict[str, Any] | None = None,
+    force_reference: bool = False,
 ) -> list[SignalRow]:
-    """One GET, one parse, one validated list of rows. ``opener`` is injectable so the path is testable.
+    """The signal, and -- only if the response forgot which state each place is in -- the list that says.
 
-    Every failure -- DNS, TLS, a proxy in the way, a 500, a body that is not JSON -- becomes a
-    ``SourceError`` whose message says which one. There is no exception class leaking out of this
-    function and no traceback for a laptop without a route to the endpoint, because "access is absent"
-    is a state this project has to be able to report.
+    Two GETs at most, and the second is spent on one condition: a locality that has a name but no
+    ``uf``. That is what IBGE's agregados endpoint actually returns, so the alternative was either to
+    accept a join key built from a guessed state or to leave item 12 unable to load anything at all.
+    ``force_reference`` exists for the harness that measures the cost, and ``notes`` is where the
+    second request reports its size so the answer is on the page and not in the code.
     """
-    url = request_url(config)
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "capstone-stage-4 (student project; contact in the repository)",
-    }
-    credentials = token(config, environ if environ is not None else _environ())
-    if credentials:
-        headers["Authorization"] = f"Bearer {credentials}"
+    env = environ if environ is not None else _environ()
+    payload = _get(
+        config,
+        request_url(config),
+        opener=opener,
+        environ=env,
+        parse=parse,
+        label=config.external.name,
+        authorize=True,
+    )
+    reference_url = str(env.get(LOCALIDADES_URL_ENV) or "").strip() or LOCALIDADES_URL
+
+    def reference_map() -> dict[str, str]:
+        try:
+            body = _get(
+                config,
+                reference_url,
+                opener=opener,
+                environ=env,
+                parse=parse,
+                label="the municipality reference",
+                authorize=False,
+            )
+        except SourceError as error:
+            raise SourceError(
+                f"{error}; the municipality reference at {reference_url} is the only source for the"
+                " state each locality belongs to, and without it the join key cannot be built"
+            ) from error
+        mapping, seen, with_uf = parse_uf_map(body)
+        if notes is not None:
+            notes["uf_reference"] = {"url": reference_url, "entries": seen, "codes": with_uf}
+        return mapping
+
+    if force_reference:
+        return normalize(payload, source=config.external.name, uf_by_code=reference_map())
     try:
-        payload = (opener or _open)(url, headers)
-        body = payload if not isinstance(payload, (bytes, bytearray)) else payload.decode("utf-8")
-        parsed = parse(body) if isinstance(body, (str, bytes, bytearray)) else body
-    except SourceError:
-        raise
-    except Exception as error:  # every transport failure, reported as one kind of sentence
-        raise SourceError(
-            f"could not fetch {config.external.name} from {url}: {type(error).__name__}:"
-            f" {str(error).strip() or '(the driver said nothing)'}"
-        ) from error
-    return normalize(parsed, source=config.external.name)
+        return normalize(payload, source=config.external.name)
+    except SourceError as error:
+        if not error.context.get("missing_uf"):
+            raise
+        return normalize(payload, source=config.external.name, uf_by_code=reference_map())
 
 
 def load(cursor: Any, rows: Iterable[SignalRow], *, source: str) -> int:
@@ -734,12 +885,18 @@ def refresh(
     Reading the rate *after* storing is the point of doing it here: the number the report quotes then
     came from the database the model reads, not from the loader's own arithmetic.
     """
-    rows: list[SignalRow] = fetch(config, opener=opener, environ=environ) if fetch_rows else []
+    notes: dict[str, Any] = {}
+    rows: list[SignalRow] = (
+        fetch(config, opener=opener, environ=environ, notes=notes) if fetch_rows else []
+    )
     out: dict[str, Any] = {
         "fetched": len(rows) if fetch_rows else None,
         "stored": None,
         "match_rate": None,
         "unmatched_cities": None,
+        # present only when the response omitted a state and the administrative list supplied it; the
+        # alternative was to print a line about a request that may not have happened
+        "uf_reference": notes.get("uf_reference"),
     }
     if not (store or report):
         return out

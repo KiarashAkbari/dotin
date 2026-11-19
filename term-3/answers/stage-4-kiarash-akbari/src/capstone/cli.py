@@ -90,7 +90,7 @@ def _stage_root() -> Path:
 def _ddl_path(config: CapstoneConfig, explicit: str | None) -> Path:
     if explicit:
         return Path(explicit)
-    return _stage_root().parent / "stage-2-kiarash-akbari" / "sql" / "001_create_olist_schema.sql"
+    return _stage_root().parent / "stage-2" / "sql" / "001_create_olist_schema.sql"
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -303,6 +303,14 @@ def command_external(args: argparse.Namespace) -> int:
         return ExitCode.OK
     fetched = report["fetched"]
     print(f"fetched: {fetched} row(s)" if fetched is not None else "fetched: not attempted")
+    reference = report.get("uf_reference")
+    if reference:
+        # the second GET is a cost the reader is owed a line about: "one request per run" is a policy,
+        # and a policy that bends silently is a policy nobody believes two months later
+        print(
+            f"      uf map: {reference['codes']} of {reference['entries']} municipality codes from"
+            f" {reference['url']}"
+        )
     if report["match_rate"] is None:
         print("match rate: not read (pass --report or --load to ask the database)")
     else:

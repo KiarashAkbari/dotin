@@ -62,6 +62,8 @@ docs/evidence/*.log
 config/capstone.toml
 # a harness that died mid-run must not leave a decided config for the next `git add -A`
 config/patch-0015-evidence.toml
+# patch 0016's harness writes the same kind of throwaway config
+config/patch-0016-evidence.toml
 
 # tool caches and OS junk
 .ruff_cache/
