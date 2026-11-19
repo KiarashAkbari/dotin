@@ -649,5 +649,235 @@ class RefusedDatabaseTests(unittest.TestCase):
         self.assertNotIn("Traceback", text)
 
 
+#: the shape the endpoint really answers with, from the student's own call of
+#: ``…/agregados/4714/periodos/2022/variaveis/614?localidades=N6[all]`` -- the URL and
+#: the decision are decisions.md item 8, not a comment. What that measurement witnessed, and only
+#: that, is in this fixture: a top-level **list**, ``resultados`` inside each element, the
+#: municipalities inside ``series``, one municipality per ``localidade``, ``nivel.id`` carrying the
+#: level, and the number as a *string* keyed by year in ``serie``: ``{"2022": "3.04"}``.
+#:
+#: What is authored, and labelled as such rather than remembered as witnessed: the locality names are
+#: placeholders, because the transcription carried no names at all; ``3550308`` and ``1094.75`` are a
+#: second row so the loop is exercised more than once; and the ``uf`` objects are what the loader needs
+#: to build ``<city>|<uf>`` and were not in the excerpt either. The two tests that say what happens
+#: when a ``uf`` is absent are the ones that matter for a real response, because that is the field
+#: whose presence here is an assumption rather than a measurement.
+IBGE_DATA_PAYLOAD: list = [
+    {
+        "id": "614",
+        "variavel": "Densidade demográfica",
+        "unidade": "Habitante por quilômetro quadrado",
+        "resultados": [
+            {
+                "series": [
+                    {
+                        "localidade": {
+                            "id": "1100015",
+                            "nome": "Município Um",
+                            "nivel": {"id": "N6", "nome": "Município"},
+                            "uf": {"id": "11", "sigla": "RO"},
+                        },
+                        "serie": {"2022": "3.04"},
+                    },
+                    {
+                        "localidade": {
+                            "id": "3550308",
+                            "nome": "Município Dois",
+                            "nivel": {"id": "N6"},
+                            "uf": {"sigla": "SP"},
+                        },
+                        "serie": {"2022": "1094.75"},
+                    },
+                ]
+            }
+        ],
+    }
+]
+
+
+def data_payload(**edits) -> list:
+    """A copy of the response with the variable element edited, so each case names what it changed.
+
+    Paths start inside ``payload[0]`` because the root is a list -- the fact the parser exists for.
+    """
+    payload = json.loads(json.dumps(IBGE_DATA_PAYLOAD))
+    for path, value in edits.items():
+        node = payload[0]
+        keys = path.split(".")
+        for key in keys[:-1]:
+            node = node[int(key)] if key.isdigit() else node[key]
+        if value is _DROP:
+            node.pop(keys[-1])
+        else:
+            node[keys[-1]] = value
+    return payload
+
+
+class _Drop:
+    """Sentinel: `del` and `None` mean different things to a parser, so the fixture says which."""
+
+    def __repr__(self) -> str:  # pragma: no cover - only for a failed assertion's message
+        return "<drop>"
+
+
+_DROP = _Drop()
+
+
+class IbgeDataShapeTests(unittest.TestCase):
+    """The response the API really sends, as rows -- and every refusal that keeps the join honest.
+
+    These cases exist because the first contract was written from documentation and the endpoint
+    disagreed with it: a top-level list, not ``{"result": …}``. The refusal wording is as pinned as
+    the success path, because the difference between "the API changed" and "the network is down" is
+    the one thing ``--fetch`` has to answer without a debugger.
+    """
+
+    def test_the_real_response_becomes_one_row_per_municipality(self) -> None:
+        rows = external.normalize(IBGE_DATA_PAYLOAD)
+        self.assertEqual([row.ibge_code for row in rows], ["1100015", "3550308"])
+        self.assertEqual([row.city_state for row in rows], ["municipio um|ro", "municipio dois|sp"])
+        self.assertEqual({row.period for row in rows}, {"2022"}, msg="the year is the serie's key here")
+        self.assertEqual(
+            {row.indicator for row in rows},
+            {"Densidade demográfica"},
+            msg="`variavel` names the indicator in this shape",
+        )
+
+    def test_a_dot_decimal_string_is_not_read_as_a_thousands_group(self) -> None:
+        """``"3.04"`` is three point zero four inhabitants per km², and 304 is a wrong country.
+
+        The pt-BR rule that made ``"2.048,90"`` read correctly would, applied blindly to a lone dot,
+        turn this into 304 -- so the rule is stated where the value is parsed and pinned here, because
+        a density off by two orders of magnitude passes every CHECK the table has.
+        """
+        rows = external.normalize(IBGE_DATA_PAYLOAD)
+        self.assertAlmostEqual(rows[0].value, 3.04, places=6)
+        self.assertAlmostEqual(rows[1].value, 1094.75, places=6)
+        for raw, expected in (
+            ("3.04", 3.04),
+            ("1094.75", 1094.75),
+            (1.05, 1.05),
+            ("2.048,90", 2048.90),
+            ("2048.90", 2048.90),
+        ):
+            self.assertAlmostEqual(external.parse_value(raw), expected, places=6, msg=repr(raw))
+
+    def test_a_value_of_none_stays_null_rather_than_becoming_zero(self) -> None:
+        payload = data_payload(**{"resultados.0.series.0.serie": {"2022": None}})
+        self.assertIsNone(external.normalize(payload)[0].value)
+
+    def test_the_level_comes_from_nivel_and_a_state_answer_is_refused(self) -> None:
+        """``N7`` is a state: a state's density onto every city in it is a confident wrong feature."""
+        payload = data_payload(
+            **{"resultados.0.series.0.localidade.nivel": {"id": "N7", "nome": "Unidade da federação"}}
+        )
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(payload)
+        self.assertIn("N7", str(caught.exception))
+        self.assertIn("N6", str(caught.exception), msg="the reader is told what was expected")
+
+    def test_a_locality_with_no_level_of_its_own_is_refused_not_assumed(self) -> None:
+        """In this shape the level is ``nivel.id``; without it, six digits of guessing start."""
+        payload = data_payload(**{"resultados.0.series.0.localidade.nivel": _DROP})
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(payload)
+        self.assertIn("N<level>[<code>]", str(caught.exception))
+
+    def test_a_bare_id_is_accepted_here_and_refused_in_the_envelope_shape(self) -> None:
+        """One rule per shape, because the two shapes carry their level evidence differently.
+
+        The data form writes ``"id": "1100015"`` and puts the level in ``nivel``; the envelope form
+        writes ``"id": "N6[3518800]"``. A parser that let either style satisfy either shape would
+        accept a state row whose ``nivel`` had been dropped -- which is the refusal above.
+        """
+        rows = external.normalize(IBGE_DATA_PAYLOAD)
+        self.assertEqual(rows[0].ibge_code, "1100015")
+        envelope = json.loads(json.dumps(GOOD_PAYLOAD))
+        envelope["result"][0]["localidades"][0]["id"] = "3518800"
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(envelope)
+        self.assertIn("N<level>[<code>]", str(caught.exception))
+        bracketed = data_payload(**{"resultados.0.series.0.localidade.id": "N6[1100015]"})
+        self.assertEqual(external.normalize(bracketed)[0].ibge_code, "1100015")
+
+    def test_a_missing_uf_names_the_keys_it_looked_for(self) -> None:
+        """The join key is ``<city>|<uf>``, and 163 city names recur in two or more states.
+
+        So no UF is not a small omission: the alternative to refusing is inventing a state, and the
+        IBGE code's first two digits are exactly that invention -- a mapping this repository has no
+        witness for. The message lists the locality's own keys so one paste of a real object is enough
+        to teach the parser wherever the sigla actually lives.
+        """
+        payload = data_payload(**{"resultados.0.series.0.localidade.uf": _DROP})
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(payload)
+        message = str(caught.exception)
+        self.assertIn("name or uf", message)
+        for key in ("id", "nome", "nivel"):
+            self.assertIn(key, message, msg="the keys it had are the diagnosis")
+        self.assertIn("decisions.md", message, msg="and the reason is a decision, not a bug")
+
+    def test_a_uf_may_ride_on_the_block_or_the_variable_element(self) -> None:
+        """The sigla is looked for in a few documented places -- and only those."""
+        bare = data_payload(
+            **{
+                "resultados.0.series.0.localidade.uf": _DROP,
+                "resultados.0.uf": {"sigla": "RO"},
+            }
+        )
+        self.assertEqual(external.normalize(bare)[0].city_state, "municipio um|ro")
+        on_element = data_payload(
+            **{"resultados.0.series.0.localidade.uf": _DROP, "uf": {"sigla": "RO"}}
+        )
+        self.assertTrue(external.normalize(on_element)[0].city_state.endswith("|ro"))
+
+    def test_a_bare_sigla_string_is_as_good_as_an_object(self) -> None:
+        """Some agregados answers write ``"uf": "RO"``; the key needs the letters, not a shape."""
+        payload = data_payload(**{"resultados.0.series.0.localidade.uf": "RO"})
+        self.assertEqual(external.normalize(payload)[0].city_state, "municipio um|ro")
+        on_nivel = data_payload(
+            **{
+                "resultados.0.series.0.localidade.uf": _DROP,
+                "resultados.0.series.0.localidade.nivel": {"id": "N6", "sigla": "RO"},
+            }
+        )
+        self.assertEqual(external.normalize(on_nivel)[0].city_state, "municipio um|ro")
+
+    def test_two_years_in_one_serie_are_two_rows(self) -> None:
+        payload = data_payload(
+            **{"resultados.0.series.0.serie": {"2010": "6.16", "2022": "3.04"}}
+        )
+        rows = [row for row in external.normalize(payload) if row.ibge_code == "1100015"]
+        self.assertEqual([(row.period, row.value) for row in rows], [("2010", 6.16), ("2022", 3.04)])
+
+    def test_a_serie_key_that_is_not_a_year_is_refused(self) -> None:
+        payload = data_payload(**{"resultados.0.series.0.serie": {"2022-2023": "3.04"}})
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(payload)
+        self.assertIn("2022-2023", str(caught.exception))
+
+    def test_a_series_object_with_no_localidade_is_reported_as_unusable(self) -> None:
+        payload = data_payload(**{"resultados.0.series": []})
+        with self.assertRaises(SourceError) as caught:
+            external.normalize(payload)
+        self.assertIn("empty", str(caught.exception))
+        with self.assertRaises(SourceError) as caught:
+            external.normalize([{"id": "614", "variavel": "x", "resultados": []}])
+        self.assertIn("no usable locality rows", str(caught.exception))
+
+    def test_the_envelope_form_still_parses(self) -> None:
+        """The shape the first draft was written against is not retired by learning the other one."""
+        rows = external.normalize(GOOD_PAYLOAD)
+        self.assertEqual(len(rows), 3)
+        self.assertAlmostEqual(rows[0].value, 2048.90, places=6)
+
+    def test_a_top_level_string_is_refused_with_its_own_sentence(self) -> None:
+        for payload in ("<html>", None, 7):
+            with self.subTest(payload=type(payload).__name__):
+                with self.assertRaises(SourceError) as caught:
+                    external.normalize(payload)
+                self.assertIn("is not the one this parser was written against", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

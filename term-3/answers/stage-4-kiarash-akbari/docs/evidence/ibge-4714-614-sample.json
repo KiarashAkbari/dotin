@@ -1,0 +1,40 @@
+[
+  {
+    "id": "614",
+    "variavel": "Densidade demográfica",
+    "unidade": "Habitante por quilômetro quadrado",
+    "resultados": [
+      {
+        "series": [
+          {
+            "localidade": {
+              "id": "1100015",
+              "nome": "Município Um",
+              "nivel": {"id": "N6", "nome": "Município"},
+              "uf": {"id": "11", "sigla": "RO"}
+            },
+            "serie": {"2022": "3.04"}
+          },
+          {
+            "localidade": {
+              "id": "3550308",
+              "nome": "Município Dois",
+              "nivel": {"id": "N6"},
+              "uf": {"sigla": "SP"}
+            },
+            "serie": {"2022": "1094.75"}
+          },
+          {
+            "localidade": {
+              "id": "3304557",
+              "nome": "Município Três",
+              "nivel": {"id": "N6"},
+              "uf": {"sigla": "RJ"}
+            },
+            "serie": {"2022": null}
+          }
+        ]
+      }
+    ]
+  }
+]

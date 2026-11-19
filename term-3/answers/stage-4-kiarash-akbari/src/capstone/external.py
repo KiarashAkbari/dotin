@@ -1,8 +1,10 @@
 """The external signal: one request, a validated response, and a table that can be empty.
 
-decisions.md item 8 registers ``ibge_agregados_municipio`` and records that the endpoint has not been
-reachable from the environment this code was written in. That combination -- a decided source, an
-unverified fetch -- is what this module is shaped for:
+decisions.md item 8 registers ``ibge_agregados_municipio``, records the URL and the response shape the
+endpoint really answers with, and records which half of that is witnessed from where: the fetch
+returned HTTP 200 for the student running it, and returned nothing from the environment this code was
+written in. That combination -- a decided source, a response only one of the two machines can see --
+is what this module is shaped for:
 
 * **the fetch is one request.** No retry loop, no backoff, no pagination walk. IBGE's agregados API
   publishes no rate limit, and the advice is one to two requests per second; a student project that
@@ -12,7 +14,9 @@ unverified fetch -- is what this module is shaped for:
 * **the response is validated here, not by the database.** ``capstone.external_municipio`` has CHECK
   constraints, and they stay as the backstop; the point of checking before the insert is that a schema
   change arrives as ``external returned no "localidades" key in result 0`` and not as 400 constraint
-  violations after a partial write.
+  violations after a partial write. Two envelopes are accepted, because this API has answered with
+  both, and both are refused in the same places: municipality level only, a name and a state to build
+  the join key from, a four-digit year to date the row by (see ``normalize``).
 * **no SQL of its own.** Rows are stored by calling ``capstone.upsert_external_municipio``, the same
   rule ``sql/005_external_signal.sql`` states for every loader: a module that writes its own ``INSERT``
   bypasses the idempotency the re-apply guard tests.
@@ -55,6 +59,13 @@ LOCALITY_ID_RE = re.compile(r"^N(?P<level>\d+)\[(?P<code>[0-9]+)\]$")
 #: per-source expectations. The URL comes from the config, because a base URL is the kind of thing
 #: that moves when a mirror appears; what cannot move is the response's shape, and that is what lives
 #: here. ``value_key`` is where the number sits inside one locality object.
+#:
+#: The ``data_*`` keys are the second envelope, the one the endpoint actually answered with
+#: (decisions.md item 8): a top-level list, ``resultados`` inside each element, the
+#: municipalities inside ``series``, one municipality per ``localidade`` and the number as a string
+#: under ``serie[<year>]``. They are spelled out as keys rather than written into the loop because a
+#: parser that hides its assumptions in control flow is the reason the first draft needed replacing.
+#: ``level`` is the one expectation that does not bend between the two: N6, a municipality, or nothing.
 CONTRACTS: dict[str, dict[str, Any]] = {
     IBGE_AREGADOS: {
         "table": "capstone.external_municipio",
@@ -63,6 +74,9 @@ CONTRACTS: dict[str, dict[str, Any]] = {
         "value_key": "valor",
         "period_key": "periodo",
         "locality_key": "localidades",
+        "data_results_key": "resultados",
+        "data_series_key": "series",
+        "data_locality_key": "localidade",
         "level": 6,
     },
 }
@@ -152,61 +166,57 @@ def parse_value(raw: Any, *, source: str = IBGE_AREGADOS, where: str = "") -> fl
         raise SourceError(f"{source} value {raw!r} for {where} is not a number: {error}") from error
 
 
-def normalize(payload: Any, *, source: str = IBGE_AREGADOS) -> list[SignalRow]:
-    """The API's JSON, as rows. Pure, and the reason the contract is testable without a network.
+#: where a locality's aggregation level is read from, in the shape that carries it there
+LEVEL_PATH = ("nivel", "id")
+#: where the two-letter state comes from, in this order, across the locality record, its block and
+#: the variable element -- the three places a sigla has been seen in this API's family. Explicit
+#: because the alternative ("find something that looks like a state") is how a response-shaped surprise
+#: turns into a silently wrong join key, and because the first two digits of an IBGE code are *not*
+#: a UF: they are a state code, and mapping one to the other is a table this repository has no witness
+#: for, so a missing sigla is refused rather than repaired.
+UF_PATHS = (("uf", "sigla"), ("uf",), ("sigla_uf",), ("UF",), ("nivel", "sigla"))
+#: the name keys, in both languages this API has answered in
+NAME_KEYS = ("nome", "name")
+#: the number's home in the envelope form, if the contract's own key is absent; in the data form it is
+#: ``serie[<year>]``, which is why no fallback here may be consulted for a record that has a ``serie``
+VALUE_KEYS = ("valor", "value")
 
-    A shape surprise raises ``SourceError`` naming the key that is missing and where it was looked
-    for. That sentence is the whole difference between "the API is down" and "the API answered with
-    something we do not understand", and the second one is the failure that gets silently swallowed
-    into an empty table.
+
+def _value_keys(contract: dict) -> tuple[str, ...]:
+    """The contract's key first, then the English spelling -- and nothing that looks alike."""
+    keys = [contract["value_key"], *VALUE_KEYS]
+    return tuple(dict.fromkeys(keys))
+
+
+def _dig(node: Any, path: Sequence[str]) -> Any:
+    """Follow a path of dict keys; ``None`` when any step is absent or is not an object."""
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def _scalar(node: Any, *path: str) -> str | None:
+    """A nested string or number as text; anything else, including a dict, reads as ``None``.
+
+    ``periodo`` is the reason this exists separately. The data form answers
+    ``{"periodo": {"ini": "2022", "fim": "2022"}}``, and its year is already the key of ``serie`` --
+    so an object in that slot is not a surprise to report, it is just not where this parser reads.
     """
-    contract = CONTRACTS.get(source)
-    if contract is None:
-        known = ", ".join(sorted(CONTRACTS))
-        raise InputError(
-            f"{source!r} has no response contract; the ones this module knows are: {known}. "
-            "Naming a source in the config is a decision about *which* API; teaching the code its "
-            "shape is a second decision, and inventing a parser is not how it gets made."
-        )
-    results = payload.get(contract["results_key"]) if isinstance(payload, dict) else None
-    if results is None:
-        got = sorted(payload) if isinstance(payload, dict) else type(payload).__name__
-        raise SourceError(
-            f"{source} returned no {contract['results_key']!r} key (top level: {got}); "
-            "the response shape is not the one this parser was written against"
-        )
-    rows: list[SignalRow] = []
-    for position, entry in enumerate(results):
-        if not isinstance(entry, dict):
-            raise SourceError(f"{source} result {position} is {type(entry).__name__}, not an object")
-        indicator = _text(entry, ("agregado", "nome"), position, source) or _text(
-            entry, ("variavel", "nome"), position, source
-        )
-        period = _text(entry, (contract["period_key"], "ano"), position, source)
-        localities = entry.get(contract["locality_key"])
-        if not isinstance(localities, list):
-            raise SourceError(f"{source} result {position} has no {contract['locality_key']!r} list")
-        if not localities:
-            # the key is there and the answer is nothing: a wrong ``localidades=`` parameter reads
-            # exactly like this, and "no such municipality" is not the same finding as "no parser bug"
-            raise SourceError(
-                f"{source} result {position} returned an empty {contract['locality_key']!r} list"
-                " -- check the localidades parameter before suspecting the parser"
-            )
-        for locality in localities:
-            rows.append(_one(locality, indicator, period, contract, position, source))
-    if not rows:
-        # an empty list from a 200 response is the classic "the query was valid, the answer was
-        # nothing" case -- and storing it silently is how a dead parameter reads as a clean run
-        raise SourceError(
-            f"{source} answered with {len(results)} result(s) and no usable locality rows; an empty "
-            "response is not a fetched signal, so nothing will be stored"
-        )
-    return rows
+    found = _dig(node, path)
+    if isinstance(found, bool) or not isinstance(found, (str, int)):
+        return None
+    text = str(found).strip()
+    return text or None
 
 
 def _text(entry: dict, path: Sequence[str], position: int, source: str) -> str | None:
-    """A nested string, or ``None`` when the path is absent. Never a guess from a sibling key."""
+    """A nested string, or ``None`` when the path is absent. Never a guess from a sibling key.
+
+    The envelope form's strictness lives here: in that shape a non-scalar at the end of the path means
+    the response is not the one this contract describes, and saying so beats reading half of it.
+    """
     node: Any = entry
     for key in path:
         if not isinstance(node, dict) or key not in node:
@@ -219,44 +229,223 @@ def _text(entry: dict, path: Sequence[str], position: int, source: str) -> str |
     return str(node)
 
 
-def _one(
-    locality: Any, indicator: str | None, period: str | None, contract: dict, position: int, source: str
-) -> SignalRow:
-    if not isinstance(locality, dict):
-        raise SourceError(f"{source} result {position} has a locality that is not an object")
-    raw_id = locality.get("id")
-    found = LOCALITY_ID_RE.match(str(raw_id)) if raw_id is not None else None
-    if found is None:
+def _level_number(raw: Any) -> int | None:
+    """``"N6"``, ``6`` and ``"6"`` all mean level six; anything else means the response is talking about
+    something this parser cannot place, which the caller turns into a refusal."""
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        return None
+    text = str(raw).strip().upper().replace(" ", "")
+    if text.startswith("N"):
+        text = text[1:]
+    return int(text) if text.isdigit() else None
+
+
+def _envelope_records(payload: dict, contract: dict, source: str) -> list[Sample]:
+    """``{"result": [{"localidades": [{"valor": …}]}]}``: one number per locality.
+
+    The shape the first draft was written against, from the metadata-style answers. The level comes
+    out of the bracketed ``N6[3518800]`` id, which is why a bare code is refused *here*: this shape has
+    no ``nivel`` to fall back on, so a record without brackets is a record whose level is unknown.
+    """
+    results = payload.get(contract["results_key"])
+    if results is None:
+        got = sorted(payload) if isinstance(payload, dict) else type(payload).__name__
         raise SourceError(
-            f"{source} result {position} locality id {raw_id!r} is not N<level>[<code>]; the parser"
-            " reads the municipality code out of that shape and cannot invent one"
+            f"{source} returned no {contract['results_key']!r} key (top level: {got}); "
+            "the response shape is not the one this parser was written against"
         )
-    if int(found.group("level")) != contract["level"]:
+    found: list[Sample] = []
+    for position, entry in enumerate(results):
+        if not isinstance(entry, dict):
+            raise SourceError(f"{source} result {position} is {type(entry).__name__}, not an object")
+        indicator = _text(entry, ("agregado", "nome"), position, source) or _text(
+            entry, ("variavel", "nome"), position, source
+        )
+        period = _text(entry, (contract["period_key"], "ano"), position, source) or _text(
+            entry, (contract["period_key"],), position, source
+        )
+        localities = entry.get(contract["locality_key"])
+        if localities is None:
+            localities = entry.get("localidades")
+        if not isinstance(localities, list):
+            raise SourceError(f"{source} result {position} has no {contract['locality_key']!r} list")
+        if not localities:
+            # the key is there and the answer is nothing: a wrong ``localidades=`` parameter reads
+            # exactly like this, and "no such municipality" is not the same finding as "no parser bug"
+            raise SourceError(
+                f"{source} result {position} returned an empty {contract['locality_key']!r} list"
+                " -- check the localidades parameter before suspecting the parser"
+            )
+        for locality in localities:
+            if not isinstance(locality, dict):
+                raise SourceError(f"{source} result {position} has a locality that is not an object")
+            raw = next((locality[key] for key in _value_keys(contract) if key in locality), None)
+            found.append((position, locality, entry, entry, indicator, period, raw, False))
+    return found
+
+
+def _data_records(payload: list, contract: dict, source: str) -> list[Sample]:
+    """The shape the endpoint really answers with: list -> ``resultados`` -> ``series`` -> record.
+
+    Tolerant about *where* a record sits, strict about what it must hold. ``resultados`` may be a list
+    of blocks or the blocks may be the elements themselves; a record either nests its ``localidade`` or
+    is one. What cannot be ambiguous is the year and the level, because those two decide which row
+    joins to which order.
+    """
+    found: list[Sample] = []
+    for position, element in enumerate(payload):
+        if not isinstance(element, dict):
+            raise SourceError(
+            f"{source} response {position} is {type(element).__name__}, not an object"
+        )
+        indicator = (
+            _scalar(element, "variavel")
+            or _scalar(element, "agregado", "nome")
+            or _scalar(element, "nome")
+        )
+        hint = _scalar(element, contract["period_key"]) or _scalar(element, "ano")
+        results_key = contract["data_results_key"]
+        series_key = contract["data_series_key"]
+        locality_key = contract["data_locality_key"]
+        blocks = element.get(results_key)
+        if blocks is None:
+            blocks = [element]
+        elif not isinstance(blocks, list):
+            raise SourceError(
+                f"{source} response {position} has `resultados` as {type(blocks).__name__}, not a list"
+            )
+        for block in blocks:
+            if not isinstance(block, dict):
+                raise SourceError(
+                    f"{source} response {position} has a {results_key!r} entry that is not an object"
+                )
+            records = block.get(series_key)
+            if records is None:
+                records = [block]
+            elif not isinstance(records, list):
+                raise SourceError(
+                    f"{source} response {position} has {series_key!r} as"
+                    f" {type(records).__name__}, not a list"
+                )
+            if not records:
+                raise SourceError(
+                    f"{source} response {position} returned an empty 'series' list -- check the"
+                    " localidades parameter before suspecting the parser"
+                )
+            for record in records:
+                if not isinstance(record, dict):
+                    raise SourceError(
+                        f"{source} response {position} has a series record that is not an object"
+                    )
+                locality = record.get(locality_key)
+                if locality is None:
+                    # a record either nests its municipality or is one; the sample nests it, and the
+                    # bare form is accepted because both have been answered by this API family
+                    locality = record
+                if not isinstance(locality, dict):
+                    raise SourceError(
+                        f"{source} response {position} has a locality that is not an object"
+                    )
+                series = record.get("serie")
+                if series is None:
+                    series = locality.get("serie")
+                if isinstance(series, dict) and series:
+                    for period, raw in series.items():
+                        if not PERIOD_RE.match(str(period)):
+                            raise SourceError(
+                                f"{source} response {position} has a serie key {period!r} that is not a"
+                                " four-digit year; a row cannot be dated, and dropping it silently would"
+                                " read as a clean run"
+                            )
+                        found.append(
+                            (position, locality, block, element, indicator, str(period), raw, True)
+                        )
+                    continue
+                if series:
+                    raise SourceError(
+                        f"{source} response {position} has `serie` as {type(series).__name__}, not an"
+                        " object keyed by year"
+                    )
+                raw = next((locality[key] for key in VALUE_KEYS if key in locality), None)
+                found.append((position, locality, block, element, indicator, hint, raw, True))
+    return found
+
+
+def _code_and_level(
+    locality: dict, raw_id: Any, contract: dict, position: int, source: str, *, from_nivel: bool
+) -> str:
+    """The seven-digit municipality code, with the level checked on the way out."""
+    text = str(raw_id).strip() if raw_id is not None else ""
+    bracketed = LOCALITY_ID_RE.match(text)
+    level = _level_number(_dig(locality, LEVEL_PATH)) if from_nivel else None
+    if bracketed is not None:
+        bracket_level = int(bracketed.group("level"))
+        if level is None:
+            level = bracket_level
+        elif level != bracket_level:
+            raise SourceError(
+                f"{source} result {position} disagrees with itself: `nivel.id` says N{level} and the id"
+                f" says {raw_id!r}. A row cannot be joined on a level the response argues about"
+            )
+    if level is None:
         raise SourceError(
-            f"{source} returned locality level N{found.group('level')} where the contract says"
+            f"{source} result {position} locality id {raw_id!r} is not N<level>[<code>] and carries no"
+            " `nivel.id`; the parser reads the municipality code and the aggregation level out of those"
+            " two and cannot invent either"
+        )
+    if level != contract["level"]:
+        raise SourceError(
+            f"{source} returned locality level N{level} where the contract says"
             f" N{contract['level']}: a signal keyed on a state cannot be joined to a city"
         )
-    name = locality.get("nome")
-    uf = (locality.get("uf") or {}).get("sigla") if isinstance(locality.get("uf"), dict) else None
+    return bracketed.group("code") if bracketed is not None else text
+
+
+def _sigla(*holders: Any) -> str | None:
+    """The state's two letters, from the first place they are found in -- and from no other place."""
+    for holder in holders:
+        for path in UF_PATHS:
+            found = _scalar(holder, *path)
+            if found:
+                return found
+    return None
+
+
+def _row(
+    locality: dict,
+    block: Any,
+    element: Any,
+    indicator: str | None,
+    period: str | None,
+    raw: Any,
+    contract: dict,
+    position: int,
+    source: str,
+    *,
+    level_from_nivel: bool,
+) -> SignalRow:
+    """One locality record as one row of ``capstone.external_municipio``, or a refusal that says why."""
+    raw_id = locality.get("id")
+    code = _code_and_level(locality, raw_id, contract, position, source, from_nivel=level_from_nivel)
+    name = next((_scalar(locality, key) for key in NAME_KEYS if _scalar(locality, key)), None)
+    uf = _sigla(locality, block, element)
     if not name or not uf:
         raise SourceError(
             f"{source} locality {raw_id!r} has no name or uf; the city_state key cannot be built"
-            " from a half-identified place, and the alternative is a silent NULL join"
+            " from a half-identified place, and the alternative is a silent NULL join (005 keys on"
+            " '<city>|<uf>' because 163 names recur in two states -- decisions.md §8)."
+            f" Keys this locality carried: {sorted(locality)}"
         )
-    raw = locality.get(contract["value_key"])
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        # a missing value is a fact about the municipality, not a zero, and NUMERIC NULL is what the
-        # table says about it -- the pivot aggregates over the indicator, not over the absence
-        value: float | None = None
-    else:
-        value = parse_value(raw, source=source, where=str(raw_id))
     if indicator is None or period is None:
         raise SourceError(
             f"{source} result {position} has no indicator name or period year; a row that cannot be"
             " named cannot be pivoted, and storing it would hide the shape change"
         )
+    value: float | None = None
+    if raw is not None and not (isinstance(raw, str) and not raw.strip()):
+        value = parse_value(raw, source=source, where=str(raw_id))
     row = SignalRow(
-        ibge_code=found.group("code"),
+        ibge_code=code,
         city_state=fold(str(name), str(uf)),
         indicator=indicator,
         period=period,
@@ -264,6 +453,60 @@ def _one(
     )
     validate(row)
     return row
+
+
+def normalize(payload: Any, *, source: str = IBGE_AREGADOS) -> list[SignalRow]:
+    """The API's JSON, as rows. Pure, and the reason the contract is testable without a network.
+
+    Two envelopes are understood, because this API has answered with both:
+
+    * the **data form** -- a top-level list whose elements carry ``resultados``, whose blocks carry
+      ``series``, and whose records are a ``localidade`` object plus a ``serie`` keyed by year. That is
+      what ``/api/v3/agregados/4714/periodos/2022/variaveis/614?localidades=N6[all]`` returned on
+      2026-11-19, from the student's own call; here the level comes from ``nivel.id`` and the value is
+      a *string* such as ``"3.04"``.
+    * the **envelope form** -- ``{"result": [{"localidades": [{"valor": …}]}]}``, which the first draft
+      was written against and which the metadata-style answers still use. There the id is the bracketed
+      ``N6[3518800]`` and a non-scalar where a scalar belongs is an error worth naming.
+
+    A shape surprise raises ``SourceError`` naming the key that is missing and where it was looked for.
+    That sentence is the whole difference between "the API is down" and "the API answered with something
+    we do not understand", and the second one is the failure that gets silently swallowed into an
+    empty table.
+    """
+    contract = CONTRACTS.get(source)
+    if contract is None:
+        known = ", ".join(sorted(CONTRACTS))
+        raise InputError(
+            f"{source!r} has no response contract; the ones this module knows are: {known}. "
+            "Naming a source in the config is a decision about *which* API; teaching the code its "
+            "shape is a second decision, and inventing a parser is not how it gets made."
+        )
+    if isinstance(payload, list):
+        samples = _data_records(payload, contract, source)
+        results: Any = payload
+    elif isinstance(payload, dict):
+        samples = _envelope_records(payload, contract, source)
+        results = payload.get(contract["results_key"]) or []
+    else:
+        raise SourceError(
+            f"{source} answered with {type(payload).__name__} where an object or a list was expected;"
+            " the response shape is not the one this parser was written against"
+        )
+    if not samples:
+        # an empty list from a 200 response is the classic "the query was valid, the answer was
+        # nothing" case -- and storing it silently is how a dead parameter reads as a clean run
+        raise SourceError(
+            f"{source} answered with {len(results)} result(s) and no usable locality rows; an empty"
+            " response is not a fetched signal, so nothing will be stored"
+        )
+    return [
+        _row(
+            locality, block, element, indicator, period, raw, contract, position, source,
+            level_from_nivel=nivel,
+        )
+        for position, locality, block, element, indicator, period, raw, nivel in samples
+    ]
 
 
 def request_url(config: CapstoneConfig, params: dict[str, str] | None = None) -> str:

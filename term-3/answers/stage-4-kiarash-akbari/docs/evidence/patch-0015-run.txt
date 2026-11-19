@@ -1,0 +1,154 @@
+========================================================================
+patch 0015's gates, run in this tree: the recorded IBGE body on the parser
+before the patch and after it, the shipped CLI, and a real load
+========================================================================
+what produced this file, in one command (from ``term-3/answers/stage-4-kiarash-akbari/``; the
+interpreter needs the dev extra only for section 4, which is the half that talks to a real
+PostgreSQL server)::
+
+    python3 docs/evidence/patch-0015-run.py | tee docs/evidence/patch-0015-run.txt
+
+``--rev`` is left at its default here, and that is the point of running it on this side: ``HEAD~1``
+in this checkout *is* the tree with ``0012``/``0013``/``0014`` applied and without the parser fix,
+which is exactly the code that refused the endpoint. On the tree the patches were authored in, the
+same section names the commit instead (``--rev 3236580``); the two logs are otherwise the same run.
+
+read it as:
+
+* section 1 is this repository's own offline suite on the plain interpreter -- ``Ran 292 tests …
+  OK (skipped=15)``, fourteen cases more than the same tree measured before this patch, no
+  ``psycopg``, no server, no network;
+* section 2 is the red/green half, and the red half is the previous commit's ``src/``, extracted
+  with ``git archive`` rather than edited out of the fixed tree. Same probe, same response file, so
+  the two blocks differ only by the patch. The refusal printed there is the sentence a live
+  ``--fetch`` answered with -- ``returned no 'result' key (top level: list)`` -- and on this side of
+  the patch the same body is three rows, with ``3.04`` where a pt-BR-tinged reader would have put
+  ``304``;
+* section 3 is the shipped ``capstone external`` command pointed at a server on 127.0.0.1 that
+  answers with the recorded body. It counts the requests, because "one request per run" is a policy
+  the module states and had never measured: one for ``--fetch``, zero for the status block. The two
+  derived bodies -- ``uf`` removed, and level changed to ``N7`` -- are refused with exit 69 and a
+  sentence, and no traceback;
+* section 4 is the only section that needs the dev extra: a disposable cluster, stage-2's DDL found
+  beside this stage, the five migrations applied, then ``external --load`` for real. Read back from
+  the table: three rows, two non-null values, the missing municipality still ``NULL``, and ``3.04``
+  as a numeric. The match rate says ``no customer keys at all`` because this cluster has an empty
+  ``olist`` -- it is a plumbing check, not the project's number;
+* the log is flattened where flattening is honest: unittest's elapsed clause, the scratch directory
+  ``git archive`` unpacked into, and the ephemeral port of the local server are all replaced by a
+  placeholder, so a second run of the harness can be compared to this one line for line.
+
+what this file does **not** establish:
+
+* it is not a call to ``servicodados.ibge.gov.br``. That host answers from the student's machine and
+  not from the sandbox this was run in, so the live verdict of checklist 12.5 is still to be
+  produced by ``capstone external --fetch`` / ``--load`` / ``--report`` and written into
+  ``report.md`` either way;
+* the response file is a transcription of the student's measurement, not their raw body: the codes,
+  the year, the variable name, the unit and the number ``3.04`` are what they read off the endpoint,
+  while the locality names are placeholders and the ``uf`` objects are the fields their
+  transcription did not carry (``docs/evidence/ibge-4714-614-sample.json``, and item 8 of
+  ``decisions.md``).
+* nothing in it is a claim about the frame's ``feature_query_ms`` ceiling -- that verdict lives in
+  ``frame-performance-student-run.txt``.
+
+
+------------------------------------------------------------------------
+1. the offline suite, plain interpreter, no database and no network
+------------------------------------------------------------------------
+$ /usr/bin/python3 -m unittest discover -s tests -t .
+  | 
+  | ...............................................................................................
+  | ----------------------------------------------------------------------
+  | Ran 292 tests in <t>s
+  | 
+  | OK (skipped=15)
+  [exit 0] the whole suite, with IbgeDataShapeTests in it
+  check[offline suite green]: ok -- exit 0
+  tally: 292 tests -- OK (skipped=15)
+
+------------------------------------------------------------------------
+2. the recorded response, against the tree before the patch and after it
+------------------------------------------------------------------------
+  pre-patch src: `HEAD~1`'s own `src/` tree, unpacked into a scratch directory
+$ python3 probe.py /home/user/dotin15/term-3/answers/stage-4-kiarash-
+  ... akbari/docs/evidence/ibge-4714-614-sample.json
+  | refused: SourceError: ibge_agregados_municipio returned no 'result' key (top level: list); the 
+  [exit 1] expected RED: this is the sentence the live --fetch answered with
+  check[the pre-patch tree refuses the real body]: ok -- exit 1
+  check[and it refuses with a sentence, not a traceback]: ok
+$ python3 probe.py /home/user/dotin15/term-3/answers/stage-4-kiarash-
+  ... akbari/docs/evidence/ibge-4714-614-sample.json
+  | 3 row(s)
+  |   1100015  municipio um|ro  2022  3.04  Densidade demográfica
+  |   3550308  municipio dois|sp  2022  1094.75  Densidade demográfica
+  |   3304557  municipio tres|rj  2022  None  Densidade demográfica
+  [exit 0] GREEN on the tree as shipped
+  check[the shipped parser reads it into rows]: ok -- exit 0
+  check[the dot-decimal string is 3.04 on its own row, not 304]: ok -- 1100015  municipio um|ro  2022  3.04  Densidade demográfica
+
+------------------------------------------------------------------------
+3. the shipped CLI, one request, a local server serving the recorded body
+------------------------------------------------------------------------
+$ python3 -m capstone external --config /home/user/dotin15/term-3/answers/stage-4-kiarash-
+  ... akbari/config/patch-0015-evidence.toml
+  | name: ibge_agregados_municipio
+  | url: http://127.0.0.1:<port>/sample
+  | join_on: city_state
+  | credential: not needed
+  | token_env: (unset)
+  | database: not configured (set CAPSTONE_DATABASE_URI)
+  | frame: capstone.v_feature_frame
+  | table: capstone.external_municipio
+  [exit 0] status only: no request, no database
+  check[status exits 0]: ok -- exit 0
+  check[it says the source is configured]: ok
+  check[status asked the server for nothing]: ok
+$ python3 -m capstone external --fetch --config
+  ... /home/user/dotin15/term-3/answers/stage-4-kiarash-akbari/config/patch-0015-evidence.toml
+  | fetched: 3 row(s)
+  | match rate: not read (pass --report or --load to ask the database)
+  [exit 0] the fetch path, end to end
+  check[--fetch exits 0]: ok -- exit 0
+  check[it counted the rows]: ok -- fetched: 3 row(s)
+match rate: not read (pass --report or --load to ask the database)
+  check[exactly one request left the process]: ok -- 1 request(s)
+$ python3 -m capstone external --fetch --config
+  ... /home/user/dotin15/term-3/answers/stage-4-kiarash-akbari/config/patch-0015-evidence.toml
+  | 
+  | error: ibge_agregados_municipio locality '1100015' has no name or uf; the city_state key cannot
+  [exit 69] the no-uf.json variant, which must be refused
+  check[no-uf.json exits 69 with its own sentence]: ok -- exit 69
+$ python3 -m capstone external --fetch --config
+  ... /home/user/dotin15/term-3/answers/stage-4-kiarash-akbari/config/patch-0015-evidence.toml
+  | 
+  | error: ibge_agregados_municipio returned locality level N7 where the contract says N6: a signal
+  [exit 69] the wrong-level.json variant, which must be refused
+  check[wrong-level.json exits 69 with its own sentence]: ok -- exit 69
+
+------------------------------------------------------------------------
+4. the load and the read-back, on a disposable server
+------------------------------------------------------------------------
+  check[applied 001_create_olist_schema.sql]: ok
+  check[applied 001_capstone_schema.sql]: ok
+  check[applied 002_time_guard.sql]: ok
+  check[applied 003_feature_views.sql]: ok
+  check[applied 004_as_of_functions.sql]: ok
+  check[applied 005_external_signal.sql]: ok
+$ python3 -m capstone external --load --config
+  ... /home/user/dotin15/term-3/answers/stage-4-kiarash-akbari/config/patch-0015-evidence.toml
+  | fetched: 3 row(s)
+  | source: ibge_agregados_municipio via http://127.0.0.1:<port>/sample
+  | stored: 3 row(s)
+  | match rate: no customer keys at all, so the join has nothing to match against
+  | claim: none yet -- an external signal earns its place by a lift measured on the model's own spl
+  [exit 0] fetch and store, through the function that owns this table
+  check[--load exits 0]: ok -- exit 0
+  rows stored: 3, non-null values: 2
+  the density, read back as numeric: 3.04
+  pivot keys: Densidade demográfica@2022, Densidade demográfica@2022, Densidade demográfica@2022
+  check[three rows stored]: ok -- count 3
+  check[the null stays a null, not a zero]: ok -- non-null 2
+  check[and 3.04 stored as 3.04]: ok -- value 3.04
+
+all checks passed

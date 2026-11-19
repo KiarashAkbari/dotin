@@ -60,6 +60,8 @@ docs/evidence/*.log
 # Machine-specific config (paths, DB host). config/capstone.example.toml is the
 # tracked contract; the password is never in either file.
 config/capstone.toml
+# a harness that died mid-run must not leave a decided config for the next `git add -A`
+config/patch-0015-evidence.toml
 
 # tool caches and OS junk
 .ruff_cache/
