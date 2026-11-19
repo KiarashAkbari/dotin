@@ -2,6 +2,14 @@
 postgres smoke run -- what a real server says about sql/004 that the offline gates did not
 ========================================================================
 tree: HEAD 0848f5f, no tracked file differs from HEAD -- the bytes below are the committed ones
+provenance: that commit is a label from data-factory-v2, the mirror this log was captured
+            in, and it resolves in neither tree -- the sandbox checkout that held it was
+            rolled back -- so read it as the name of a run, not as a citation: `git show
+            0848f5f` failing is expected, here and there. The sql/ bytes the run applied are
+            this directory's own (patches 0001..0010, merged as 9dc4663), and the server was a
+            throwaway cluster started by `pgserver` in the agent sandbox: never a project
+            database. The capture is left exactly as it was produced and this note sits under
+            it; from 0011 on the harness prints the repository name in the header itself.
 
 server: the cluster pgserver starts on this interpreter
         PostgreSQL 16.2 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 10.2.1 20210130 (Red Hat 10.2.1-11), 64-bit

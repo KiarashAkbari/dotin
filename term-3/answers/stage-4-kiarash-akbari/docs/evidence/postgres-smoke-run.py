@@ -112,6 +112,30 @@ def smoke(*, env: dict[str, str] | None = None, python: str | None = None) -> tu
     return run(argv, env=env)
 
 
+def repo_name() -> str:
+    """Which repository `head()`'s short sha is a commit of.
+
+    The log travels: it is captured in one repository and read in another, and a short
+    hash that resolves in the mirror is a dead link wherever it is pasted -- one was, in
+    `postgres-smoke-run.txt`. So the header names the repository too, taken from `origin`
+    rather than the local directory name, because the name a reader clones a repo into is not
+    a fact about its history.
+    """
+    url = subprocess.run(
+        ["git", "remote", "get-url", "origin"], cwd=STAGE, capture_output=True, text=True
+    ).stdout.strip().rstrip("/")
+    if url:
+        tail = url.rsplit("/", 2)[-2:]
+        tail[-1] = tail[-1][: -len(".git")] if tail[-1].endswith(".git") else tail[-1]
+        if any(part in ("github.com", "gitlab.com", "localhost", "~") for part in tail):
+            tail = tail[-1:]
+        return "/".join(part for part in tail if part)
+    toplevel = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=STAGE, capture_output=True, text=True
+    ).stdout.strip()
+    return Path(toplevel).name if toplevel else "unknown repository"
+
+
 def head() -> tuple[str, str, str]:
     """HEAD, the tracked diff, and a note about what is deliberately not counted as drift.
 
@@ -151,7 +175,7 @@ def main() -> int:
         if not tracked
         else "TRACKED DIFF:"
     )
-    print(f"tree: HEAD {commit}, {label}")
+    print(f"tree: {repo_name()} @ HEAD {commit}, {label}")
     for line in tracked.splitlines():
         print(f"      {line}")
     if note:
