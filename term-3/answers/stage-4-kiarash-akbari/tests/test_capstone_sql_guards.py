@@ -60,28 +60,34 @@ ANCHOR_MARKERS = (
 def database_uri() -> str | None:
     """Where a loaded ``olist`` schema lives, or ``None`` when this machine says nothing.
 
-    An environment variable and nothing else, on purpose: stage 4 has no loader of its own
-    (phase 4 borrows stage 1's), so the only honest way to find a database is to be told where
-    one is. Guessing a localhost socket would turn "not verified" into "passed".
+    An environment variable and nothing else, on purpose: guessing a localhost socket would
+    turn "not verified" into "passed", and a skip that names no variable leaves a reader
+    looking for a config file that was never consulted.
     """
     return (os.environ.get("CAPSTONE_DATABASE_URI") or "").strip() or None
 
 
 def _connect():
-    """A connection to that database, or ``None`` -- a missing driver is not a failure."""
-    try:
-        import psycopg2
-    except ModuleNotFoundError:  # pragma: no cover - depends on the machine
-        return None
+    """A connection to that database, or ``None`` -- a missing driver is not a failure.
+
+    The driver is resolved by ``capstone.features.connect``, the same path the feature layer
+    uses. Hard-coding one module here was a second opinion that wasn't: a test pinned to
+    ``psycopg2`` skips quietly on the psycopg-3 environment this project ships, and "skipped
+    because no driver" reads exactly like "skipped because no database" -- which is how a
+    green run of 145 offline tests came to say nothing about the eleven live ones. The two
+    answers now come from one resolver, and a refusal is a different outcome from an absent
+    variable: see tests/test_capstone_features.py, where a step that reaches for a connection
+    is treated as having reached it.
+    """
     uri = database_uri()
     if uri is None:
         return None
     try:
-        connection = psycopg2.connect(uri)
+        from capstone.features import connect
+
+        return connect(uri, autocommit=True, purpose="run the live SQL guards")
     except Exception:  # pragma: no cover - depends on the machine
         return None
-    connection.autocommit = True
-    return connection
 
 
 def sql_files() -> list[Path]:
@@ -161,6 +167,137 @@ AUDIT_CSV = STAGE / "docs" / "evidence" / "column_audit.csv"
 #: the only two capstone objects allowed to read a column the audit does not permit as a
 #: feature: the label needs the review score, and the D1/D2 counts need the final status
 NON_FEATURE_VIEWS = ("v_order_label", "v_d1_excluded_orders", "v_d2_unlabelled_orders")
+
+
+#: how a ``COMMENT ON FUNCTION`` can spell a type the ``CREATE OR REPLACE FUNCTION`` spelled
+#: differently, and mean the same function: these are the catalog's own names for the short forms
+#: the shipped files use. Anything outside this table is treated as a different type, on purpose --
+#: a guard that resolves every difference away stops being a guard.
+_TYPE_SYNONYMS = {
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamptz",
+    "double precision": "float8",
+    "character varying": "varchar",
+}
+
+
+#: how far back a ``DROP FUNCTION`` has to look for the check that guards it. The width is borrowed
+#: from ``unreplaceable_creates`` for the same reason: a guard two pages away belongs to a different
+#: statement, and a window keeps this a per-statement claim.
+_DROP_WINDOW = 1600
+
+
+def stale_drops(sql: str) -> list[dict]:
+    """Every ``DROP FUNCTION`` in *sql*, with the two properties that make it safe.
+
+    ``dynamic`` is the closer one and it is deliberately strict: the drop has to be written as
+    ``EXECUTE format(...)``, i.e. asked of ``pg_proc`` for whichever stale signatures are present,
+    because a literal ``DROP FUNCTION capstone.f(text, timestamptz)`` in a migration is a different
+    claim -- it names one signature and assumes the database is the one that has it.
+
+    ``guarded`` then wants the dependents count and the refusal in front of it. The window is text
+    proximity, not analysis: this cannot judge whether ``dependents > 0`` is the right test, only
+    whether the file shows a reader that a dependent object stops the drop. ``CASCADE`` is refused
+    outright by the test that calls this, which is what keeps the window from being a joke.
+    """
+    body = body_of(sql)
+    found: list[dict] = []
+    for match in re.finditer(r"\bDROP\s+FUNCTION\b", body, re.IGNORECASE):
+        start = match.start()
+        window = body[max(0, start - _DROP_WINDOW) : start]
+        found.append(
+            {
+                "line": body[:start].count("\n") + 1,
+                # the keyword is inside the format string, so the quote in front of it is the seam
+                "dynamic": re.search(r"\bEXECUTE\s+format\(\s*['\"]$", window, re.IGNORECASE)
+                is not None,
+                "guarded": all(marker in window for marker in ("pg_depend", "RAISE EXCEPTION")),
+            }
+        )
+    return found
+
+
+def split_arguments(text: str) -> list[str]:
+    """One parameter list, split on the commas that are not inside parentheses.
+
+    ``p_price numeric(10, 2)`` has a comma that belongs to the type, and counting it as a second
+    parameter would make the guard report a signature that never was.
+    """
+    parts, depth, current = [], 0, ""
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+            continue
+        current += char
+    parts.append(current)
+    return [part for part in parts if part.strip()]
+
+
+def _inside_parens(text: str, open_index: int) -> str:
+    """The balanced group that starts at this ``(`` -- the argument list of one statement."""
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_index + 1 : index]
+    raise AssertionError("unbalanced parentheses in a function signature")
+
+
+def _param_types(raw: str) -> tuple[str, ...]:
+    """The types of a parameter list, in order, with names and modes dropped.
+
+    ``IN``/``OUT``/``VARIADIC`` are not types and a parameter's own name comes before its type, so
+    a parameter of the shape ``p_at timestamp`` resolves to one word. An empty list is a real
+    answer, not a parse failure: ``capstone.assert_no_source_writes()`` takes nothing.
+    """
+    types: list[str] = []
+    for part in split_arguments(raw):
+        tokens = part.replace("\n", " ").split()
+        while tokens and tokens[0].upper() in {"IN", "OUT", "INOUT", "VARIADIC"}:
+            tokens.pop(0)
+        if len(tokens) > 1:
+            tokens.pop(0)
+        spelled = " ".join(tokens).lower().replace("pg_catalog.", "").strip()
+        types.append(_TYPE_SYNONYMS.get(spelled, spelled))
+    return tuple(types)
+
+
+def created_signatures(sql: str) -> dict[str, set[tuple[str, ...]]]:
+    """Every ``CREATE OR REPLACE FUNCTION`` header here, as ``{name: {parameter types}}``."""
+    found: dict[str, set[tuple[str, ...]]] = {}
+    pattern = re.compile(
+        r"CREATE\s+OR\s+REPLACE\s+FUNCTION\s+([A-Za-z_][\w.]*)\s*\(", re.IGNORECASE
+    )
+    for match in pattern.finditer(sql):
+        name = match.group(1).lower()
+        types = _param_types(_inside_parens(sql, match.end() - 1))
+        found.setdefault(name, set()).add(types)
+    return found
+
+
+def commented_signatures(sql: str) -> list[tuple[str, tuple[str, ...], int]]:
+    """Every ``COMMENT ON FUNCTION`` here, with its line number for the failure message."""
+    found: list[tuple[str, tuple[str, ...], int]] = []
+    pattern = re.compile(
+        r"COMMENT\s+ON\s+FUNCTION\s+([A-Za-z_][\w.]*)\s*\(", re.IGNORECASE
+    )
+    for match in pattern.finditer(sql):
+        inner = _inside_parens(sql, match.end() - 1)
+        rest = sql[match.end() + len(inner) + 1 :]
+        if not re.match(r"\s*IS\b", rest, re.IGNORECASE):
+            # a ``COMMENT ON FUNCTION`` inside prose, or a multi-statement line that is not this one
+            continue
+        line = sql[: match.start()].count("\n") + 1
+        found.append((match.group(1).lower(), _param_types(inner), line))
+    return found
 
 
 def blocks_of(sql: str) -> list[tuple[str, str]]:
@@ -271,6 +408,92 @@ class StaticSqlContractTests(unittest.TestCase):
             for offence in unreplaceable_creates(body_of(path.read_text(encoding="utf-8")))
         ]
         self.assertEqual(offenders, [])
+
+    def test_a_comment_never_names_a_signature_the_directory_does_not_create(self) -> None:
+        """A ``COMMENT ON FUNCTION`` is resolved by exact signature, so a stale one is a defect.
+
+        The mirror's ``fix/stage4-live-guards`` commit of 2026-11-18 is why this exists: it made all
+        four as-of parameters ``p_at timestamp`` and left
+        ``COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamptz)`` under them.
+        On a database that had never held the old signature, that statement aborts the migration. On
+        one that had, it succeeds -- and comments a stale overload the ``CREATE OR REPLACE`` could
+        not replace, because a changed argument type creates a second function rather than editing
+        the first. The second outcome is the dangerous one: a green apply, a comment that looks
+        right, and a frame whose call resolves by argument types to whichever overload the
+        planner prefers.
+        """
+        for path in sql_files():
+            spoken = len(
+                re.findall(r"COMMENT\s+ON\s+FUNCTION", body_of(path.read_text(encoding="utf-8")))
+            )
+            seen = len(commented_signatures(body_of(path.read_text(encoding="utf-8"))))
+            self.assertEqual(
+                spoken,
+                seen,
+                f"{path.name}: {spoken} COMMENT ON FUNCTION statements in the text, "
+                f"{seen} parsed -- a guard that reads none would pass for the wrong reason",
+            )
+
+        created: dict[str, set[tuple[str, ...]]] = {}
+        for path in sql_files():
+            body = body_of(path.read_text(encoding="utf-8"))
+            for name, options in created_signatures(body).items():
+                created.setdefault(name, set()).update(options)
+        offenders: list[str] = []
+        for path in sql_files():
+            body = body_of(path.read_text(encoding="utf-8"))
+            for name, types, line in commented_signatures(body):
+                if types not in created.get(name, set()):
+                    spelled = ", ".join(types)
+                    offenders.append(f"{path.name}:{line}: nothing creates {name}({spelled})")
+        self.assertEqual(offenders, [])
+
+    def test_a_stale_overload_is_dropped_only_when_nothing_depends_on_it(self) -> None:
+        """The clean-up that leaves four as-of functions on a re-applied database, not eight.
+
+        Three claims. The drop exists and `004` owns exactly one of them; it is guarded, meaning a
+        dependents count and a refusal are written in front of it; and no `CASCADE` appears anywhere
+        in the directory, so the guard cannot be satisfied by the one keyword that makes it optional.
+        The last is why this is a static test rather than a live one: a `CASCADE` would have to be
+        written down, and what a reader of `004` has to be able to trust is the text.
+        """
+        for path in sql_files():
+            with self.subTest(name=path.name):
+                body = body_of(path.read_text(encoding="utf-8"))
+                self.assertEqual([], re.findall(r"\bCASCADE\b", body, re.IGNORECASE))
+        offenders = [
+            f"{path.name}:{drop['line']}: DROP FUNCTION "
+            + ("with no dependents guard" if not drop["guarded"] else "not asked of pg_proc")
+            for path in sql_files()
+            for drop in stale_drops(path.read_text(encoding="utf-8"))
+            if not (drop["guarded"] and drop["dynamic"])
+        ]
+        self.assertEqual(offenders, [])
+        self.assertEqual(
+            len(stale_drops((SQL_DIR / "004_as_of_functions.sql").read_text(encoding="utf-8"))),
+            1,
+            msg="004 drops the stale overload once, and no other file drops one at all",
+        )
+        # the parser reads what is there: a bare drop has to look different to it, and the safe
+        # spelling has to look like the safe spelling
+        self.assertEqual(
+            [{"line": 1, "dynamic": False, "guarded": False}],
+            stale_drops("DROP FUNCTION capstone.f(text, timestamptz);"),
+            msg="the guard's own tripwire: an unguarded literal drop must not read as a guarded one",
+        )
+        self.assertEqual(
+            [{"line": 3, "dynamic": True, "guarded": True}],
+            stale_drops(
+                "SELECT COUNT(*) INTO dependents FROM pg_depend;\n"
+                "RAISE EXCEPTION 'still used';\n"
+                "EXECUTE format('DROP FUNCTION %I.%I(%s)', n, p, a);"
+            ),
+        )
+        self.assertEqual(
+            [],
+            stale_drops("SELECT COUNT(*) FROM pg_depend;\nRAISE EXCEPTION 'x';\n"),
+            msg="the markers alone are not a drop, and a check that invents offences is not a check",
+        )
 
     def test_no_star_expansion_and_no_write_against_the_source_schema(self):
         offenders: list[str] = []
@@ -404,7 +627,8 @@ class LiveSqlContractTests(unittest.TestCase):
             raise unittest.SkipTest(
                 "CAPSTONE_DATABASE_URI is unset (or no driver/connection), so the live SQL "
                 "guards were NOT verified: the frame's column dependencies, the feature and "
-                "source counts, the label separation and the as-of agreement stay unverified"
+                "source counts, the label separation, the as-of agreement, the audit mirror "
+                "beside its CSV and the type of every number both paths produce stay unverified"
             )
         with cls.connection.cursor() as cursor:
             cursor.execute("SELECT to_regclass('capstone.v_feature_frame')")
@@ -485,19 +709,60 @@ class LiveSqlContractTests(unittest.TestCase):
             if column is not None
         ]
 
+    def test_the_audit_table_holds_the_rows_the_repository_ships(self):
+        """``capstone.column_audit`` and ``docs/evidence/column_audit.csv`` are the same table.
+
+        The guards are fail-closed by design: an empty ``column_audit`` refuses every column, and
+        a live run then reports errors about the feature frame that have nothing to do with it --
+        two ERRORs naming `v_feature_frame`, with the cause one ``RAISE`` deep inside
+        ``require_allowed``. So the precondition is a test now, and it fails with the command that
+        fixes it. Row by row rather than by count, because a count agrees while verdicts disagree,
+        and that is the version of this that would actually mislead someone.
+        """
+        rows = self.query(
+            'SELECT "table", "column", verdict FROM capstone.column_audit'
+            ' ORDER BY "table", "column"'
+        )
+        self.assertGreater(
+            len(rows),
+            0,
+            msg="capstone.column_audit is empty; the guards refuse everything by design. Load"
+                " it with: python3 scripts/load_column_audit.py | psql"
+                ' "$CAPSTONE_DATABASE_URI" -v ON_ERROR_STOP=1 -f -',
+        )
+        from capstone import audit
+
+        expected = [
+            (row.table, row.column, row.verdict)
+            for row in sorted(audit.load_audit(AUDIT_CSV), key=lambda row: (row.table, row.column))
+        ]
+        self.assertEqual(
+            [tuple(str(value) for value in row) for row in rows],
+            [tuple(row) for row in expected],
+            msg="the table does not match the CSV; reload it, do not edit the table",
+        )
+
     def test_the_frame_reads_no_column_the_audit_forbids(self):
         columns = sorted({f"{table}.{column}" for table, column in self.frame_source_columns()})
         self.assertGreater(len(columns), 0, msg="the catalog reported no dependencies at all")
-        # ``require_allowed`` raises on any refusal; psycopg2 turning that into an error is
-        # the failure this test exists to produce.
+        # ``require_allowed`` raises on any refusal, and the driver the URI names turns that into a
+        # python exception -- whichever driver that is. This test only asserts that the query runs or
+        # raises, so it has no opinion about the class; the negative control below does, and it asks
+        # the resolver instead of guessing.
         self.query("SELECT capstone.require_allowed(%s::text[])", (columns,))
 
     def test_the_guard_below_bites_on_a_forbidden_column(self):
         """The negative control for the test above, on the same database."""
-        from psycopg2 import errors as pg_errors  # type: ignore[attr-defined]
+        # the exception class comes from the URI, not from an import here:
+        # ``capstone.features.raise_exception_type`` records why a hard-coded ``psycopg2`` import
+        # made this test error on a psycopg-3 connection -- the guard's own exception escaped
+        # ``assertRaises``, which looks like a broken test and leaves the leak unproved
+        from capstone.features import raise_exception_type
+
+        raise_error = raise_exception_type(database_uri())
 
         self.query("SELECT capstone.require_allowed(ARRAY['orders.order_approved_at'])")
-        with self.assertRaises(pg_errors.RaiseException):
+        with self.assertRaises(raise_error):
             self.query("SELECT capstone.require_allowed(ARRAY['order_reviews.review_score'])")
 
     def test_the_frame_meets_the_minimum_size_rules(self):
@@ -540,6 +805,76 @@ class LiveSqlContractTests(unittest.TestCase):
                 (expected[0], round(expected[1], 6) if expected[1] is not None else None),
                 msg=order_id,
             )
+
+    def test_the_two_paths_agree_in_type_as_well_as_value(self):
+        """The same number out of both implementations, and the same type.
+
+        ``test_the_window_and_the_plain_as_of_query_agree`` above catches a wrong formula. It does
+        not catch a frame column that arrives as ``Decimal`` while the function's ``RETURNS double
+        precision`` arrives as ``float``, because ``assertAlmostEqual`` forgives that; and a view's
+        column types come from its expressions, not from a declaration, so they move whenever
+        someone rewrites a view. Cheap to check, and it is the check that has to sit next to the
+        value comparison for either of them to mean anything.
+        """
+        types = {
+            str(row[0]): str(row[1])
+            for row in self.query(
+                """
+                SELECT a.attname, t.typname
+                FROM pg_attribute AS a
+                JOIN pg_type AS t ON t.oid = a.atttypid
+                WHERE a.attrelid = 'capstone.v_feature_frame'::regclass
+                  AND a.attname IN ('days_since_prior_order', 'shipping_limit_days', 'promise_days')
+                """
+            )
+        }
+        self.assertEqual(sorted(types), [
+            "days_since_prior_order",
+            "promise_days",
+            "shipping_limit_days",
+        ], msg=str(sorted(types)))
+        for name in sorted(types):
+            self.assertEqual(
+                types[name],
+                "float8",
+                msg=f"{name} is {types[name]}; a float8 beside a numeric is how one value"
+                    " becomes Decimal from one path and a float from the other",
+            )
+        for signature in (
+            "capstone.customer_days_since_prior_order(text, timestamp)",
+            "capstone.seller_mean_price_before(text, timestamp)",
+        ):
+            self.assertEqual(
+                str(self.query(f"SELECT pg_get_function_result('{signature}'::regprocedure)")[0][0]),
+                "double precision",
+                msg=f"{signature} no longer returns the type the frame stores",
+            )
+            # and it takes the instant in the same type the frame stores it in. A `timestamp`
+            # column compared against a `timestamptz` parameter is resolved through the session
+            # zone, which is how the same number can differ by an hour between the two paths.
+            arguments = str(
+                self.query(f"SELECT pg_get_function_arguments('{signature}'::regprocedure)")[0][0]
+            )
+            self.assertIn("timestamp without time zone", arguments, msg=f"{signature}: {arguments}")
+        anchor_type = str(
+            self.query(
+                "SELECT t.typname FROM pg_attribute AS a JOIN pg_type AS t ON t.oid = a.atttypid"
+                " WHERE a.attrelid = 'capstone.v_feature_frame'::regclass"
+                " AND a.attname = 'order_approved_at'"
+            )[0][0]
+        )
+        self.assertEqual(
+            anchor_type,
+            "timestamp",
+            msg="the frame's anchor is naive, and every as-of comparison must stay naive with it",
+        )
+        # and the one float8 aggregate in the frame must not be a float8 aggregate
+        centroid = self.query(
+            "SELECT data_type FROM information_schema.columns"
+            " WHERE table_schema = 'capstone' AND table_name = 'v_zip_centroid'"
+            " AND column_name IN ('lat', 'lng') ORDER BY column_name"
+        )
+        self.assertEqual([str(row[0]) for row in centroid], ["numeric", "numeric"], msg=str(centroid))
 
     def test_reapplying_the_directory_changes_nothing(self):
         """Idempotency, tested rather than asserted: run the directory again, compare."""

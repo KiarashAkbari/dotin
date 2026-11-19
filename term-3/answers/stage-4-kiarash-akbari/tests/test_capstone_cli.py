@@ -15,6 +15,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from importlib.util import find_spec
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,10 +39,17 @@ def run(*argv: str) -> tuple[int, str, str]:
 
 
 class ChainPlanTest(unittest.TestCase):
-    def test_the_plan_is_the_five_steps_the_brief_describes(self) -> None:
+    def test_the_plan_is_the_six_steps_the_brief_describes(self) -> None:
+        """The order is the point, and so is the step that was missing from it.
+
+        ``load-audit`` sits between stage 1's load and this stage's frame: ``sql/001`` creates
+        ``capstone.column_audit``, the guard in ``sql/002`` reads that table and refuses everything
+        while it is empty, and nothing else in this stage writes it. A chain that starts from a fresh
+        database therefore died at its third command on a setup error dressed up as a leak.
+        """
         self.assertEqual(
             [step.name for step in CHAIN],
-            ["ingest", "load-database", "features", "model", "capacity-list"],
+            ["ingest", "load-database", "load-audit", "features", "model", "capacity-list"],
         )
 
     def test_the_prediction_path_is_not_part_of_the_training_chain(self) -> None:
@@ -50,9 +58,12 @@ class ChainPlanTest(unittest.TestCase):
     def test_dry_run_reports_what_blocks_and_why(self) -> None:
         code, out, _ = run("chain", "--dry-run")
         self.assertEqual(code, int(ExitCode.OK))
-        self.assertIn("features", out)
-        self.assertIn("phase 4", out)
-        self.assertIn("5.1", out)
+        # phase 4 landed, so the plan now blocks on the model layer and names the phase that owns
+        # it; the features line has to say "ready" rather than merely appear
+        self.assertIn("[ready  ] features", out)
+        self.assertIn("[blocked] model", out)
+        self.assertIn("phase 5", out)
+        self.assertIn("6.1", out)
 
     def test_dry_run_json_is_machine_readable(self) -> None:
         code, out, _ = run("chain", "--dry-run", "--json")
@@ -62,24 +73,34 @@ class ChainPlanTest(unittest.TestCase):
         self.assertTrue(all("reason" in row for row in rows))
 
     def test_readiness_is_derived_from_the_code_not_from_a_status_table(self) -> None:
-        with patch("capstone.chain.find_spec", return_value=None):
-            rows = {row["name"]: row for row in statuses()}
-            self.assertFalse(rows["ingest"]["ready"])
-            self.assertFalse(rows["features"]["ready"])
-            self.assertFalse(rows["model"]["ready"])
-            self.assertIn("placeholder", rows["features"]["reason"])
+        rows = {row["name"]: row for row in statuses()}
+        # features flipped to ready when phase 4 wrote its body, and nothing in this file or in
+        # chain.py was edited to make that happen -- which is the whole point of deriving it
+        self.assertTrue(rows["features"]["ready"])
+        self.assertEqual(rows["features"]["reason"], "")
+        self.assertFalse(rows["model"]["ready"])
+        self.assertIn("placeholder", rows["model"]["reason"])
+        # Where the chain stops is a fact about the interpreter, not about this code: the two stage-1
+        # steps count as ready exactly when ``find_spec`` can see that package, so in a venv that has
+        # stage 1 installed the chain stops at ``model`` -- and the hard-coded "ingest" used to fail
+        # there, which punished a working setup. So the test asks the same question ``implemented()``
+        # asks and checks the answer that follows. Both branches assert: skipping the ready case
+        # would let a chain that ignores stage 1 pass unnoticed.
+        stage_one = find_spec("data_factory") is not None
+        if stage_one:
+            self.assertTrue(
+                rows["ingest"]["ready"],
+                msg="stage 1 is importable here, so ingest cannot be the blocker the chain names",
+            )
+            self.assertEqual(first_blocked().name, "model")
+        else:
             self.assertEqual(first_blocked().name, "ingest")
             self.assertIn("not importable", rows["ingest"]["reason"])
 
-        with patch("capstone.chain.find_spec", return_value=object()):
-            rows = {row["name"]: row for row in statuses()}
-            self.assertTrue(rows["ingest"]["ready"])
-            self.assertTrue(rows["load-database"]["ready"])
-            self.assertFalse(rows["features"]["ready"])
-            self.assertEqual(first_blocked().name, "features")
-
     def test_the_placeholders_refuse_with_their_phase(self) -> None:
-        for function in (features.build, model.train, predict._score_rows):
+        # features.build is absent on purpose: its body landed with phase 4, and
+        # LayerStatusTests in test_capstone_features.py pins that it no longer carries the marker
+        for function in (model.train, predict._score_rows):
             with self.assertRaises(NotReadyError) as caught:
                 function(None, [])  # type: ignore[arg-type]
             self.assertIn("ROADMAP phase", str(caught.exception))

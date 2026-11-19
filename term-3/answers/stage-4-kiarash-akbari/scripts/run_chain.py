@@ -11,6 +11,19 @@ returned" rather than "the last script in the folder finished".
 Today the loop refuses at the first step whose package is not on the interpreter's
 path, and writes a manifest that says so. ``--dry-run`` prints the plan and touches
 nothing, which is what the doctor and the README point a stranger at.
+
+One prerequisite used to live only in a README: ``capstone.column_audit`` is created by
+``sql/001``, read by the guard in ``sql/002``, and *refuses everything while it is empty* --
+fail-closed, which is the right instinct and the wrong error for a fresh database. It is now a step
+of its own, ``load-audit``, ordered before ``features``, so "the chain ran" includes "the audit the
+guard consults was loaded". Nothing needs to be pre-loaded by hand any more; to see what that step
+did, run it on its own::
+
+    python3 -m capstone load_audit --config config/capstone.toml
+
+and the same load without Python, for whoever holds the database directly::
+
+    python3 scripts/load_column_audit.py | psql "$CAPSTONE_DATABASE_URI" -v ON_ERROR_STOP=1 -f -
 """
 
 from __future__ import annotations
@@ -64,6 +77,7 @@ def execute(args: argparse.Namespace, timer) -> int:
     ``timer`` is a :class:`capstone.timing.ChainTimer`, built by the caller so the
     manifest can still be written when this function raises.
     """
+    from capstone import chain as capstone_chain
     from capstone.chain import CHAIN
     from capstone.errors import CapstoneError
     from capstone.exit_codes import ExitCode
@@ -80,11 +94,11 @@ def execute(args: argparse.Namespace, timer) -> int:
                         context={"command": command},
                     )
                 continue
-            module_name, _, attribute = step.entrypoint.partition(":")
-            module = __import__(module_name, fromlist=[attribute or module_name])
-            getattr(module, attribute)(  # a pending placeholder raises NotReadyError here
-                args.loaded_config, []
-            )
+            # one positional, the config: the contract lives in capstone.chain.run_step, and the
+            # tests in tests/test_run_chain.py hold every step in CHAIN to it. Passing argv here is
+            # what used to break -- `load_from_csv(config)` took the extra [] as a second argument
+            # and died, while `features.build(config, audit)` accepted it as an empty audit.
+            capstone_chain.run_step(step, args.loaded_config)
     return int(ExitCode.OK)
 
 

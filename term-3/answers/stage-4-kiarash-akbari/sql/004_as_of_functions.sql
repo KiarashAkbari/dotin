@@ -12,6 +12,100 @@
 -- ROADMAP phase 4 item 2 asks for the as-of condition to be *in* the SQL. A function body
 -- is the smallest possible place for such a condition to live, and the largest possible
 -- audience: it can be run, grepped and read in psql without touching Python.
+--
+-- `p_at` is `timestamp`, not `timestamp with time zone`, and that is a measured choice rather
+-- than a preference. `olist.orders.order_approved_at` is `TIMESTAMP` -- naive, no offset -- as
+-- `stage-2/sql/001_create_olist_schema.sql` defines it, and 003's window compares naive values
+-- to each other. Ask the same question through a `timestamptz` parameter and PostgreSQL resolves
+-- the *column* side through the session zone first, so a session sitting in a zone with
+-- daylight time shifts the answer by an hour for part of the year. The live run in
+-- live run on the student's own PostgreSQL is what found it, on order
+-- `003a7f59d7e08a9c61d9e2881fe6459c` the frame's window said 175.902280 days and this file's
+-- function said 175.860613: exactly 0.041667 of a day, one hour, which is the size of the shift
+-- between the two offsets those two instants carry in that zone. The window cannot produce that number, because a
+-- window over a naive column never leaves the naive domain: it is the parameter's type, not the
+-- arithmetic, that decides.
+--
+-- The narrow reading is that the parameter is only a cutoff instant, so the safe rule is: nothing
+-- in this directory converts. `001`'s bookkeeping keeps `TIMESTAMPTZ` (`build_run.built_at`,
+-- `external_municipio.fetched_at`), because those columns record when *we* wrote a row and there
+-- is no naive counterpart to be inconsistent with. What must stay naive is every comparison
+-- against an `olist` timestamp.
+
+-- The stale-overload clean-up, conditional on purpose.
+--
+-- `CREATE OR REPLACE FUNCTION` does not edit a signature, it adds one. A database that ran this
+-- file while `p_at` was `timestamptz` holds eight as-of functions -- the naive four beside the
+-- zoned four -- and `COMMENT ON FUNCTION` attaches to whichever the text names, which is how the
+-- "green" live run of an earlier round proved nothing. The state is not only untidy: on such a
+-- database `003` was applied when only the zoned overload existed, so the frame's view resolves
+-- through `timestamptz` and casts the naive column side through the session zone -- the exact one-hour disagreement `docs/evidence/live-guards-dotin-run.txt` section 6 measured. Removing the zoned signatures is
+-- therefore part of the fix.
+--
+-- Doing it blindly is not. `003` runs before this file in the same directory, so an unqualified
+-- `DROP … CASCADE` would take the frame with it, and a plain `DROP` would abort the migration with
+-- 2BP01 while looking like a broken file. So the drop is asked, not ordered: no dependents, it
+-- goes quietly (which is every database that has already run this file once); dependents exist, the
+-- migration stops with the order that fixes it -- this file, then `003`, then this file again --
+-- instead of deleting objects nobody asked it to delete.
+--
+--
+-- The predicate is `oidvector = oidvector`, and the three spellings that look equivalent are not:
+--
+--   proargtypes = ARRAY['text', 'timestamptz']::regtype[]      -- does not parse: there is no
+--                                                               -- `oidvector = regtype[]` operator, and
+--                                                               -- the apply aborts with
+--                                                               -- UndefinedFunction (42883)
+--   proargtypes::oid[] = ARRAY[...]::oid[]                      -- parses, and is always false: the
+--                                                               -- cast keeps the vector's zero-based
+--                                                               -- bounds, so `[0:1]` never equals the
+--                                                               -- `[1:2]` that ARRAY[] builds
+--   proargtypes = 'text'::regtype AND ...                       -- compares a two-element vector to one
+--                                                               -- scalar and matches nothing either
+--
+-- A predicate that only ever returns false is the worst of the three: the migration exits 0, prints
+-- the notice about what it converged, and leaves the database with eight functions behind an
+-- ambiguous view. The first two of these shipped in earlier revisions of this file and were caught
+-- only by running it. So the comparison stays on `oidvector`, whose `=` exists and ignores bounds, and
+-- the expected types are named through `regtype` so that no OID is hard-coded here.
+-- `tests/test_postgres_smoke.py` asserts both halves of this: that the block fires on a database that
+-- has stale overloads, and that the count it drops is the count the student's own database had (four, on
+-- the report of round 102 -- which is why `\df capstone.*` ending at four is the check to run).
+DO $drop_stale_as_of_overloads$
+DECLARE
+    stale record;
+    dependents integer;
+BEGIN
+    FOR stale IN
+        SELECT p.oid, p.proname, n.nspname, pg_get_function_identity_arguments(p.oid) AS arguments
+        FROM pg_proc AS p
+        JOIN pg_namespace AS n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'capstone'
+          -- the four names this file owns, and only they: a sweep of "every capstone function with
+          -- that shape" would also drop a function added later on purpose, and a migration may not
+          -- delete what it never created
+          AND p.proname IN ('customer_order_volume_before', 'customer_days_since_prior_order',
+                            'seller_order_volume_before', 'seller_mean_price_before')
+          AND p.proargtypes = ARRAY['text'::regtype, 'timestamptz'::regtype]::oidvector
+    LOOP
+        SELECT COUNT(*) INTO dependents
+        FROM pg_depend
+        WHERE refclassid = 'pg_proc'::regclass AND refobjid = stale.oid;
+        IF dependents > 0 THEN
+            RAISE EXCEPTION
+                'capstone.% is depended on by % object(s), so the stale overload cannot be dropped '
+                'without taking them with it; re-apply sql/004_as_of_functions.sql, then '
+                'sql/003_feature_views.sql, then this file again -- only once the frame resolves '
+                'through the naive signatures can the zoned ones go',
+                stale.proname, dependents;
+        END IF;
+        EXECUTE format('DROP FUNCTION %I.%I(%s)', stale.nspname, stale.proname, stale.arguments);
+        -- out loud, because the silence is how this went unnoticed: a re-apply that changes the
+        -- database is not a re-apply that changes nothing, and the log line is what tells the two apart
+        RAISE NOTICE 'dropped the stale overload %.% (%)', stale.nspname, stale.proname, stale.arguments;
+    END LOOP;
+END
+$drop_stale_as_of_overloads$;
 
 -- How many orders this buyer had already had, strictly before the decision instant.
 --
@@ -107,7 +201,7 @@ AS $$
       AND o.order_approved_at < p_at;
 $$;
 
-COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamptz) IS
+COMMENT ON FUNCTION capstone.customer_order_volume_before(text, timestamp) IS
     'the as-of specification behind v_feature_frame.prior_orders_by_customer, on '
     'customer_unique_id; slow on purpose, and compared to the window implementation by '
     'tests/test_capstone_sql_guards.py';

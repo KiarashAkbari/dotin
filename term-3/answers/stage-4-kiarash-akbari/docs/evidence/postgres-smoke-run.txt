@@ -1,0 +1,77 @@
+========================================================================
+postgres smoke run -- what a real server says about sql/004 that the offline gates did not
+========================================================================
+tree: HEAD 0848f5f, no tracked file differs from HEAD -- the bytes below are the committed ones
+
+server: the cluster pgserver starts on this interpreter
+        PostgreSQL 16.2 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 10.2.1 20210130 (Red Hat 10.2.1-11), 64-bit
+
+------------------------------------------------------------------------
+1. the gates a reader has without the dev extra
+------------------------------------------------------------------------
+   smoke module under /usr/bin/python3: exit 0
+      | ssssssssss
+      | ----------------------------------------------------------------------
+      | Ran 10 tests in <t>s
+      | OK (skipped=10)
+   full stage-4 suite on the shipped tree: exit 0
+      | ......................................................................................................................
+      | ----------------------------------------------------------------------
+      | Ran 220 tests in <t>s
+      | OK (skipped=2)
+
+------------------------------------------------------------------------
+2. a real server, both ways the module can be given one
+------------------------------------------------------------------------
+   temp cluster started by the module itself: exit 0
+      | ..........
+      | ----------------------------------------------------------------------
+      | Ran 10 tests in <t>s
+      | OK
+   through CAPSTONE_SMOKE_DATABASE_URI (the reader's path): exit 0
+      | ..........
+      | ----------------------------------------------------------------------
+      | Ran 10 tests in <t>s
+      | OK
+   the same URI without CAPSTONE_SMOKE_ALLOW_DESTROY=1: exit 0
+      | refuses to touch a schema it was not told to drop
+   \df capstone.* after that apply:
+      |                                                                               List of functions
+      |   Schema  |              Name               | Result data type |                                         Argument data types                                          | Type
+      | ----------+---------------------------------+------------------+------------------------------------------------------------------------------------------------------+------
+      |  capstone | audit_is_allowed                | boolean          | p_column text                                                                                        | func
+      |  capstone | audit_is_allowed                | boolean          | p_table text, p_column text                                                                          | func
+      |  capstone | customer_days_since_prior_order | double precision | p_customer_id text, p_at timestamp without time zone                                                 | func
+      |  capstone | customer_order_volume_before    | bigint           | p_customer_id text, p_at timestamp without time zone                                                 | func
+      |  capstone | refresh_external_municipio      | bigint           | p_source text                                                                                        | func
+      |  capstone | require_allowed                 | void             | p_columns text[]                                                                                     | func
+      |  capstone | seller_mean_price_before        | double precision | p_seller_id text, p_at timestamp without time zone                                                   | func
+      |  capstone | seller_order_volume_before      | bigint           | p_seller_id text, p_at timestamp without time zone                                                   | func
+      |  capstone | upsert_external_municipio       | void             | p_ibge_code text, p_city_state text, p_indicator text, p_period text, p_value numeric, p_source text | func
+      | (9 rows)
+
+------------------------------------------------------------------------
+3. 2 predicates that the offline gates cannot tell from the shipped one
+------------------------------------------------------------------------
+
+   --- the predicate that shipped in the seventh patch (004_as_of_functions.sql, manifest regenerated to match)
+       offline gates, /usr/bin/python3: exit 0 (still green, as claimed)
+       real server (/home/user/data-factory-v2/stage-4/.venv/bin/python): exit 1 (red, as intended)
+           | AssertionError: 'is depended on by' not found in 'psql:/tmp/dotin/term-3/answers/stage-4-kiarash-akbari/sql/004_as_of_
+           | ----------------------------------------------------------------------
+           | Ran 10 tests in <t>s
+           | FAILED (failures=6)
+
+   --- a predicate that parses and is always false (004_as_of_functions.sql, manifest regenerated to match)
+       offline gates, /usr/bin/python3: exit 0 (still green, as claimed)
+       real server (/home/user/data-factory-v2/stage-4/.venv/bin/python): exit 1 (red, as intended)
+           | AssertionError: 0 == 0 : the drop went ahead beside a dependent view
+           | ----------------------------------------------------------------------
+           | Ran 10 tests in <t>s
+           | FAILED (failures=3)
+
+========================================================================
+restore: files are byte-identical to what they were
+checksum tripwire after the restore: ok: 5 files match the manifest
+
+verdict: 2 predicates invisible to the offline gates, all caught by the server

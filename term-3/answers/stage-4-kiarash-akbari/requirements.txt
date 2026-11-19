@@ -1,0 +1,35 @@
+# Stage 4's own requirements, in the same shape as ../stage-3-kiarash-akbari/requirements.txt.
+#
+# Python floor: >=3.12, declared in ../stage-1-kiarash-akbari/pyproject.toml.
+#
+# These pins are *inherited*, not resolved here: psycopg 3.3.6 is what stages 1, 2 and 3 already
+# ship, and ``capstone.features.connect`` imports exactly the module a URI names -- a bare
+# ``postgresql://`` or ``postgresql+psycopg://`` for this one, ``postgresql+psycopg2://`` for a
+# machine that only has psycopg2. A second, independently "fresh" resolution would produce a
+# different environment on a different week, which is the failure the == pins exist to prevent
+# (00 §۲.۹: «آخرین نسخه» pin نیست).
+#
+# Nothing in this file was installed or import-checked in the sandbox that wrote it -- there is no
+# PostgreSQL and no driver there, so the offline suite stays stdlib-only and these two lines are
+# attributable to stage 3's lock and to the student's machine, not to a run here («بررسی نشده از
+# این محیط»). The command that makes this list honest, on a machine with the venv:
+#
+#   ../stage-3-kiarash-akbari/.venv/bin/python -m pip freeze | grep -iE '^psycopg' > requirements.txt
+#
+# Phase 5 adds the model (numpy/pandas/scikit-learn) and the notebooks add matplotlib; those lines
+# are deliberately absent, because a requirements file that lists what a later phase might want is
+# not a contract about what this phase needs. They are in stage 3's file, unchanged, until then.
+psycopg==3.3.6
+psycopg-binary==3.3.6
+#
+# Optional, and only for tests/test_postgres_smoke.py, which starts a throwaway PostgreSQL so that a
+# catalog predicate is executed rather than read. Deliberately not pinned above: a bundled server is not
+# a dependency of the deliverable, and a reader who never runs that module needs nothing.
+#
+#   python3 -m venv .venv && .venv/bin/pip install "pgserver==0.1.4" "psycopg2-binary==2.9.13"
+#
+# psycopg 3, pinned above, is the driver the smoke module also uses; psycopg2 is there only so
+# DriverAgreementTests can name two exception classes and compare them. With no extra installed the
+# module skips and prints why -- and `CAPSTONE_SMOKE_DATABASE_URI=<uri>
+# CAPSTONE_SMOKE_ALLOW_DESTROY=1` runs the same ten tests against a server you chose, which is the
+# shorter path if you already have one.
