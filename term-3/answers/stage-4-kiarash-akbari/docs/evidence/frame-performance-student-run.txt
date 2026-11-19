@@ -1,0 +1,100 @@
+========================================================================
+checklist 5.3, closed: the feature frame timed on the project's own PostgreSQL
+========================================================================
+
+Who ran what
+------------
+
+Every number in this file is **student-reported**: they are read off the output of
+
+    PYTHONPATH=src CAPSTONE_DATABASE_URI=postgresql+psycopg://... \
+      python3 docs/evidence/frame-performance-run.py --runs 5 \
+      | tee docs/evidence/frame-performance-real-run.txt
+
+run on `olist_phase0_test` by the student, on their own machine, against the project's own
+database. The agent sandbox contributed the *script*, not the measurement -- and the two must
+not be blended: the sandbox captures beside this file (`frame-performance-sandbox-run.txt`,
+`frame-performance-dotin-run.txt`) carry synthetic corpora of 100,000 invented orders, and the
+timings there (366.5 ms and 397.7 ms) are not comparable with this row except as a statement
+about the procedure.
+
+This file is a transcription, and says so. This answer's `.gitignore` keeps
+`docs/evidence/*-real-run*.txt` out of git, which is the project's standing rule for raw logs; the
+patch that adds this file also adds one negation line, so the raw capture can be promoted to a
+tracked byte copy with
+
+    git add docs/evidence/frame-performance-real-run.txt
+
+Nothing here claims that promotion happened. Where a transcription and the raw file disagree,
+the raw file wins and this one is wrong.
+
+What was measured
+-----------------
+
+| what | value | what it means |
+|---|---|---|
+| frame rows | 99,281 | the rows `capstone.v_feature_frame` returns on the real corpus |
+| frame columns | 32 | 29 counted as features; the three withheld are the view's own leading `order_id`, `customer_id` and `order_approved_at`, the names in `TECHNICAL_COLUMNS` that appear in it |
+| feature minimum | 10 | the brief's floor; 29 is measured against it, not assumed from the view |
+| timed mean, 5 runs | **488.6 ms** | `capstone.features.FRAME_TIMING_SQL` -- the statement the ceiling is defined on |
+| ceiling | 500 ms | `features.feature_query_ms` in config, unchanged by this round |
+| margin | 11.4 ms | thin, and see the drift paragraph below |
+| whole-frame read | not quoted here | transfer is the log's second number, not part of the verdict |
+| live test modules | `Ran 84 ... OK (skipped=1)` | `test_capstone_features` + `test_capstone_external` on this database |
+
+The denominator of the external report, 4,310, is the count of distinct `(customer_city,
+customer_state)` pairs -- the same figure `decision-impact.txt` section 5 measures on the
+shipped CSV, which is the cross-check that the view and the audit are looking at the same
+corpus and not at a partially loaded one.
+
+The plan, as reported
+---------------------
+
+Two `Hash Join` nodes dominate: 173.1 ms and 166.3 ms of self time. Beneath them a
+`HashAggregate` spills: five batches, temp blocks written -- the transcription names the batches and
+not the block count, which the sandbox captures do print. Two of the nine `olist` tables had never
+been ANALYZEd at the time of the run, so the row estimates beside those nodes are the
+planner's guess even though the durations are real.
+
+Read together, that is where the 11.4 ms of margin goes: the aggregate that builds the per-
+order rollups does not fit in `work_mem`, so the same rows are hashed and re-read from disk,
+and both hash joins pay for the extra passes. Ranked by *self* time rather than by the
+inclusive
+`Actual Total Time`, the root node is not in the list at all -- which is the reason the harness
+reports it that way.
+
+Why the pass is reported as a pass anyway
+-----------------------------------------
+
+The brief asks for under 500 ms and the measurement answers 488.6 ms on the project's own
+data. That is what the item asks to be closed with, and closing it on a different standard --
+"must be comfortable" -- would be moving the goal after seeing the score.
+
+What the sandbox captures add is the size of the uncertainty: the same procedure on the same
+schema with the same synthetic rows has printed 366.5 ms and 397.7 ms, a 31.2 ms drift, which
+is larger than the 11.4 ms margin here. So the honest sentence for `report.md` is: *the frame
+query meets the 500 ms requirement as measured, by a margin smaller than the run-to-run spread
+of the measurement; the spill is the first thing to fix if it is ever re-measured closer to
+the line.* The fix is a config change to `work_mem` or an index on `order_items(order_id)` /
+`payments(order_id)`, both of which are report findings -- raising `features.feature_query_ms`
+is not, and the harness says so in the same words the test pins.
+
+The external half of the same run
+---------------------------------
+
+    fetched: not attempted
+    stored: not attempted (read-only run)
+    match rate: 0 of 4310 (city, uf) keys = 0.0; the external table holds 0 key(s)
+    claim: none yet -- an external signal earns its place by a lift measured on the model's own
+      split, and a match rate is not that lift
+
+Four things that sentence is and is not. It is the state before any fetch: `capstone external
+--report` reads `capstone.v_external_match_rate` and does not invent a row. It is not a
+failure of the join:
+`0 of 4310` with an empty external table is the arithmetic the view is supposed to do, and the same
+report names the unmatched cities through `capstone.v_external_unmatched_cities` instead of
+quietly dropping them. It is not a
+hypothesis tested -- that is 12.5, and it needs `--fetch` to have stored something first. And
+it is not a crash, which is the other half of this patch: the same command with a URI whose
+port is closed used to end in a driver traceback and now ends in a sentence with exit code 67
+(`docs/evidence/patch-0014-run.txt`, section 3).

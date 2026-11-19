@@ -1,0 +1,157 @@
+========================================================================
+patch 0014's gates: the refusal fix red and green, the offline suite, and a server
+========================================================================
+what produced this file, in one command (from ``term-3/answers/stage-4-kiarash-akbari/``; the
+interpreter needs the dev
+extra only for section 3, which is the half that talks to a real socket)::
+
+    python3 docs/evidence/patch-0014-run.py | tee docs/evidence/patch-0014-run.txt
+
+read it as:
+
+* section 1 is the whole offline suite on the plain interpreter -- no ``psycopg``, no server, no
+  network. The tally line is the suite's own, and the elapsed clause is scrubbed so two runs of
+  this file can be compared byte for byte;
+* section 2 is the red/green half, and the red half is not a story: the harness copies ``src``,
+  ``tests``, ``config``, ``sql`` and ``docs/evidence`` into a scratch directory, removes the
+  ``try``/``except`` from ``features.connect`` *there*, and runs the new tests against that tree.
+  Four of six fail, with the driver's own exception escaping -- the bug, reproduced. It then
+  runs the same six against the tree as shipped and they pass. Copying only ``src`` would have
+  printed a green for the red run, because the test modules put ``<stage>/src`` on ``sys.path``
+  themselves; that is written into the harness's docstring so the next one does not repeat it;
+* section 3 starts a disposable cluster, applies stage-2's DDL and this stage's five migrations,
+  loads the audit through the shipped loader, seeds 200 synthetic orders so the match-rate view
+  has a denominator that is not zero, and runs ``capstone external --report`` twice: once
+  against the live socket (exit 0, ``0 of 200`` keys) and once against ``127.0.0.1:5599``, which
+  is closed -- exit 67, one sentence, no traceback, and the password from the URI not present in
+  the output. The corpus is synthetic and the machine is the agent sandbox («سندباکس»); no
+  timing in this file is a stage measurement, and the one that closed 5.3 is
+  ``frame-performance-student-run.txt``;
+* section 4 is the two touched modules with ``CAPSTONE_DATABASE_URI`` set: ``Ran 90 ... OK
+  (skipped=1)``. The skip is the endpoint guard, which needs ``CAPSTONE_EXTERNAL_LIVE=1``. The
+  student's own run of the same two modules printed ``Ran 84 ... OK (skipped=1)`` -- 84 because
+  the six tests in this patch had not landed yet, and ``skipped=1`` for the same reason as here.
+  The 0013 capture's ``skipped=2`` is neither better nor worse: that run's demo step had already
+  stored twenty external rows, so the empty-table guard skipped itself. Which live guards get to
+  run depends on what the table holds, and that is the whole difference;
+* ``check[...]`` lines are the harness asserting its own expectations against the children's output,
+  so a silent regression prints ``FAILED`` here rather than looking like a log.
+
+Two provenance notes, because this file travels between trees. It was captured from this ported
+tree by the agent sandbox: section 1's ``Ran 278`` is this directory's own suite (the mirror in
+``data-factory-v2/stage-4`` printed ``Ran 312`` for the same bytes -- the two suites differ by the
+tests that cannot be ported, not by this patch), and section 3's cluster is a disposable
+``pgserver`` holding 200 invented orders, so no duration in this file is a measurement of your
+database. The measurement that closes checklist 5.3 is beside it, in
+``frame-performance-student-run.txt``, and that one is yours.
+
+
+------------------------------------------------------------------------
+1. the offline suite, plain interpreter, no database and no driver
+------------------------------------------------------------------------
+$ /usr/bin/python3 -m unittest discover -s tests -t .
+  | 
+  | ...............................................................................................
+  | ----------------------------------------------------------------------
+  | Ran 278 tests in <t>s
+  | 
+  | OK (skipped=15)
+  [exit 0] the whole suite, with the two new classes in it
+  check[offline suite green]: ok -- exit 0
+  tally: 278 tests -- OK (skipped=15)
+
+------------------------------------------------------------------------
+2. the same guards against the bug put back
+------------------------------------------------------------------------
+$ /usr/bin/python3 -m unittest tests.test_capstone_features.ConnectRefusalTests
+  ... tests.test_capstone_external.RefusedDatabaseTests
+  |   File "/tmp/capstone-red-oc83fly6/tests/test_capstone_features.py", line 939, in test_a_driver
+  |     self.assertLess(len(str(caught.exception)), 700)
+  | AssertionError: 1260 not less than 700
+  | 
+  | ======================================================================
+  | FAIL: test_the_password_never_rides_along_in_the_refusal (tests.test_capstone_features.ConnectR
+  | ----------------------------------------------------------------------
+  | Traceback (most recent call last):
+  |   File "/tmp/capstone-red-oc83fly6/tests/test_capstone_features.py", line 929, in test_the_pass
+  |     self.assertNotIn("sup3rs3cr3t", str(caught.exception))
+  | AssertionError: 'sup3rs3cr3t' unexpectedly found in 'connection to server at "127.0.0.1", port 
+  | 
+  | ----------------------------------------------------------------------
+  | Ran 6 tests in <t>s
+  | 
+  | FAILED (failures=2, errors=2)
+  [exit 1] expected RED: without the translation, a refused port escapes as a traceback
+  check[red run fails on the driver error]: ok -- exit 1
+$ /usr/bin/python3 -m unittest tests.test_capstone_features.ConnectRefusalTests
+  ... tests.test_capstone_external.RefusedDatabaseTests
+  | 
+  | ......
+  | ----------------------------------------------------------------------
+  | Ran 6 tests in <t>s
+  | 
+  | OK
+  [exit 0] GREEN on the tree as shipped
+  check[green run passes]: ok -- exit 0
+
+------------------------------------------------------------------------
+3. a disposable server, and the two paths through --report
+------------------------------------------------------------------------
+  check[applied 001_create_olist_schema.sql]: ok
+  check[applied 001_capstone_schema.sql]: ok
+  check[applied 002_time_guard.sql]: ok
+  check[applied 003_feature_views.sql]: ok
+  check[applied 004_as_of_functions.sql]: ok
+  check[applied 005_external_signal.sql]: ok
+$ python3 -m capstone audit --load --config config/capstone.example.toml
+  |   changed: sellers.seller_city
+  |   changed: sellers.seller_id
+  |   changed: sellers.seller_state
+  |   changed: sellers.seller_zip_code_prefix
+  [exit 0] the audit the guard asks for, through the shipped loader
+$ python3 docs/evidence/frame-performance-synthetic.py --orders 200
+  |       olist.geolocation           257984 rows
+  |       olist.order_items              254 rows
+  |       olist.orders                   200 rows
+  |       olist.payments                 195 rows
+  |       olist.products                 100 rows
+  |       olist.sellers                   25 rows
+  [exit 0] 200 synthetic orders, so the rate has a denominator
+$ python3 -m capstone external --report --config config/capstone.example.toml
+  | stored: not attempted (read-only run)
+  | match rate: 0 of 200 (city, uf) keys = 0.0; the external table holds 0 key(s)
+  | claim: none yet -- an external signal earns its place by a lift measured on the model's own spl
+  |       unmatched: city_1|rj (1 orders)
+  |       unmatched: city_10|pr (1 orders)
+  |       unmatched: city_100|pr (1 orders)
+  |       unmatched: city_101|ba (1 orders)
+  |       unmatched: city_102|sp (1 orders)
+  [exit 0] the normal path: a rate, read from the view, nothing stored
+  check[report on a live server exits 0]: ok -- exit 0
+  check[it names the denominator]: ok
+$ python3 -m capstone external --report --config config/capstone.example.toml
+  | 
+  | error: the database named by CAPSTONE_DATABASE_URI would not open, so capstone cannot load the 
+  [exit 67] the bug: a well-formed uri whose port is closed
+  check[refused port exits 67]: ok -- exit 67
+  check[no traceback escapes]: ok
+  check[the driver's own words survive]: ok
+  check[the password is not echoed]: ok
+
+------------------------------------------------------------------------
+4. the live guards, on the server they were written for
+------------------------------------------------------------------------
+$ python3 -m unittest tests.test_capstone_features tests.test_capstone_external
+  | 
+  | ...............................................................s..........................
+  | ----------------------------------------------------------------------
+  | Ran 90 tests in <t>s
+  | 
+  | OK (skipped=1)
+  [exit 0] with a URI set, so the skip path is not what ran
+  check[live modules green]: ok -- exit 0
+
+summary: 0 check(s) failed
+end note: the refusals above were produced against a real driver and a real socket; the
+frame timings are not in this file and the 200-order corpus is synthetic. Neither number
+is the stage's -- the one that closed 5.3 is in frame-performance-student-run.txt.

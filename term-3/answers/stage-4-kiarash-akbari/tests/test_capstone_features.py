@@ -20,6 +20,7 @@ import importlib.util
 import os
 import subprocess
 import unittest
+from unittest import mock
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -875,6 +876,83 @@ class DriverErrorTypeTests(unittest.TestCase):
             msg="resolve it through `capstone.features.raise_exception_type` instead",
         )
         self.assertIn("raise_exception_type", source)
+
+
+class ConnectRefusalTests(unittest.TestCase):
+    """A database that will not open is a state of the machine, and states get sentences.
+
+    ``capstone external --report`` used to end in a traceback out of the driver when the port was
+    closed: the URI was well-formed, so the two guards that run before it (no scheme, unknown driver,
+    module missing) had nothing to say, and ``module.connect`` raised whatever its author's
+    ``OperationalError`` is. Two things are pinned here -- that the failure arrives as a
+    ``NotReadyError`` with 67 so the caller can branch on it, and that the translation does not eat
+    the diagnosis or leak the password the driver may have echoed.
+    """
+
+    URI = "postgresql+psycopg://learner:sup3rs3cr3t@127.0.0.1:5599/olist_phase0_test"
+    REFUSED = (
+        'connection to server at "127.0.0.1", port 5599 failed: Connection refused\n'
+        "\tIs the server running on that host and accepting TCP/IP connections?\n"
+        "supplied password: sup3rs3cr3t"
+    )
+
+    def refusing_module(self, text: str | None = None) -> mock._patch_decorator:
+        """Patch the one seam ``connect`` uses to reach a driver, so no driver has to be installed."""
+
+        class Refusing:
+            OperationalError = type("OperationalError", (Exception,), {})
+
+            def connect(self, dsn: str):
+                raise self.OperationalError(text or ConnectRefusalTests.REFUSED)
+
+        return mock.patch.object(features, "_driver_and_dsn", return_value=(Refusing(), "dsn"))
+
+    def test_a_refused_connection_raises_the_project_error_not_the_driver_one(self) -> None:
+        from capstone.errors import NotReadyError
+
+        with self.refusing_module():
+            with self.assertRaises(NotReadyError) as caught:
+                features.connect(self.URI, purpose="report the external signal")
+        self.assertEqual(int(caught.exception.exit_code), int(features_not_ready_code()))
+        message = str(caught.exception)
+        self.assertIn("would not open", message)
+        self.assertIn(
+            "report the external signal", message, msg="the purpose has to survive, or a reader cannot tell which command failed"
+        )
+        self.assertIn("Connection refused", message, msg="the driver's own words are the diagnosis")
+        self.assertIn("Nothing was read or written", message)
+
+    def test_the_password_never_rides_along_in_the_refusal(self) -> None:
+        with self.refusing_module():
+            with self.assertRaises(Exception) as caught:
+                features.connect(self.URI, purpose="report the external signal")
+        self.assertNotIn("sup3rs3cr3t", str(caught.exception))
+        self.assertIn(
+            "«redacted»", str(caught.exception), msg="the driver echoed it, so the scrub is what this test is about"
+        )
+
+    def test_a_driver_dump_is_cut_short_rather_than_pasted(self) -> None:
+        long_text = "line of driver noise " * 60
+        with self.refusing_module(long_text):
+            with self.assertRaises(Exception) as caught:
+                features.connect(self.URI, purpose="report the external signal")
+        self.assertLess(len(str(caught.exception)), 700)
+        self.assertTrue(str(caught.exception).endswith(".") or str(caught.exception).count(" …") == 1)
+
+    def test_the_refusal_survives_a_uri_the_parser_hates(self) -> None:
+        """The scrubber parses the URI to find the secret; a malformed one is the input it exists for."""
+        with self.refusing_module("Network is unreachable"):
+            with self.assertRaises(Exception) as caught:
+                features.connect("postgresql+psycopg://[::1", purpose="report the external signal")
+        self.assertIn("Network is unreachable", str(caught.exception))
+
+
+def features_not_ready_code() -> int:
+    """67, read from the table rather than typed: a renumbering has to move the test too."""
+    from capstone.exit_codes import ExitCode
+
+    return int(ExitCode.NOT_READY)
+
 
 if __name__ == "__main__":
     unittest.main()

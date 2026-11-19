@@ -18,8 +18,10 @@ import contextlib
 import dataclasses
 import io
 import json
+import os
 import re
 import subprocess
+from unittest import mock
 import sys
 import unittest
 from pathlib import Path
@@ -29,7 +31,7 @@ STAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(STAGE / "src"))
 # deliberately no stage-1 path, and no real endpoint: see the module docstring
 
-from capstone import external, cli
+from capstone import external, cli, features
 from capstone.config import External, load_contract
 from capstone.errors import InputError, NotReadyError, SourceError
 
@@ -591,6 +593,60 @@ class LiveExternalGuardTests(unittest.TestCase):
             self.assertTrue(re.search(r"result|fetch|value|localities", message), msg=message)
             self.skipTest(f"reachable enough to answer, unusable: {message[:160]}")
         self.assertTrue(rows)
+
+
+
+class RefusedDatabaseTests(unittest.TestCase):
+    """The third state of item 12: a configured URI whose server is not there.
+
+    A closed port is not "no database configured" (78, fix your config) and it is not "the source
+    declined" (69, the endpoint answered badly) -- it is 67, and the difference matters because the
+    reader's next action is different in each case. These two tests reach the CLI, not the helper,
+    because the bug was a traceback escaping ``main``: the sentence is only a fix if the exit code
+    that travels with it is the one the rest of the stage already branches on.
+    """
+
+    URI = "postgresql+psycopg://learner:sup3rs3cr3t@127.0.0.1:5599/olist_phase0_test"
+
+    def refusing(self):
+        class Refusing:
+            OperationalError = type("OperationalError", (Exception,), {})
+
+            def connect(self, dsn: str):
+                raise self.OperationalError(
+                    'connection to server at "127.0.0.1", port 5599 failed: Connection refused'
+                )
+
+        return mock.patch.object(features, "_driver_and_dsn", return_value=(Refusing(), "dsn"))
+
+    def run_cli(self, *flags: str) -> tuple[int, str]:
+        saved = os.environ.get("CAPSTONE_DATABASE_URI")
+        os.environ["CAPSTONE_DATABASE_URI"] = self.URI
+        try:
+            with captured() as out:
+                argv = ["external", "--config", str(STAGE / "config" / "capstone.example.toml")]
+                code = cli.main([*argv, *flags])
+        finally:
+            if saved is None:
+                os.environ.pop("CAPSTONE_DATABASE_URI", None)
+            else:
+                os.environ["CAPSTONE_DATABASE_URI"] = saved
+        return int(code), out.getvalue()
+
+    def test_report_over_a_closed_port_is_a_message_and_67(self) -> None:
+        with self.refusing():
+            code, text = self.run_cli("--report")
+        self.assertEqual(code, 67)
+        self.assertNotIn("Traceback", text, msg="an unhandled exception is what this test exists to catch")
+        self.assertIn("would not open", text)
+        self.assertNotIn("sup3rs3cr3t", text, msg="the refusal goes into docs/evidence/ one day")
+
+    def test_the_load_path_refuses_before_touching_the_endpoint(self) -> None:
+        """``--load`` fetches first, and with no source configured the fetch is the honest refusal."""
+        with self.refusing():
+            code, text = self.run_cli("--load")
+        self.assertIn(code, (67, 69), msg=f"expected a reported state, got {text!r}")
+        self.assertNotIn("Traceback", text)
 
 
 if __name__ == "__main__":

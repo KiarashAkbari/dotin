@@ -17,8 +17,10 @@ unverified fetch -- is what this module is shaped for:
   rule ``sql/005_external_signal.sql`` states for every loader: a module that writes its own ``INSERT``
   bypasses the idempotency the re-apply guard tests.
 * **an empty table is a result, not an error.** ``load`` and ``report`` both answer with the match rate
-  they found, including ``0 of 4119 keys``. The negative result the brief asks for -- an external
-  signal that adds nothing -- has to be printable, so nothing in this module raises on it.
+  they found, including ``0 of 4310 keys`` -- the count ``capstone.v_external_match_rate`` takes over
+  the distinct ``(customer_city, customer_state)`` pairs of ``olist.customers``, which is the same
+  denominator the external audit reports. The negative result the brief asks for -- an external signal
+  that adds nothing -- has to be printable, so nothing in this module raises on it.
 
 ``normalize`` and ``validate`` are pure functions over a parsed payload. That is not decoration: the
 contract of a third-party API is the one part of item 12 that can be tested with no network at all,

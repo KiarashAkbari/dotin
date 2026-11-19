@@ -46,6 +46,12 @@ data/run_manifest*.json
 # committed evidence file. Evidence files already tracked (the red/green runs and
 # phase0-baseline.txt) are not affected: .gitignore does not untrack files.
 docs/evidence/*-real-run*.txt
+# ... with one exception, and it is the reason the rule is stated as a rule: the student's own run of
+# docs/evidence/frame-performance-run.py is the witness that closes checklist 5.3, and a checklist row
+# quoting a file that git will not carry is a claim nobody downstream can check. The transcription
+# `frame-performance-student-run.txt` is tracked either way; this line only lets the raw capture join
+# it, on `git add docs/evidence/frame-performance-real-run.txt`. Nothing in the patch assumes it happened.
+!docs/evidence/frame-performance-real-run.txt
 docs/evidence/*.log
 
 # Fitted models are outputs, not source

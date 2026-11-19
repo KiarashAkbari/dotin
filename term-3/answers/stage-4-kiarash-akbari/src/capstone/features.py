@@ -38,7 +38,7 @@ from typing import Any
 
 from .audit import AUDIT_COUNT_STATEMENT, COLUMN_AUDIT_TABLE, ColumnVerdict, require_allowed
 from .config import CapstoneConfig
-from .errors import BudgetError, ConfigError, InputError
+from .errors import BudgetError, ConfigError, InputError, NotReadyError
 
 #: the frame, as the SQL directory names it
 FRAME_VIEW = "capstone.v_feature_frame"
@@ -275,7 +275,9 @@ def _driver_and_dsn(uri: str, *, purpose: str) -> tuple[Any, str]:
         ) from exc
 
 
-def connect(uri: str, *, autocommit: bool = False, purpose: str = "read and write the feature layer") -> Any:
+def connect(
+    uri: str, *, autocommit: bool = False, purpose: str = "read and write the feature layer"
+) -> Any:
     """Open the URI with the driver the URI names; imported late so the guards run without one.
 
     ``autocommit`` is for the live test suite, which issues DDL and cannot wrap a whole migration in a
@@ -284,10 +286,44 @@ def connect(uri: str, *, autocommit: bool = False, purpose: str = "read and writ
     directory is the state this stage refuses to leave behind.
     """
     module, dsn = _driver_and_dsn(uri, purpose=purpose)
-    connection = module.connect(dsn)
+    try:
+        connection = module.connect(dsn)
+    except Exception as error:
+        # the driver's own name for "there is no database on the other end" -- refused, unreachable,
+        # wrong credentials, missing database. It is a *state* of the machine, and every other state
+        # of this stage is a sentence with an exit code, so it does not leave here as a traceback out
+        # of a third-party module
+        raise NotReadyError(connection_refusal(uri, error, purpose=purpose)) from error
     if autocommit:
         connection.autocommit = True
     return connection
+
+
+def connection_refusal(uri: str, error: BaseException, *, purpose: str) -> str:
+    """One sentence about a database that would not open, with nothing secret in it.
+
+    The ``uri`` is deliberately not quoted: it can carry a password, and this text ends up in
+    ``docs/evidence/`` where other people read it. The driver's own words are kept, because the
+    difference between "connection refused" and "password authentication failed" is the whole
+    diagnosis, and a wrapper that hides it is worse than the traceback it replaced.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        secret = urlsplit(uri).password or ""
+    except ValueError:  # a uri the parser dislikes is exactly the input this function describes
+        secret = ""
+    reported = " ".join(str(error).split())
+    if secret:
+        reported = reported.replace(secret, "«redacted»")
+    if len(reported) > 240:
+        reported = reported[:240] + " …"
+    return (
+        f"the database named by CAPSTONE_DATABASE_URI would not open, so capstone cannot {purpose}: "
+        f"{type(error).__name__}: {reported}. Nothing was read or written. The uri is not repeated here"
+        " because it can hold a password -- check that a server is listening on that host and port and"
+        " that the database name belongs to it, then re-run the same command."
+    )
 
 
 def raise_exception_type(uri: str, *, purpose: str = "run the live SQL guards") -> type:
