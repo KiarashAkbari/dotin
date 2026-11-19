@@ -42,6 +42,26 @@ from .errors import BudgetError, ConfigError, InputError
 
 #: the frame, as the SQL directory names it
 FRAME_VIEW = "capstone.v_feature_frame"
+#: the statement the ceiling is measured on, in one place because the harness in
+#: ``docs/evidence/frame-performance-run.py`` has to time *this* query and not its own idea of it.
+#: The count wrapper is deliberate: the plan and the work are the frame's, the client transfer is
+#: not, and a duration that depends on how fast a laptop reads rows is not a property of a query.
+FRAME_TIMING_SQL = "SELECT count(*) FROM (SELECT * FROM {frame}) AS frame"
+#: the same frame with the transfer included. Nothing in ``src/`` runs this -- it exists so the
+#: performance log can show how much of the wall time is the database and how much is the client,
+#: which is the one number a reader is entitled to ask for after "under 500 ms" is claimed.
+FRAME_READ_SQL = "SELECT * FROM {frame} AS frame"
+#: how many rows the frame holds. A count of the view, not of the timing wrapper: the two answer
+#: different questions ("how big is the frame" and "how long does reading it take") and a log that
+#: conflates them is how a row estimate ends up quoted as a duration.
+FRAME_COUNT_SQL = "SELECT count(*) FROM {frame} AS f"
+#: the frame's columns, in declaration order. ``information_schema`` rather than ``SELECT * LIMIT
+#: 0`` because the cursor description of a prepared count query reports the wrapper, not the frame.
+FRAME_COLUMNS_SQL = (
+    "SELECT column_name FROM information_schema.columns"
+    " WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position"
+)
+
 #: keys that travel with a row but are not features
 TECHNICAL_COLUMNS = frozenset({"order_id", "customer_id", "order_approved_at", "order_status"})
 #: the brief's minimum for a feature frame built in the database
@@ -379,9 +399,10 @@ def build(
             connection.commit()
 
             # asked before the guard, and only about emptiness: an empty audit table is a missing
-            # prerequisite, while a populated one that rejects a column is a finding about the frame.
-            # Conflating them would send a reader to load the CSV when the CSV is the thing that has
-            # to change, and -- worse -- a guard error relabelled as a setup error stops being a bug
+            # prerequisite, while a populated one that rejects a column is a finding about the
+            # frame. Conflating them would send a reader to load the CSV when the CSV is the thing
+            # that has to change, and -- worse -- a guard error relabelled as a setup error stops
+            # being a bug
             cursor.execute(AUDIT_COUNT_STATEMENT)
             if not int(cursor.fetchone()[0] or 0):
                 raise InputError(
@@ -410,8 +431,7 @@ def build(
                 )
 
             cursor.execute(
-                "SELECT column_name FROM information_schema.columns"
-                " WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+                FRAME_COLUMNS_SQL,
                 (config.features.schema, FRAME_VIEW.split(".", 1)[1]),
             )
             names = [str(row[0]) for row in cursor.fetchall()]
@@ -428,7 +448,7 @@ def build(
                     "to the order it scored"
                 )
 
-            cursor.execute(f"SELECT count(*) FROM {FRAME_VIEW} AS f")
+            cursor.execute(FRAME_COUNT_SQL.format(frame=FRAME_VIEW))
             rows = int(cursor.fetchone()[0])
             if rows <= 0:
                 raise InputError(
@@ -439,7 +459,7 @@ def build(
             durations_ms: list[float] = []
             for _ in range(repeat):
                 started = clock()
-                cursor.execute(f"SELECT count(*) FROM (SELECT * FROM {FRAME_VIEW}) AS frame")
+                cursor.execute(FRAME_TIMING_SQL.format(frame=FRAME_VIEW))
                 cursor.fetchall()
                 durations_ms.append((clock() - started) * 1000.0)
             connection.commit()

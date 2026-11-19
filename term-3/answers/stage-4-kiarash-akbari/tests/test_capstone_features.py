@@ -13,8 +13,12 @@ opinion to offer on that. The number itself stays where it belongs: a run on the
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
+import importlib.util
+import os
+import subprocess
 import unittest
 import sys
 from pathlib import Path
@@ -28,6 +32,14 @@ sys.path.insert(0, str(STAGE / "src"))
 
 from capstone import features
 from capstone.audit import parse_audit
+
+#: the performance harness is a script, not a module: loaded by path so the plan parser can be
+#: tested on a canned EXPLAIN, which is the half of the log that a reviewer can check at all
+_SPEC = importlib.util.spec_from_file_location(
+    "frame_performance_run", STAGE / "docs" / "evidence" / "frame-performance-run.py"
+)
+perf = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(perf)
 from capstone.errors import BudgetError, ConfigError, InputError
 from capstone.pending import is_pending
 
@@ -331,6 +343,21 @@ class BuildSequencingTests(unittest.TestCase):
             features.checksum_mismatches(features.sql_migrations(STAGE / "sql"), manifest=default),
         )
 
+    def test_build_times_exactly_the_statement_the_performance_log_measures(self):
+        """The harness and the code must time one query, not two that look alike.
+
+        Checklist 5.3 is closed by a log, so the sentence "376 ms, under the ceiling" is only about
+        ``capstone features`` if the measured text is the text the code runs. A private copy in the
+        harness -- one that drops the count wrapper, or adds a ``LIMIT`` to keep the run quick --
+        would produce a green log about a query nobody ships.
+        """
+        timed = features.FRAME_TIMING_SQL.format(frame=features.FRAME_VIEW)
+        read = features.FRAME_READ_SQL.format(frame=features.FRAME_VIEW)
+        connection = RecordingConnection()
+        self.build(connection=connection, repeat=3)
+        self.assertEqual(connection.statements.count(timed), 3, msg="one timing per repeat, no more")
+        self.assertNotIn(read, connection.statements, msg="the shipped path does not pay for transfer")
+
     def test_the_metadata_is_the_shape_the_model_step_consumes(self):
         metadata = self.build()
         self.assertEqual(
@@ -351,6 +378,315 @@ class BuildSequencingTests(unittest.TestCase):
         self.assertEqual(metadata["frame"], features.FRAME_VIEW)
         self.assertEqual(metadata["features"], len(FEATURE_NAMES))
         self.assertEqual(metadata["migrations_applied"], ["001_first.sql", "002_second.sql"])
+
+
+class FramePerformanceHarnessTests(unittest.TestCase):
+    """The two scripts behind the performance log, read as sources and run without a database.
+
+    Neither script can be tested *as a measurement* here -- a duration belongs to a server, and this
+    suite has none. What can be tested is everything that makes a measured number worth reading: that
+    the query is the shipped one, that the scale is stated rather than assumed, that a scratch-only
+    script refuses a database that holds rows, and that a refusal arrives as a sentence instead of a
+    traceback. Each of those is a claim about text or about an exit code, and both are cheap.
+    """
+
+    HARNESS = STAGE / "docs" / "evidence" / "frame-performance-run.py"
+    SEEDER = STAGE / "docs" / "evidence" / "frame-performance-synthetic.py"
+    #: the questions the harness may ask that ``src/`` has no reason to ask: which server is this, how
+    #: big is each table the frame reads, and whether the planner has statistics for them. Everything
+    #: about the frame itself has to come from a constant in ``capstone.features`` -- the test below
+    #: fails on any other statement, which is how a new diagnostic has to be *argued for* here rather
+    #: than quietly added to the log
+    DIAGNOSTICS = (
+        "SELECT current_database()",
+        "SELECT table_name FROM information_schema.columns",
+        "SELECT count(*) FROM olist.",
+        "SELECT count(*), count(*) FILTER (WHERE last_analyze IS NOT NULL",
+    )
+    #: the statements the harness shares with the shipped code, each with the call site that proves
+    #: it is used and how many of them there are: timing once for the measurement and twice for the
+    #: plan, read once for the transfer and once for its plan. A count that moves is a call site added
+    #: or removed, which is exactly the edit that turns a log into a different claim.
+    #: shared constants that exist for the log and must never be sent by ``src/``
+    LOG_ONLY = ("FRAME_READ_SQL",)
+    SHARED = {
+        "FRAME_TIMING_SQL": ("FRAME_TIMING_SQL.format(frame=FRAME_VIEW)", 3),
+        "FRAME_READ_SQL": ("FRAME_READ_SQL.format(frame=FRAME_VIEW)", 2),
+        "FRAME_COUNT_SQL": ("FRAME_COUNT_SQL.format(frame=FRAME_VIEW)", 1),
+        # parameterised rather than formatted: the schema and the view are its two %s
+        "FRAME_COLUMNS_SQL": ("rows(cursor, FRAME_COLUMNS_SQL,", 1),
+    }
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.harness = cls.HARNESS.read_text(encoding="utf-8")
+        cls.seeder = cls.SEEDER.read_text(encoding="utf-8")
+
+    def run_script(self, path: Path, *, env: dict | None = None, args: list | None = None):
+        base = {key: value for key, value in os.environ.items() if not key.startswith("CAPSTONE_")}
+        base["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.run(
+            [sys.executable, str(path), *(args or [])],
+            cwd=str(STAGE),
+            env=dict(base, **(env or {})),
+            capture_output=True,
+            text=True,
+        )
+
+    def statements(self, source: str) -> list[str]:
+        """Every string the script can send to the server, f-strings included.
+
+        Parsed with ``ast`` rather than scanned line by line: the first draft of this test looked at
+        lines that began with ``SELECT`` and passed a harness whose real queries were all arguments
+        to a helper. A green test that cannot see the code it guards is worse than none.
+        """
+        found: list[str] = []
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if node.value.lstrip().startswith("SELECT"):
+                    found.append(" ".join(node.value.split()))
+            elif isinstance(node, ast.JoinedStr):  # an f-string: the literal head is the query
+                head = node.values[0]
+                if isinstance(head, ast.Constant) and isinstance(head.value, str):
+                    if head.value.lstrip().startswith("SELECT"):
+                        found.append(" ".join(head.value.split()))
+        return found
+
+    def test_the_harness_imports_the_query_instead_of_restating_it(self) -> None:
+        """The log's numbers are only about ``capstone features`` if the text is the shipped text.
+
+        A private copy in the harness -- one that drops the count wrapper, or adds a ``LIMIT`` to keep
+        the run quick -- would produce a green log about a query nobody ships, and the ceiling verdict
+        would then be about a statement the model step never runs.
+        """
+        for name in ("FRAME_VIEW", "MINIMUM_FEATURES", "TECHNICAL_COLUMNS"):
+            self.assertIn(name, self.harness, msg=f"the harness must use capstone's {name}")
+        # a literal frame name would be a second definition of what is measured, and it would not
+        # move when the view is renamed -- which is how a log ends up describing another tree
+        self.assertNotIn('"capstone.v_feature_frame"', self.harness)
+        for name, (call_site, uses) in self.SHARED.items():
+            statement = getattr(features, name)
+            self.assertNotIn(
+                statement, self.harness, msg=f"{name} is imported to be used, not copied into the log"
+            )
+            self.assertEqual(
+                self.harness.count(call_site), uses, msg=f"{call_site} should appear {uses} time(s)"
+            )
+
+    def test_the_harness_owns_no_query_beyond_its_diagnostics(self) -> None:
+        """Anything the harness sends is either a shared constant or a documented diagnostic.
+
+        The allowlist is short on purpose: the identity of the server, the row counts of the source
+        tables, and whether those tables have statistics are the only facts a performance log needs
+        that the shipped code has no reason to care about. A third one -- a filtered frame, a LIMIT, a different view -- means the log is measuring
+        something other than what ``capstone features`` runs, and the ceiling verdict moves with it.
+        """
+        # no filter on anything the frame is measured with: a harness that narrows what it times
+        # produces a fast plan and a true sentence about the wrong query. The rule is per-line rather
+        # than per-file because the statistics diagnostic legitimately has its own WHERE, and a guard
+        # that forbids that would only teach the next person to write the query twice
+        measuring = [
+            line
+            for line in self.harness.splitlines()
+            if any(name in line for name in self.SHARED) or "FROM olist." in line
+        ]
+        self.assertGreaterEqual(len(measuring), 7, msg="the call sites vanished; check the regex")
+        for line in measuring:
+            for forbidden in ("WHERE", "LIMIT", "OFFSET", "TABLESAMPLE", "ORDER BY"):
+                self.assertNotIn(
+                    forbidden, line, msg=f"a narrowed measurement statement: {line.strip()}"
+                )
+        shared = [getattr(features, name) for name in self.SHARED]
+        found = self.statements(self.harness)
+        self.assertTrue(found, msg="the harness stopped sending SELECTs; this test needs updating")
+        for statement in found:
+            collapsed = " ".join(statement.split())
+            self.assertTrue(
+                collapsed.startswith(self.DIAGNOSTICS) or collapsed.startswith(tuple(shared)),
+                msg=f"a statement that is neither diagnostic nor shared: {collapsed}",
+            )
+
+    def test_the_shipped_module_sends_the_shared_statements_too(self) -> None:
+        """Guard against the refactor the other way: constants the code only *declares*.
+
+        If ``build`` kept its own copy and the harness imported the constant, the two would drift
+        silently and every test above would pass. So each statement has to appear in a call, not just
+        at module level -- counting on both sides is what makes the pair mean something.
+        """
+        shipped = (STAGE / "src" / "capstone" / "features.py").read_text(encoding="utf-8")
+        for name in self.SHARED:
+            if name in self.LOG_ONLY:
+                # the transfer statement is the log's alone, and that is the point: a ``SELECT *`` in
+                # the build path would make client speed part of the ceiling verdict
+                self.assertEqual(
+                    shipped.count(name),
+                    1,
+                    msg=f"{name} must stay out of the shipped path, declaration aside",
+                )
+                continue
+            self.assertGreaterEqual(
+                shipped.count(name),
+                2,
+                msg=f"{name} is declared in features.py and never sent there",
+            )
+        self.assertIn(
+            "FRAME_TIMING_SQL.format(frame=FRAME_VIEW)",
+            shipped,
+            msg="build must time the constant the log times, not a literal that happens to match",
+        )
+
+    def test_the_plan_is_ranked_by_work_done_not_by_work_reported(self) -> None:
+        """``hotspots`` has to subtract the child, or every log names the root and says nothing.
+
+        The canned plan is the shape that fooled the first draft: an ``Aggregate`` of 100 ms whose
+        only child is a ``Hash Join`` of 96 ms. Ranking by total time would blame the aggregate,
+        and the advice would then propose an index for a node that is only waiting.
+        """
+        plan = [
+            {
+                "Plan": {
+                    "Node Type": "Aggregate",
+                    "Actual Total Time": 100.0,
+                    "Actual Rows": 1,
+                    "Actual Loops": 1,
+                    "Plans": [
+                        {
+                            "Node Type": "Hash Join",
+                            "Relation Name": "order_items",
+                            "Actual Total Time": 96.0,
+                            "Actual Rows": 48_750,
+                            "Actual Loops": 2,
+                            "Shared Hit Blocks": 212_468,
+                            "Shared Read Blocks": 0,
+                        }
+                    ],
+                }
+            }
+        ]
+        hot = perf.hotspots(plan)
+        self.assertEqual(hot[0]["node"], "Hash Join", msg="the root is not the work when its child is")
+        self.assertAlmostEqual(hot[0]["self_ms"], 96.0, places=3)
+        self.assertEqual(perf.self_time(plan[0]["Plan"]), 4.0)
+        self.assertAlmostEqual(hot[0]["share"], 0.96, places=3)
+
+    def test_the_advice_table_is_closed_and_only_fires_over_the_ceiling(self) -> None:
+        hot = [{"node": "Sort", "relation": "orders", "self_ms": 90.0, "share": 0.9}]
+        self.assertEqual(perf.advice(hot, None), [], msg="a query inside the ceiling gets no proposal")
+        lines = perf.advice(hot, 12.0)
+        self.assertTrue(any("work_mem" in line for line in lines), msg=lines)
+        self.assertTrue(all("index" not in line for line in perf.advice(hot, None)))
+        unknown = perf.advice([{"node": "Custom Scan", "relation": "", "self_ms": 1.0, "share": 1.0}], 5.0)
+        self.assertTrue(any("advice table" in line for line in unknown), msg="an unmapped node is said")
+
+    def test_temp_space_is_reported_whether_or_not_the_ceiling_held(self) -> None:
+        """``spill`` reads the root's inclusive counters, and names only the operator that spilled.
+
+        Two mistakes the same plan teaches. Summing the per-node temp counters triples the number,
+        because a Gather and the hash under it report the same blocks; and listing every node with a
+        non-zero counter calls the waiting parent a spiller, which sends a reader to the wrong
+        ``work_mem``. Both are pinned here rather than discovered on the real server, because the log
+        has to be trustworthy to whoever reads it next.
+        """
+        plan = [
+            {
+                "Plan": {
+                    "Node Type": "Finalize Aggregate",
+                    "Actual Total Time": 500.0,
+                    "Temp Read Blocks": 2232,
+                    "Temp Written Blocks": 2938,
+                    "Plans": [
+                        {
+                            "Node Type": "Gather",
+                            "Temp Read Blocks": 2232,
+                            "Temp Written Blocks": 2938,
+                            "Plans": [
+                                {
+                                    "Node Type": "Hash",
+                                    "Hash Batches": 2,
+                                    "Temp Read Blocks": 2232,
+                                    "Temp Written Blocks": 2938,
+                                }
+                            ],
+                        },
+                        {
+                            "Node Type": "Sort",
+                            "Relation Name": "order_items",
+                            "Sort Space Type": "Disk",
+                            "Temp Written Blocks": 842,
+                        },
+                    ],
+                }
+            }
+        ]
+        info = perf.spill(plan)
+        self.assertEqual(info["temp_read"], 2232, msg="the root's inclusive count, not three copies")
+        self.assertEqual(info["temp_written"], 2938)
+        self.assertEqual(info["batches"], 2, msg="the key is Hash Batches, and it is read from JSON")
+        self.assertEqual(
+            info["spilling"],
+            ["Hash", "Sort on order_items"],
+            msg="a parent that only inherits its child's counters is not the spiller",
+        )
+        clean = perf.spill({"Plan": {"Node Type": "Aggregate"}})
+        self.assertIsNone(clean["batches"], msg="no hash nodes, so no batch count to report")
+        self.assertEqual(clean["temp_read"], 0)
+        self.assertEqual(clean["spilling"], [])
+
+    def test_no_minimum_is_repeated_where_the_code_already_states_it(self) -> None:
+        """The log compares against ``MINIMUM_FEATURES``; a literal 10 in the harness could drift.
+
+        The brief's number lives in one place. A harness carrying its own copy would keep printing a
+        pass for nine columns after the constant moved, which is the failure mode the checksum
+        manifest was written to make impossible for SQL.
+        """
+        self.assertIn("MINIMUM_FEATURES", self.harness)
+        self.assertNotIn("< 10", self.harness)
+        self.assertNotIn(">= 10", self.harness)
+
+    def test_a_missing_database_is_a_message_and_exit_zero(self) -> None:
+        proc = self.run_script(self.HARNESS)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr[-500:])
+        self.assertIn("not measured", proc.stdout)
+        self.assertIn("CAPSTONE_DATABASE_URI", proc.stdout)
+        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+
+    def test_the_seeder_refuses_a_database_it_was_not_told_to_fill(self) -> None:
+        proc = self.run_script(self.SEEDER)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr[-500:])
+        self.assertIn("CAPSTONE_SMOKE_ALLOW_DESTROY=1", proc.stdout)
+        self.assertIn("Nothing was written", proc.stdout)
+        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+
+    def test_the_seeder_looks_for_rows_before_it_creates_any(self) -> None:
+        """Order matters here more than anywhere else in the stage: the check is the only promise.
+
+        There is no rollback in this script -- it is autocommit, because a 100k-row generate_series
+        inside one transaction would hold locks on somebody's scratch cluster for minutes. So the
+        refusal has to come first, and it must not be able to "clean up" what it finds: no TRUNCATE,
+        no DELETE, in either direction.
+        """
+        self.assertLess(
+            self.seeder.index("the target already holds rows"),
+            self.seeder.index("generate(cursor, args.orders"),
+            msg="a row check after the inserts is a message printed over a filled database",
+        )
+        executable = self.seeder.replace(self.seeder[: self.seeder.index("\n\n\ndef ")], "")
+        self.assertIn(
+            "if occupied:",
+            self.seeder,
+            msg="a guard behind a constant is not a guard; this test reads order, not intent",
+        )
+        for forbidden in ("TRUNCATE", "DELETE FROM"):
+            self.assertNotIn(
+                forbidden, executable, msg=f"{forbidden} would erase data, not test it"
+            )
+        self.assertIn("olist", self.seeder, msg="the refusal is about stage-2's schema specifically")
+
+    def test_the_seeder_names_the_scale_it_wrote(self) -> None:
+        """A performance log without counts in it is a number attached to no claim."""
+        self.assertIn("the counts this run wrote", self.seeder)
+        self.assertIn("--orders", self.seeder)
+        self.assertIn("--zip-prefixes", self.seeder)
 
 
 class LayerStatusTests(unittest.TestCase):

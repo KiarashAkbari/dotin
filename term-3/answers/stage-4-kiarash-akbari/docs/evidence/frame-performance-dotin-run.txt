@@ -1,0 +1,328 @@
+========================================================================
+the same performance capture, produced from the ported tree -- patch 0013 applied to dotin
+========================================================================
+what produced this file, in one command (run from the answer directory of a clone of
+``KiarashAkbari/dotin``, branch ``fix/stage4-live-guards``, with this patchset's files present)::
+
+    python3 docs/evidence/frame-performance-sandbox.py > /tmp/dotin-run-raw.txt 2>&1
+
+The capture is the driver's stdout, unedited below this banner; the banner was added afterwards,
+which is the only edit. This is a second capture of one procedure, not a second measurement of one
+thing: ``frame-performance-sandbox-run.txt`` beside it is the same script run from the assistant's
+mirror repository. Both are kept because the pair is the number that matters -- third bullet.
+
+* the corpus is SYNTHETIC and the machine is the agent sandbox («سندباکس»): 100,000
+  generated orders against the shipped schema, views and queries; the row values are invented by
+  ``frame-performance-synthetic.py``. No number in this file is a measurement of the project's own
+  database, and no number in either file closes checklist 5.3;
+* what the run establishes about the *port* is the reason to keep it: the harness, the seeder, the
+  external demo and the two live guard modules each executed from
+  ``term-3/answers/stage-4-<name>/`` with no path edits, so ``docs/evidence/`` in this tree is a
+  working directory and not a copy that
+  only runs where it was written. Every step exits 0, the seeder's refusal against a non-empty
+  ``olist`` is in section 3, and the guards print ``Ran 84 tests ... OK (skipped=2)`` with the
+  URI set, so the skip path is not what ran;
+* the two captures of the same procedure, on the same schema with the same row counts, disagree by
+  31.2 ms: timed mean 397.7 ms here against 366.5 ms there, whole-frame read 2676.8 ms against
+  2463.9 ms. Same plan, same spill (``Hash Batches: 2``, 2938 temp blocks written), same frame of
+  97,500 rows x 32 columns with 29 feature columns. That spread is 6% of the 500 ms ceiling,
+  produced by nothing but running the thing twice -- which is why the verdict on 5.3 belongs to a
+  run on your own server rather than to either file;
+* ``tree: KiarashAkbari/dotin @ HEAD f806b29, 8 tracked file(s) differ`` is the truth of the
+  moment: ``f806b29`` is patch 0012 of this set, the eight differing files are patch 0013's, and
+  ``git am`` rewrites every sha anyway, so the hash is the name of a run and not an address. The
+  ``ddl: /tmp/...`` line is a sandbox path on a throwaway clone and nothing else;
+* unittest's elapsed-time clause is scrubbed (``in <t>s``) so two runs can be compared byte for
+  byte. The measured durations are not scrubbed and will not repeat.
+
+------------------------------------------------------------------------
+0. the cluster this log belongs to
+------------------------------------------------------------------------
+built: pgserver under capstone-perf-wyc_vhow, removed when this script exits
+ddl:   /tmp/dotin12/term-3/answers/stage-2-kiarash-akbari/sql/001_create_olist_schema.sql
+uri:   not printed -- it is a socket path on this machine and nothing else
+scale: synthetic, --orders 100000; the seeder prints the row counts it wrote
+
+------------------------------------------------------------------------
+1. schema and migrations, in the order the chain applies them
+------------------------------------------------------------------------
+  applied: the Olist DDL, then this stage's sql/001..005
+
+------------------------------------------------------------------------
+2. the audit, loaded through the shipped loader (not a hand-written INSERT)
+------------------------------------------------------------------------
+$ python3 -m capstone audit --load --config config/capstone.example.toml
+  | capstone.column_audit: 53 rows from column_audit.csv -- 53 inserted, 0 unchanged, 0 rewritten, 0 removed
+  |   changed: customers.customer_city
+  |   changed: customers.customer_id
+  |   changed: customers.customer_state
+  |   changed: customers.customer_unique_id
+  |   changed: customers.customer_zip_code_prefix
+  |   changed: geolocation.geolocation_city
+  |   changed: geolocation.geolocation_id
+  |   changed: geolocation.geolocation_lat
+  |   changed: geolocation.geolocation_lng
+  |   changed: geolocation.geolocation_state
+  |   changed: geolocation.geolocation_zip_code_prefix
+  |   changed: order_items.freight_value
+  |   changed: order_items.order_id
+  |   changed: order_items.order_item_id
+  |   changed: order_items.price
+  |   changed: order_items.product_id
+  |   changed: order_items.seller_id
+  |   changed: order_items.shipping_limit_date
+  |   changed: order_reviews.order_id
+  |   changed: order_reviews.review_answer_timestamp
+  |   changed: order_reviews.review_comment_message
+  |   changed: order_reviews.review_comment_title
+  |   changed: order_reviews.review_creation_date
+  |   changed: order_reviews.review_id
+  |   changed: order_reviews.review_score
+  |   changed: orders.customer_id
+  |   changed: orders.order_approved_at
+  |   changed: orders.order_delivered_carrier_date
+  |   changed: orders.order_delivered_customer_date
+  |   changed: orders.order_estimated_delivery_date
+  |   changed: orders.order_id
+  |   changed: orders.order_purchase_timestamp
+  |   changed: orders.order_status
+  |   changed: payments.order_id
+  |   changed: payments.payment_installments
+  |   changed: payments.payment_sequential
+  |   changed: payments.payment_type
+  |   changed: payments.payment_value
+  |   changed: product_category_name_translation.product_category_name
+  |   changed: product_category_name_translation.product_category_name_english
+  |   changed: products.product_category_name
+  |   changed: products.product_description_length
+  |   changed: products.product_height_cm
+  |   changed: products.product_id
+  |   changed: products.product_length_cm
+  |   changed: products.product_name_length
+  |   changed: products.product_photos_qty
+  |   changed: products.product_weight_g
+  |   changed: products.product_width_cm
+  |   changed: sellers.seller_city
+  |   changed: sellers.seller_id
+  |   changed: sellers.seller_state
+  |   changed: sellers.seller_zip_code_prefix
+  [exit 0] 53 rows is the whole audit; on a fresh table every row is an insert, and the `changed:` lines are the keys the CSV added, so 53 of each is the expected shape
+
+------------------------------------------------------------------------
+3. the corpus, at the scale the brief describes
+------------------------------------------------------------------------
+$ python3 docs/evidence/frame-performance-synthetic.py --orders 100000
+  | target: postgres (empty olist schema, checked above)
+  | generating a synthetic corpus of 100000 orders (32248 zip prefixes)
+  |       geolocation                     1271 ms
+  |       sellers                           89 ms
+  |       products                         444 ms
+  |       customers                       1124 ms
+  |       orders                          1451 ms
+  |       order_items                     3492 ms
+  |       payments                        1179 ms
+  | ANALYZE, so the planner is not guessing -- a plan built on empty statistics is not this
+  | query's plan, and the row estimates in the log would describe a database that does not exist
+  | 
+  | the counts this run wrote, which the log has to quote:
+  |       olist.customers             100000 rows
+  |       olist.geolocation           257984 rows
+  |       olist.order_items           130038 rows
+  |       olist.orders                100000 rows
+  |       olist.payments               97500 rows
+  |       olist.products               50000 rows
+  |       olist.sellers                12500 rows
+  [exit 0] the seeder refuses a target that already holds rows
+
+------------------------------------------------------------------------
+4. checklist 5.3 -- the timing, the plan, and the verdict
+------------------------------------------------------------------------
+$ python3 docs/evidence/frame-performance-run.py --runs 5
+  | ========================================================================
+  | feature frame performance -- timing, plan, and what the plan says about the ceiling
+  | ========================================================================
+  | tree: KiarashAkbari/dotin @ HEAD f806b29, 8 tracked file(s) differ -- the plan below is that tree's plan
+  | 
+  | database: postgres
+  | server:   PostgreSQL 16.2 on x86_64-pc-linux-gnu, compiled by gcc (GCC) 10.2.1 20210130 (Red Hat 10.2.1-11), 64-bit
+  | source tables (the frame's inputs, so a small number here means a small measurement):
+  |       olist.customers                       100000 rows
+  |       olist.geolocation                     257984 rows
+  |       olist.order_items                     130038 rows
+  |       olist.order_reviews                        0 rows
+  |       olist.orders                          100000 rows
+  |       olist.payments                         97500 rows
+  |       olist.product_category_name_translation         0 rows
+  |       olist.products                         50000 rows
+  |       olist.sellers                          12500 rows
+  | 
+  | frame: 97500 rows, 32 columns, 29 feature columns (the brief asks for at least 10)
+  | 
+  | timing, 5 runs, cold first (the ceiling in config is 500 ms)
+  |       timed (what capstone features judges)    mean 397.7 ms | cold 402.0 ms | warm 396.7 ms | min 387.9 | max 406.8
+  |       read (with transfer)                     mean 2676.8 ms | cold 2810.6 ms | warm 2643.4 ms | min 2596.4 | max 2810.6
+  | 
+  | ------------------------------------------------------------------------
+  | 1. EXPLAIN (ANALYZE, BUFFERS) -- the statement the ceiling is measured on
+  | ------------------------------------------------------------------------
+  |   Finalize Aggregate  (cost=52969.04..52969.05 rows=1 width=8) (actual time=476.310..480.777 rows=1 loops=1)
+  |     Buffers: shared hit=212468, temp read=2232 written=2938
+  |     ->  Gather  (cost=52968.93..52969.04 rows=1 width=8) (actual time=476.301..480.769 rows=2 loops=1)
+  |           Workers Planned: 1
+  |           Workers Launched: 1
+  |           Buffers: shared hit=212468, temp read=2232 written=2938
+  |           ->  Partial Aggregate  (cost=51968.93..51968.94 rows=1 width=8) (actual time=469.442..469.459 rows=1 loops=2)
+  |                 Buffers: shared hit=212468, temp read=2232 written=2938
+  |                 ->  Parallel Hash Right Join  (cost=45913.62..51825.57 rows=57343 width=0) (actual time=389.946..466.596 rows=48750 loops=2)
+  |                       Hash Cond: ((agg.order_id)::text = (o_1.order_id)::text)
+  |                       Buffers: shared hit=212468, temp read=2232 written=2938
+  |                       ->  Hash Join  (cost=33027.47..37929.24 rows=51846 width=259) (actual time=265.609..322.404 rows=48750 loops=2)
+  |                             Hash Cond: ((primary_row.order_id)::text = (agg.order_id)::text)
+  |                             Buffers: shared hit=205861, temp read=2232 written=2938
+  |                             ->  Hash Join  (cost=25883.48..30649.14 rows=51846 width=132) (actual time=175.911..211.706 rows=48750 loops=2)
+  |                                   Hash Cond: ((o_2.order_id)::text = (primary_row.order_id)::text)
+  |                                   Buffers: shared hit=200553, temp read=1738 written=1738
+  |                                   ->  Parallel Seq Scan on orders o_2  (cost=0.00..2313.24 rows=58824 width=33) (actual time=0.008..5.262 rows=50000 loops=2)
+  |                                         Buffers: shared hit=1725
+  |                                   ->  Hash  (cost=23403.74..23403.74 rows=88139 width=99) (actual time=175.663..175.666 rows=97500 loops=2)
+  |                                         Buckets: 65536  Batches: 2  Memory Usage: 6760kB
+  |                                         Buffers: shared hit=198753, temp written=1412
+  |                                         ->  Subquery Scan on primary_row  (cost=0.63..23403.74 rows=88139 width=99) (actual time=0.111..146.595 rows=97500 loops=2)
+  |                                               Buffers: shared hit=198753
+  |                                               ->  Unique  (cost=0.63..22522.35 rows=88139 width=135) (actual time=0.109..136.353 rows=97500 loops=2)
+  |                                                     Buffers: shared hit=198753
+  |                                                     ->  Incremental Sort  (cost=0.63..22197.25 rows=130038 width=135) (actual time=0.109..121.033 rows=130038 loops=2)
+  |                                                           Sort Key: i.order_id, ((i.price + i.freight_value)) DESC, i.order_item_id
+  |                                                           Presorted Key: i.order_id
+  |                                                           Full-sort Groups: 4034  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
+  |                                                           Buffers: shared hit=198753
+  |                                                           Worker 0:  Full-sort Groups: 4034  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
+  |                                                           ->  Index Scan using pk_order_items on order_items i  (cost=0.42..17812.01 rows=130038 width=135) (actual time=0.015..69.754 rows=130038 loops=2)
+  |                                                                 Buffers: shared hit=198707
+  |                             ->  Hash  (cost=6042.26..6042.26 rows=88139 width=33) (actual time=89.419..89.421 rows=97500 loops=2)
+  |                                   Buckets: 131072  Batches: 1  Memory Usage: 7213kB
+  |                                   Buffers: shared hit=5308, temp read=494 written=1200
+  |                                   ->  Subquery Scan on agg  (cost=4279.48..6042.26 rows=88139 width=33) (actual time=45.432..71.367 rows=97500 loops=2)
+  |                                         Buffers: shared hit=5308, temp read=494 written=1200
+  |                                         ->  HashAggregate  (cost=4279.48..5160.87 rows=88139 width=193) (actual time=45.431..63.429 rows=97500 loops=2)
+  |                                               Group Key: i_1.order_id
+  |                                               Batches: 5  Memory Usage: 8241kB  Disk Usage: 3368kB
+  |                                               Buffers: shared hit=5308, temp read=494 written=1200
+  |                                               Worker 0:  Batches: 5  Memory Usage: 8241kB  Disk Usage: 3368kB
+  |                                               ->  Seq Scan on order_items i_1  (cost=0.00..3954.38 rows=130038 width=33) (actual time=0.018..12.321 rows=130038 loops=2)
+  |                                                     Buffers: shared hit=5308
+  |                       ->  Parallel Hash  (cost=12169.37..12169.37 rows=57343 width=33) (actual time=123.853..123.862 rows=48750 loops=2)
+  |                             Buckets: 131072  Batches: 1  Memory Usage: 7936kB
+  |                             Buffers: shared hit=6604
+  |                             ->  Parallel Hash Join  (cost=8831.09..12169.37 rows=57343 width=33) (actual time=60.137..110.414 rows=48750 loops=2)
+  |                                   Hash Cond: ((o_1.order_id)::text = (o.order_id)::text)
+  |                                   Buffers: shared hit=6604
+  |                                   ->  Parallel Hash Right Join  (cost=5782.56..8970.30 rows=57343 width=33) (actual time=42.885..78.781 rows=48750 loops=2)
+  |                                         Hash Cond: ((o_3.order_id)::text = (o_1.order_id)::text)
+  |                                         Buffers: shared hit=4879
+  |                                         ->  Parallel Hash Join  (cost=2752.54..5216.31 rows=57343 width=172) (actual time=22.742..43.962 rows=48750 loops=2)
+  |                                               Hash Cond: ((o_3.customer_id)::text = (c.customer_id)::text)
+  |                                               Buffers: shared hit=3154
+  |                                               ->  Parallel Seq Scan on orders o_3  (cost=0.00..2313.24 rows=57343 width=74) (actual time=0.004..6.410 rows=48750 loops=2)
+  |                                                     Filter: (order_approved_at IS NOT NULL)
+  |                                                     Rows Removed by Filter: 1250
+  |                                                     Buffers: shared hit=1725
+  |                                               ->  Parallel Hash  (cost=2017.24..2017.24 rows=58824 width=66) (actual time=22.491..22.492 rows=50000 loops=2)
+  |                                                     Buckets: 131072  Batches: 1  Memory Usage: 11232kB
+  |                                                     Buffers: shared hit=1429
+  |                                                     ->  Parallel Seq Scan on customers c  (cost=0.00..2017.24 rows=58824 width=66) (actual time=0.009..5.503 rows=50000 loops=2)
+  |                                                           Buffers: shared hit=1429
+  |                                         ->  Parallel Hash  (cost=2313.24..2313.24 rows=57343 width=66) (actual time=19.914..19.915 rows=48750 loops=2)
+  |                                               Buckets: 131072  Batches: 1  Memory Usage: 10976kB
+  |                                               Buffers: shared hit=1725
+  |                                               ->  Parallel Seq Scan on orders o_1  (cost=0.00..2313.24 rows=57343 width=66) (actual time=0.013..6.635 rows=48750 loops=2)
+  |                                                     Filter: (order_approved_at IS NOT NULL)
+  |                                                     Rows Removed by Filter: 1250
+  |                                                     Buffers: shared hit=1725
+  |                                   ->  Parallel Hash  (cost=2313.24..2313.24 rows=58824 width=33) (actual time=16.902..16.903 rows=50000 loops=2)
+  |                                         Buckets: 131072  Batches: 1  Memory Usage: 8096kB
+  |                                         Buffers: shared hit=1725
+  |                                         ->  Parallel Seq Scan on orders o  (cost=0.00..2313.24 rows=58824 width=33) (actual time=0.010..5.483 rows=50000 loops=2)
+  |                                               Buffers: shared hit=1725
+  |   Planning:
+  |     Buffers: shared hit=33
+  |   Planning Time: 0.861 ms
+  |   Execution Time: 481.524 ms
+  |    spill: temp read 2232 blocks / written 2938, worst batch count 2 (> 1 means work_mem sent a hash to disk); spilling at: Hash
+  | 
+  |    hottest nodes by self time (a parent is not the work when its child is):
+  |       Hash Join: 156.799 ms (30% of the query), 48750 rows x 2 loops, buffers 212468 hit / 0 read
+  |       Hash Join: 114.165 ms (22% of the query), 48750 rows x 2 loops, buffers 205861 hit / 0 read
+  |       Index Scan on order_items: 80.687 ms (15% of the query), 130038 rows x 2 loops, buffers 198707 hit / 0 read
+  | 
+  | ------------------------------------------------------------------------
+  | 2. the same frame read whole, which is what a person waits for
+  | ------------------------------------------------------------------------
+  |    spill: temp read 11455 blocks / written 12877, worst batch count 2 (> 1 means work_mem sent a hash to disk); spilling at: Sort, Hash
+  |       Hash Join: 669.934 ms self time, 97500 rows
+  |       Hash Join: 472.124 ms self time, 97500 rows
+  |       Hash Join: 335.192 ms self time, 97500 rows
+  | 
+  | ------------------------------------------------------------------------
+  | verdict
+  | ------------------------------------------------------------------------
+  | within the ceiling: the timed mean is 397.7 ms against 500 ms. The whole-frame read is 2676.8 ms, which the ceiling does not cover and the brief does not ask about -- recorded so nobody has to guess it later.
+  | 
+  | numbers, machine-readable: {"ceiling_ms": 500, "database": "postgres", "frame_columns": 32, "frame_features": 29, "frame_rows": 97500, "over_ceiling_ms": null, "read_mean_ms": 2676.8, "timed_mean_ms": 397.7}
+  | 
+  | statistics: 2 of 9 olist tables have never been ANALYZEd, so their row estimates are guesses -- the timings are still real, the plan beside them is partly not
+  | protocol note: no cache clearing was attempted -- a script that cannot write
+  | /proc/sys/vm/drop_caches reports warm timings, and says so, rather than implying a cold
+  | run it did not perform.
+  [exit 0] the ceiling is the config's; nothing here raises it
+
+------------------------------------------------------------------------
+5. item 12 -- the external table, empty and then filled
+------------------------------------------------------------------------
+$ python3 -m capstone external --report --config config/capstone.example.toml
+  | fetched: not attempted
+  | source: (undecided: [external].name is empty) via (no url configured)
+  | stored: not attempted (read-only run)
+  | match rate: 0 of 96744 (city, uf) keys = 0.0; the external table holds 0 key(s)
+  | claim: none yet -- an external signal earns its place by a lift measured on the model's own split, and a match rate is not that lift
+  |       unmatched: city_1|rj (2 orders)
+  |       unmatched: city_10|pr (2 orders)
+  |       unmatched: city_100|pr (2 orders)
+  |       unmatched: city_1000|pr (2 orders)
+  |       unmatched: city_1001|ba (2 orders)
+  [exit 0] the empty-table case must be printable, not fatal
+$ python3 docs/evidence/frame-performance-external-demo.py
+  | refresh: 0 row(s) of source 'sandbox_synthetic' removed before the reload
+  | stored: 20 row(s) via capstone.upsert_external_municipio, 'city_1|rj' first
+  | match rate: 20 of 96744 keys = 0.0002, external table holds 20
+  | note: the rate is small because the synthetic corpus spreads invented city names thin;
+  |       on the real corpus the denominator is the 4,119 distinct customer cities, and the
+  |       number that matters is measured by the student's run, not by this demo
+  [exit 0] 20 keys stored through capstone.upsert_external_municipio
+$ python3 -m capstone external --report --config config/capstone.example.toml
+  | fetched: not attempted
+  | source: (undecided: [external].name is empty) via (no url configured)
+  | stored: not attempted (read-only run)
+  | match rate: 20 of 96744 (city, uf) keys = 0.0002; the external table holds 20 key(s)
+  | claim: none yet -- an external signal earns its place by a lift measured on the model's own split, and a match rate is not that lift
+  |       unmatched: city_1016|mg (2 orders)
+  |       unmatched: city_1017|rs (2 orders)
+  |       unmatched: city_1018|pr (2 orders)
+  |       unmatched: city_1019|ba (2 orders)
+  |       unmatched: city_102|sp (2 orders)
+  [exit 0] the same command, now with a match rate to report
+
+------------------------------------------------------------------------
+6. the live guards, on the server they were written for
+------------------------------------------------------------------------
+$ python3 -m unittest tests.test_capstone_external tests.test_capstone_features
+  ! ...............ss...................................................................
+  ! ----------------------------------------------------------------------
+  ! Ran 84 tests in <t>s
+  ! 
+  ! OK (skipped=2)
+  [exit 0] with a URI set, so the skip path is not what ran
+
+end note: every duration above was measured on a synthetic corpus in a temporary cluster
+on a shared sandbox. They are the plan's evidence and the procedure's proof, not the
+stage's number -- that one comes from a run on the project's own PostgreSQL.
