@@ -38,7 +38,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, NamedTuple, Sequence
 
 from .config import CapstoneConfig
 from .errors import InputError, NotReadyError, SourceError
@@ -414,11 +414,27 @@ LOCALIDADES_URL = "https://servicodados.ibge.gov.br/api/v1/localidades/municipio
 LOCALIDADES_URL_ENV = "CAPSTONE_IBGE_LOCALIDADES_URL"
 
 
-def parse_uf_map(payload: Any) -> tuple[dict[str, str], int, int]:
-    """``[{ "id": 1100015, "microrregiao": { "mesorregiao": { "UF": { "sigla": "RO" } } } }, …]``.
+class Municipality(NamedTuple):
+    """One entry of IBGE's administrative list: what the place is called, and which state it is in.
+
+    Both halves travel together on purpose. A row whose state was looked up but whose city was copied
+    from the signal keyed as ``sao paulo - sp|sp`` -- the answer writes ``São Paulo - SP`` into
+    ``localidade.nome`` -- and joined to nothing, which is how a fetched-and-stored table of 5570 rows
+    still reported ``0 of 4310`` keys. A key is a *pair*, so a lookup that supplies one half has to
+    supply the spelling of the other, and ``name`` is empty rather than guessed when the list has none.
+    """
+
+    sigla: str
+    name: str = ""
+
+
+def parse_uf_map(payload: Any) -> tuple[dict[str, Municipality], int, int]:
+    """``[{ "id": 1100015, "nome": "Alta Floresta D'Oeste", "microrregiao": { … "UF": { "sigla": "RO" }}}]``.
 
     Returns the map plus two counts -- entries seen, entries that carried a state -- because the report
-    has to be able to say ``5568 of 5570`` rather than imply a complete list. A missing entry is not a
+    has to be able to say ``5568 of 5570`` rather than imply a complete list. Each value is a
+    ``Municipality``, so the name arrives with the sigla instead of being cut out of the signal's
+    ``"City - UF"`` display string afterwards. A missing entry is not a
     broken list: the municipality it describes then hits the refusal in ``_row``, which is where a
     unknown code belongs. A list that yields *nothing* is a broken list, and says so.
     """
@@ -428,7 +444,7 @@ def parse_uf_map(payload: Any) -> tuple[dict[str, str], int, int]:
             f" {LOCALIDADES_URL} answered with {type(payload).__name__} where an array of municipalities"
             " was expected"
         )
-    mapping: dict[str, str] = {}
+    mapping: dict[str, Municipality] = {}
     with_uf = 0
     for entry in payload:
         if not isinstance(entry, dict):
@@ -439,10 +455,16 @@ def parse_uf_map(payload: Any) -> tuple[dict[str, str], int, int]:
         code = str(raw_id).strip()
         if not IBGE_CODE_RE.match(code):
             continue
-        sigla = _scalar(_dig(entry, UF_IN_LIST_PATH[:-1]), "sigla") or _scalar(entry, "UF", "sigla")
+        holder = _dig(entry, UF_IN_LIST_PATH[:-1])
+        sigla = _scalar(holder, "sigla") or _scalar(entry, "UF", "sigla")
         if not sigla or len(sigla) != 2:
             continue
-        mapping[code] = sigla
+        # the name is read from the same entry, never from the signal's display string; an entry
+        # without one is still a usable state, so the row keeps the name the answer gave it
+        mapping[code] = Municipality(
+            sigla=sigla,
+            name=next((_scalar(entry, key) for key in NAME_KEYS if _scalar(entry, key)), "") or "",
+        )
         with_uf += 1
     if not mapping:
         raise SourceError(
@@ -475,7 +497,7 @@ def _row(
     source: str,
     *,
     level_from_nivel: bool,
-    uf_by_code: dict[str, str] | None = None,
+    municipality_by_code: dict[str, Municipality] | None = None,
 ) -> SignalRow:
     """One locality record as one row of ``capstone.external_municipio``, or a refusal that says why."""
     raw_id = locality.get("id")
@@ -491,7 +513,7 @@ def _row(
         # the two cases are told apart because only one of them is worth a second request: a response
         # that named the place but not its state is missing a field the administrative list has,
         # while a response that named nothing has a shape problem no lookup can fix
-        if uf_by_code is None:
+        if municipality_by_code is None:
             raise SourceError(
                 f"{source} locality {raw_id!r} ({name}) carries no uf, and no municipality reference"
                 " was supplied for this run; 005 keys on '<city>|<uf>' because 163 names recur in two"
@@ -499,13 +521,18 @@ def _row(
                 f" Keys this locality carried: {sorted(locality)}",
                 context={"missing_uf": code},
             )
-        uf = uf_by_code.get(code)
-        if uf is None:
+        entry = municipality_by_code.get(code)
+        if entry is None:
             raise SourceError(
                 f"{source} locality {raw_id!r} ({name}) has no uf and the municipality code is not in"
                 f" the reference list from {LOCALIDADES_URL}; a code IBGE's own administrative list"
                 " does not know is not a code to join orders onto"
             )
+        # the pair, or neither: the list is what tells us which state the code belongs to, and it is
+        # equally what the place is *called* in a key that has to agree with 005's lower(city)||uf
+        uf = entry.sigla
+        if entry.name:
+            name = entry.name
     if indicator is None or period is None:
         raise SourceError(
             f"{source} result {position} has no indicator name or period year; a row that cannot be"
@@ -529,7 +556,7 @@ def normalize(
     payload: Any,
     *,
     source: str = IBGE_AREGADOS,
-    uf_by_code: dict[str, str] | None = None,
+    municipality_by_code: dict[str, Municipality] | None = None,
 ) -> list[SignalRow]:
     """The API's JSON, as rows. Pure, and the reason the contract is testable without a network.
 
@@ -544,10 +571,11 @@ def normalize(
       was written against and which the metadata-style answers still use. There the id is the bracketed
       ``N6[3518800]`` and a non-scalar where a scalar belongs is an error worth naming.
 
-    ``uf_by_code`` is the municipality list's ``{code: sigla}``, consulted **only** for a locality
-    that has a name but no state of its own -- which is what the endpoint actually sends. A sigla in
-    the response always wins over the reference, because the answer about a place beats a table about
-    its code.
+    ``municipality_by_code`` is the municipality list's ``{code: Municipality(sigla, name)}``,
+    consulted **only** for a locality that has a name but no state of its own -- which is what the
+    endpoint actually sends. A sigla in the response always wins over the reference, because the answer
+    about a place beats a table about its code; when the table is consulted, its name is used too, for
+    the same reason: the signal writes ``São Paulo - SP`` and ``005`` keys on ``sao paulo|sp``.
 
     A shape surprise raises ``SourceError`` naming the key that is missing and where it was looked for.
     That sentence is the whole difference between "the API is down" and "the API answered with something
@@ -592,7 +620,7 @@ def normalize(
             position,
             source,
             level_from_nivel=nivel,
-            uf_by_code=uf_by_code,
+            municipality_by_code=municipality_by_code,
         )
         for position, locality, block, element, indicator, period, raw, nivel in samples
     ]
@@ -746,17 +774,26 @@ def fetch(
             ) from error
         mapping, seen, with_uf = parse_uf_map(body)
         if notes is not None:
-            notes["uf_reference"] = {"url": reference_url, "entries": seen, "codes": with_uf}
+            # ``named`` is reported separately because it is the number that decides whether a row's city
+            # half comes from the list or from the answer's display string, and a reader comparing two
+            # runs' keys needs to know which of the two they got
+            named = sum(1 for entry in mapping.values() if entry.name)
+            notes["uf_reference"] = {
+                "url": reference_url,
+                "entries": seen,
+                "codes": with_uf,
+                "named": named,
+            }
         return mapping
 
     if force_reference:
-        return normalize(payload, source=config.external.name, uf_by_code=reference_map())
+        return normalize(payload, source=config.external.name, municipality_by_code=reference_map())
     try:
         return normalize(payload, source=config.external.name)
     except SourceError as error:
         if not error.context.get("missing_uf"):
             raise
-        return normalize(payload, source=config.external.name, uf_by_code=reference_map())
+        return normalize(payload, source=config.external.name, municipality_by_code=reference_map())
 
 
 def load(cursor: Any, rows: Iterable[SignalRow], *, source: str) -> int:

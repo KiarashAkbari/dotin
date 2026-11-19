@@ -64,6 +64,8 @@ config/capstone.toml
 config/patch-0015-evidence.toml
 # patch 0016's harness writes the same kind of throwaway config
 config/patch-0016-evidence.toml
+# patch 0017's harness writes the same kind of throwaway config
+config/patch-0017-evidence.toml
 
 # tool caches and OS junk
 .ruff_cache/

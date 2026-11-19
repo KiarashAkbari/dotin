@@ -306,11 +306,18 @@ def command_external(args: argparse.Namespace) -> int:
     reference = report.get("uf_reference")
     if reference:
         # the second GET is a cost the reader is owed a line about: "one request per run" is a policy,
-        # and a policy that bends silently is a policy nobody believes two months later
-        print(
-            f"      uf map: {reference['codes']} of {reference['entries']} municipality codes from"
-            f" {reference['url']}"
+        # and a policy that bends silently is a policy nobody believes two months later. The name count
+        # rides along because the list now supplies the city half of the key as well, and a key built
+        # from a list entry without a name keeps the answer's "City - UF" spelling instead -- a
+        # difference that is invisible in the count of rows and decides whether the join matches.
+        line = (
+            f"      uf map: {reference['codes']} of {reference['entries']} municipality codes and"
+            f" their names from {reference['url']}"
         )
+        named, codes = reference.get("named"), reference["codes"]
+        if named is not None and named != codes:
+            line += f" ({codes - named} without a name, keyed on the answer's spelling)"
+        print(line)
     if report["match_rate"] is None:
         print("match rate: not read (pass --report or --load to ask the database)")
     else:

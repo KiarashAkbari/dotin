@@ -21,7 +21,9 @@ Four things are recorded, in the order a reviewer needs them:
    response already names the states, which is what keeps "one request per run" true instead of merely
    restated;
 4. ``--load`` on a disposable cluster, read back from the table: the join key that did not exist before
-   this patch, as ``municipio um|ro``, beside the NULL that stays a NULL.
+   this patch, as ``municipio um|ro`` on this patch's own tree and ``alta floresta d'oeste|ro`` from
+   0017 onward (0017 moved the name's source to the list, which is what made the join match at all),
+   beside the NULL that stays a NULL.
 
 What is deliberately *not* measured: any claim about the live IBGE host from this machine. The two
 reference files under ``docs/evidence/`` were fetched through the platform's HTTP route, which has a
@@ -88,8 +90,11 @@ from capstone import external
 body = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 reference = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
 
-can = hasattr(external, "parse_uf_map") and "uf_by_code" in external.normalize.__code__.co_varnames
-print(f"parser accepts a municipality reference: {can}")
+record = getattr(external, "Municipality", None)
+params = external.normalize.__code__.co_varnames
+keyword = "municipality_by_code" if "municipality_by_code" in params else "uf_by_code"
+can = hasattr(external, "parse_uf_map") and keyword in params
+print(f"parser accepts a municipality reference: {can} (keyword: {keyword})")
 if not can:
     try:
         external.normalize(body)
@@ -99,9 +104,15 @@ if not can:
     print("unexpectedly accepted the body -- the refusal this patch replaces did not happen")
     raise SystemExit(2)
 
-mapping = external.parse_uf_map(reference)[0]
+# 0016 keyed on {code: sigla} and kept the answer's name; 0017 put the list's name beside the state,
+# because the answer writes "São Paulo - SP" while 005 keys on lower(city). One reference body, both
+# shapes: the probe converts to whichever the tree wants, so this file gates either checkout.
+raw = external.parse_uf_map(reference)[0]
+mapping = raw if record is not None else {
+    code: value.sigla if hasattr(value, "sigla") else value for code, value in raw.items()
+}
 try:
-    rows = external.normalize(body, uf_by_code=mapping)
+    rows = external.normalize(body, **{keyword: mapping})
 except Exception as error:  # a refusal is still a result worth reading, not a stack to hide
     print(f"refused: {type(error).__name__}: {error}")
     raise SystemExit(1)
@@ -393,9 +404,11 @@ def main(argv: list[str]) -> int:
         cwd=work,
     )
     failures += not check("this tree builds the rows", code_green == 0, f"exit {code_green}")
+    # either spelling, deliberately: 0016 took the city from the answer's name and 0017 takes it from
+    # the list's, and what this log records is the half both trees share -- that a state arrived
     failures += not check(
         "and the join key has a state in it",
-        "municipio um|ro" in text_green,
+        "municipio um|ro" in text_green or "alta floresta d'oeste|ro" in text_green,
         text_green.strip().splitlines()[-1] if text_green.strip() else "no rows printed",
     )
 
@@ -508,7 +521,7 @@ def main(argv: list[str]) -> int:
         say("  the join keys now in the table: " + keys.replace("\n", ", "))
         failures += not check(
             "the state arrived through the reference, in the table itself",
-            "municipio um|ro" in keys,
+            "municipio um|ro" in keys or "alta floresta d'oeste|ro" in keys,
             keys.replace("\n", ", "),
         )
     except Exception as error:  # a harness that dies mid-way is worse than one that skips

@@ -1,0 +1,122 @@
+[
+ {
+  "id": 1100015,
+  "nome": "Alta Floresta D'Oeste",
+  "microrregiao": {
+   "id": 11006,
+   "nome": "Cacoal",
+   "mesorregiao": {
+    "id": 1102,
+    "nome": "Leste Rondoniense",
+    "UF": {
+     "id": 11,
+     "sigla": "RO",
+     "nome": "Rondônia",
+     "regiao": {
+      "id": 1,
+      "sigla": "N",
+      "nome": "Norte"
+     }
+    }
+   }
+  },
+  "regiao-imediata": {
+   "id": 110005,
+   "nome": "Cacoal",
+   "regiao-intermediaria": {
+    "id": 1102,
+    "nome": "Ji-Paraná",
+    "UF": {
+     "id": 11,
+     "sigla": "RO",
+     "nome": "Rondônia",
+     "regiao": {
+      "id": 1,
+      "sigla": "N",
+      "nome": "Norte"
+     }
+    }
+   }
+  }
+ },
+ {
+  "id": 3550308,
+  "nome": "São Paulo",
+  "microrregiao": {
+   "id": 35061,
+   "nome": "São Paulo",
+   "mesorregiao": {
+    "id": 3515,
+    "nome": "Metropolitana de São Paulo",
+    "UF": {
+     "id": 35,
+     "sigla": "SP",
+     "nome": "São Paulo",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  },
+  "regiao-imediata": {
+   "id": 350001,
+   "nome": "São Paulo",
+   "regiao-intermediaria": {
+    "id": 3501,
+    "nome": "São Paulo",
+    "UF": {
+     "id": 35,
+     "sigla": "SP",
+     "nome": "São Paulo",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  }
+ },
+ {
+  "id": 3304557,
+  "nome": "Rio de Janeiro",
+  "microrregiao": {
+   "id": 33018,
+   "nome": "Rio de Janeiro",
+   "mesorregiao": {
+    "id": 3306,
+    "nome": "Metropolitana do Rio de Janeiro",
+    "UF": {
+     "id": 33,
+     "sigla": "RJ",
+     "nome": "Rio de Janeiro",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  },
+  "regiao-imediata": {
+   "id": 330001,
+   "nome": "Rio de Janeiro",
+   "regiao-intermediaria": {
+    "id": 3301,
+    "nome": "Rio de Janeiro",
+    "UF": {
+     "id": 33,
+     "sigla": "RJ",
+     "nome": "Rio de Janeiro",
+     "regiao": {
+      "id": 3,
+      "sigla": "SE",
+      "nome": "Sudeste"
+     }
+    }
+   }
+  }
+ }
+]

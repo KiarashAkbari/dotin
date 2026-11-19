@@ -18,6 +18,7 @@ import contextlib
 import dataclasses
 import io
 import json
+import unicodedata
 import os
 import re
 import subprocess
@@ -917,6 +918,109 @@ UF_MAP_SAMPLE = [
 ]
 
 
+class MunicipalityNameTests(unittest.TestCase):
+    """Where the *city* half of the key comes from, once the list is the one being asked.
+
+    Measured on the student's own database after `0016`: `--fetch` stored 5570 rows and the reference
+    answered for every one of them, and `match rate` stayed `0 of 4310`. The reason was in the key:
+    the agregados answer names a municipality ``São Paulo - SP``, so ``0016`` built
+    ``sao paulo - sp|sp`` while ``005`` keys on ``lower(customer_city) || '|' || lower(customer_state)``
+    -- ``sao paulo|sp``. The fix is not to cut a suffix off a display string; it is to take the name from
+    the same record the state was taken from, so that one row is spelled by one source.
+    """
+
+    #: the three codes the student's own query printed, with the answer's name and the list's name
+    LIVE_TRIPLES = (
+        ("1100015", "Alta Floresta D'Oeste - RO", "Alta Floresta D'Oeste", "ro"),
+        ("3304557", "Rio de Janeiro - RJ", "Rio de Janeiro", "rj"),
+        ("3550308", "São Paulo - SP", "São Paulo", "sp"),
+    )
+
+    def suffixed_payload(self, code: str, name: str) -> dict:
+        return data_payload(
+            **{
+                "resultados.0.series.0.localidade.id": code,
+                "resultados.0.series.0.localidade.nome": name,
+                "resultados.0.series.0.localidade.uf": _DROP,
+            }
+        )
+
+    def list_body(self, code: str, name: str, sigla: str) -> list:
+        return [{"id": int(code), "nome": name, "microrregiao": {"mesorregiao": {"UF": {"sigla": sigla}}}}]
+
+    def test_the_suffixed_name_is_what_the_endpoint_holds(self) -> None:
+        """The finding, before any fix: this is the string the response sends, not one we added.
+
+        Kept as a test on the *payload* rather than on a row, because after this patch the row no longer
+        carries the suffix -- and the reason it stopped carrying it is exactly what would otherwise be
+        forgotten: the endpoint writes ``São Paulo - SP`` into ``localidade.nome``.
+        """
+        for code, answer_name, _, _ in self.LIVE_TRIPLES:
+            with self.subTest(code=code):
+                payload = self.suffixed_payload(code, answer_name)
+                locality = payload[0]["resultados"][0]["series"][0]["localidade"]
+                self.assertEqual(locality["nome"], answer_name)
+                self.assertNotIn("uf", locality, msg="and no state of its own, which is the whole point")
+
+    def test_every_example_the_student_printed_becomes_the_key_the_view_expects(self) -> None:
+        for code, answer_name, list_name, sigla in self.LIVE_TRIPLES:
+            with self.subTest(code=code):
+                mapping = external.parse_uf_map(self.list_body(code, list_name, sigla))[0]
+                rows = external.normalize(
+                    self.suffixed_payload(code, answer_name), municipality_by_code=mapping
+                )
+                folded = (
+                    unicodedata.normalize("NFKD", list_name)
+                    .encode("ascii", "ignore")
+                    .decode()
+                    .casefold()
+                )
+                self.assertEqual(rows[0].city_state, f"{folded}|{sigla}")
+                self.assertNotIn(" - ", rows[0].city_state, msg="no display suffix reaches the table")
+
+    def test_the_name_is_taken_from_the_list_only_because_the_state_was(self) -> None:
+        """A response that answers both questions is not edited by the reference.
+
+        The list is a fallback for a missing half, not a spelling authority: if the answer names the
+        state too, its name is what the row carries, and a disagreement between the two sources stays
+        visible in the report instead of being resolved by a rule nobody audited.
+        """
+        mapping = {"1100015": external.Municipality(name="Another Place", sigla="SP")}
+        rows = external.normalize(IBGE_DATA_PAYLOAD, municipality_by_code=mapping)
+        self.assertEqual(rows[0].city_state, "municipio um|ro")
+
+    def test_a_list_entry_without_a_name_keeps_the_answers_name(self) -> None:
+        mapping, _, _ = external.parse_uf_map(
+            [{"id": 3550308, "microrregiao": {"mesorregiao": {"UF": {"sigla": "SP"}}}}]
+        )
+        self.assertEqual(mapping["3550308"].name, "")
+        rows = external.normalize(
+            self.suffixed_payload("3550308", "São Paulo - SP"), municipality_by_code=mapping
+        )
+        self.assertEqual(rows[0].city_state, "sao paulo - sp|sp", msg="nothing invented, nothing dropped")
+
+    def test_the_map_reports_what_it_learned_from_the_list(self) -> None:
+        entries = [
+            {"id": 3550308, "nome": "São Paulo", "microrregiao": {"mesorregiao": {"UF": {"sigla": "SP"}}}},
+            {"id": 3304557, "nome": "Rio de Janeiro", "microrregiao": {"mesorregiao": {"UF": {"sigla": "RJ"}}}},
+        ]
+        mapping, seen, usable = external.parse_uf_map(entries)
+        self.assertEqual((seen, usable), (2, 2))
+        self.assertEqual(mapping["3550308"].name, "São Paulo", msg="accents are folded later, by fold()")
+        self.assertEqual(mapping["3550308"].sigla, "SP")
+
+    def test_a_locality_the_answer_never_named_still_refuses(self) -> None:
+        """The list names places, it does not identify them: a code alone is not a row to key."""
+        payload = data_payload(**{"resultados.0.series.0.localidade.nome": _DROP,
+                                   "resultados.0.series.0.localidade.uf": _DROP})
+        with self.assertRaises(external.SourceError) as caught:
+            external.normalize(
+                payload,
+                municipality_by_code={"1100015": external.Municipality(name="X", sigla="RO")},
+            )
+        self.assertIn("has no name", str(caught.exception))
+
+
 class UfReferenceTests(unittest.TestCase):
     """The municipality list that supplies the state the agregados response omits.
 
@@ -937,12 +1041,12 @@ class UfReferenceTests(unittest.TestCase):
     def test_the_reference_supplies_the_state_the_response_omits(self) -> None:
         mapping, seen, with_uf = external.parse_uf_map(UF_MAP_SAMPLE)
         self.assertEqual((seen, with_uf), (6, 6))
-        self.assertEqual(mapping["1100015"], "RO")
-        rows = external.normalize(self.payload_without_uf(), uf_by_code=mapping)
+        self.assertEqual(mapping["1100015"].sigla, "RO")
+        rows = external.normalize(self.payload_without_uf(), municipality_by_code=mapping)
         self.assertEqual(
             [row.city_state for row in rows],
-            ["municipio um|ro", "municipio dois|sp"],
-            msg="the join key is built from the reference, per code",
+            ["alta floresta d'oeste|ro", "guarulhos|sp"],
+            msg="the whole key is built from the reference: the answer's names are display strings",
         )
 
     def test_the_response_wins_when_it_does_name_a_uf(self) -> None:
@@ -952,9 +1056,9 @@ class UfReferenceTests(unittest.TestCase):
         joins to orders is the one the audit can be checked against -- so the response is trusted and
         the disagreement stays visible in the row rather than being averaged away.
         """
-        mapping = {"1100015": "SP"}
-        rows = external.normalize(IBGE_DATA_PAYLOAD, uf_by_code=mapping)
-        self.assertEqual(rows[0].city_state, "municipio um|ro", msg="the response said RO")
+        mapping = {"1100015": external.Municipality(sigla="SP", name="Elsewhere")}
+        rows = external.normalize(IBGE_DATA_PAYLOAD, municipality_by_code=mapping)
+        self.assertEqual(rows[0].city_state, "municipio um|ro", msg="the response said RO, and named")
 
     def test_a_code_the_reference_does_not_know_is_refused(self) -> None:
         payload = data_payload(**{
@@ -963,7 +1067,7 @@ class UfReferenceTests(unittest.TestCase):
             "resultados.0.series.1.localidade.uf": _DROP,
         })
         with self.assertRaises(SourceError) as caught:
-            external.normalize(payload, uf_by_code={"1100015": "RO"})
+            external.normalize(payload, municipality_by_code={"1100015": external.Municipality(name="Alta Floresta D'Oeste", sigla="RO")})
         message = str(caught.exception)
         self.assertIn("9909999", message, msg="the code is the diagnosis")
         self.assertIn(external.LOCALIDADES_URL, message, msg="and so is the list that did not know it")
@@ -971,14 +1075,17 @@ class UfReferenceTests(unittest.TestCase):
     def test_parse_accepts_both_spellings_of_the_id_and_skips_what_has_no_uf(self) -> None:
         entries = [{"id": "1100015", "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}}]
         mapping, seen, with_uf = external.parse_uf_map(entries)
-        self.assertEqual(mapping, {"1100015": "RO"})
-        self.assertEqual((seen, with_uf), (1, 1))
+        self.assertEqual(mapping, {"1100015": external.Municipality(sigla="RO", name="")})
+        self.assertEqual((seen, with_uf), (1, 1), msg="an entry can have a state and no name")
         blank = [
             {"id": 1100015, "nome": "no uf anywhere in this entry"},
             {"id": 1100023, "microrregiao": {"mesorregiao": {"UF": {"sigla": "RO"}}}},
         ]
         mapping, seen, with_uf = external.parse_uf_map(blank)
-        self.assertEqual(mapping, {"1100023": "RO"}, msg="one entry without a UF is not a broken list")
+        self.assertEqual(
+            mapping, {"1100023": external.Municipality(sigla="RO", name="")},
+            msg="one entry without a UF is not a broken list",
+        )
         self.assertEqual((seen, with_uf), (2, 1))
 
     def test_a_reference_that_is_not_a_list_is_refused_with_its_own_words(self) -> None:
