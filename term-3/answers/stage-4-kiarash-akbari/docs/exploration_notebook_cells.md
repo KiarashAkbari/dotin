@@ -51,11 +51,11 @@ from capstone.features import connect, database_uri
 from capstone import model
 from pathlib import Path
 
-STAGE = Path.cwd().parent if (Path.cwd() / 'config').is_dir() else Path.cwd()
+STAGE = Path.cwd() if (Path.cwd() / 'config').is_dir() else Path.cwd().parent
 config = load_contract(STAGE / 'config' / 'capstone.example.toml')
 uri = database_uri(config, purpose="the exploration notebook")
 engine = connect(uri)
-print('engine:', engine.dialect.name)
+print('engine:', uri.split('://')[0])
 print('label:', model.label_definition())
 
 %% md

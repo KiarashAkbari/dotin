@@ -59,7 +59,11 @@ NOTEBOOK_DELIVERABLES = frozenset(
 )
 #: empty until those phases land. Adding a notebook means adding its exact path here -- one
 #: deliberate line, rather than inventing a rule -- and the test below refuses a stale or wider entry.
-NOTEBOOK_EXCEPTIONS: frozenset = frozenset()
+NOTEBOOK_EXCEPTIONS: frozenset = frozenset(
+    {
+        "term-3/answers/stage-4-kiarash-akbari/01_exploration.ipynb",
+    }
+)
 
 
 def ignored(relative: str) -> bool:
