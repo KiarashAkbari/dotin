@@ -51,6 +51,21 @@ DENSITY_COLUMN = "external_density_2022"
 #: the baseline the brief can state without a model: rank everybody at the observed rate
 PRIOR_RATE = "prior_rate"
 
+#: the view ``sql/006`` publishes the signal through. The frame itself is not touched -- ``005``'s
+#: own header records why (an unverified external source must not be able to move a modelled number),
+#: and the bridge is where that decision stops: a separate view, joined by ``order_id``, so
+#: ``v_feature_frame`` keeps its 29 columns and its audit story.
+EXTERNAL_VIEW = "capstone.v_external_feature"
+#: the two counts the coverage view answers with, and nothing else -- a catalog lookup and one
+#: aggregate, which is what lets a refusal name the migration instead of the row
+EXTERNAL_COVERAGE_VIEW = "capstone.v_external_feature_coverage"
+#: how the external columns get into a frame. ``auto`` reads them when the bridge is applied and
+#: skips it when it is not; ``off`` never reads them, which is how a reviewer reproduces the
+#: baseline-only half of the table; ``required`` refuses a database without ``sql/006``, because a
+#: missing migration and a signal that did not help are different findings and the report cannot
+#: print one word for both.
+EXTERNAL_MODES = ("auto", "off", "required")
+
 
 def is_negative(score: int, config: CapstoneConfig) -> bool:
     """Is this review a negative one, per the brief?"""
@@ -391,6 +406,7 @@ def train(
     baseline_rules: Sequence[str] = (PRIOR_RATE,),
     share: float | None = None,
     omit: Sequence[str] = (),
+    on_refusal: str = "raise",
 ) -> dict[str, Any]:
     """Score every baseline and family, on every feature set, at the operational quota.
 
@@ -408,7 +424,21 @@ def train(
     ``scorers`` empty is a refusal that names what is missing. The brief leaves "which two
     families" to the student, so an implementation that picked them would write the report's
     central comparison into library code and call it a default.
+
+    ``on_refusal`` is what one unusable feature set does to the rest of the table. ``"raise"`` (the
+    default) aborts, which is the behaviour every other caller of this module has always had;
+    ``"record"`` keeps the healthy rows and attaches the refusal sentence to the row that could not
+    be scored -- the shape the ablation harness needs, because a bridge that matched some
+    municipalities and not others leaves NULLs the rest of the corpus cannot be scored over, and
+    losing the baseline rows to that would be losing the only measured numbers in the table. Neither mode invents anything:
+    ``"record"`` writes an ``error`` where a metric would have been, and
+    :func:`ablation` reports ``status="refused"`` instead of a difference.
     """
+    if on_refusal not in ("raise", "record"):
+        raise InputError(
+            f"on_refusal={on_refusal!r} is neither 'raise' nor 'record'; both are honest, an empty "
+            "third option is not"
+        )
     undecided = config.model.undecided
     if undecided:
         raise NotReadyError(
@@ -456,10 +486,36 @@ def train(
     for set_name, columns in sets.items():
         sub = LabeledFrame(rows=kept_frame.rows, columns=columns)
         for scorer in roster:
-            if scorer.kind == "rule":
-                scores = rule_scores(sub, scorer.name, labels)
-            else:
-                scores = fit_family(scorer, sub, labels)
+            try:
+                if scorer.kind == "rule":
+                    scores = rule_scores(sub, scorer.name, labels)
+                else:
+                    scores = fit_family(scorer, sub, labels)
+            except CapstoneError as exc:
+                if on_refusal != "record":
+                    raise
+                # One row of the table refuses; the table does not vanish with it. A column that is
+                # NULL everywhere (a clone with no fetch yet) and a family that cannot fit are both
+                # findings, and printing the first as ``0.0`` would be the invention this stage has
+                # refused since phase 0 -- so the run keeps its name, carries the sentence, and
+                # leaves every metric undefined for the report to render as a blank.
+                runs.append(
+                    {
+                        "scorer": scorer.name,
+                        "kind": scorer.kind,
+                        "feature_set": set_name,
+                        "features": list(columns),
+                        "model_run_id": f"{scorer.name}@{set_name}",
+                        "error": str(exc),
+                        "auc": None,
+                        "average_precision": None,
+                        "quota": None,
+                        "rows": len(labels),
+                        "unlabelled_rows": len(raw_labels) - len(labels),
+                        "scores": [],
+                    }
+                )
+                continue
             run: dict[str, Any] = {
                 "scorer": scorer.name,
                 "kind": scorer.kind,
@@ -480,7 +536,14 @@ def train(
                 run["months"] = month_spread(scores, labels, months, quota)
             runs.append(run)
 
-    best = max(runs, key=_rank_key)
+    scored_runs = [run for run in runs if "error" not in run]
+    if not scored_runs:
+        raise InputError(
+            f"all {len(runs)} runs refused before scoring, so there is no table: the first refusal was "
+            f"{runs[0]['error'] if runs else 'no run was attempted'}",
+            context={"errors": [run.get("error", "") for run in runs]},
+        )
+    best = max(scored_runs, key=_rank_key)
     return {
         "label": label_definition(),
         "operational_share": quota,
@@ -490,6 +553,7 @@ def train(
         "scorers": names,
         "feature_sets": {name: list(columns) for name, columns in sets.items()},
         "runs": runs,
+        "refused_runs": [run for run in runs if "error" in run],
         "best": best,
         "ablation": ablation(runs),
         "scored_frame": [
@@ -504,6 +568,55 @@ def train(
             for index, row in enumerate(kept_frame.rows)
         ],
     }
+
+
+def external_readiness(config: CapstoneConfig) -> dict[str, Any]:
+    """What this database can actually say about the external signal, before anyone fits anything.
+
+    Three facts, each measured and each with a distinct absent case: the bridge view exists
+    (``sql/006`` applied), it carries rows, and the density column has values. A caller that skips
+    this and goes straight to ``train`` gets a refusal too, but a refusal naming NULLs -- which is
+    the wrong sentence about a database where nothing was ever fetched. This is the one place that
+    reads the difference, and it reads it from ``005``'s and ``006``'s own views rather than
+    recounting them here.
+    """
+    from .features import connect, database_uri
+
+    uri = database_uri(config, purpose="ask what the external signal can support")
+    connection = connect(uri, purpose="ask what the external signal can support")
+    try:
+        cursor = connection.cursor()
+        view_present = _regclass(cursor)
+        coverage: dict[str, Any] | None = None
+        if view_present:
+            cursor.execute(
+                "SELECT frame_rows, matched_rows, valued_rows, value_share "
+                f"FROM {EXTERNAL_COVERAGE_VIEW}"
+            )
+            names = [column.name for column in cursor.description]
+            row = cursor.fetchone()
+            coverage = dict(zip(names, row, strict=True)) if row else None
+    finally:
+        connection.close()
+    if not view_present:
+        note = (
+            "no capstone.v_external_feature: apply sql/006_external_bridge.sql, then fetch and load "
+            "the signal with `capstone external`"
+        )
+    elif coverage is None or not coverage.get("frame_rows"):
+        note = "the frame is empty, so there is nothing for the signal to join to"
+    elif not coverage.get("valued_rows"):
+        note = (
+            f"the bridge is applied but {DENSITY_COLUMN} has no values: the fetch has not stored rows "
+            "for the municipalities this frame's orders live in, so the ablation is refused and not zero"
+        )
+    else:
+        note = (
+            f"{coverage['valued_rows']} of {coverage['frame_rows']} orders can see a value "
+            f"({float(coverage['value_share'] or 0):.2%}) -- an ablation restricted to those rows is "
+            "an ablation over that population, and the report has to say so"
+        )
+    return {"view_present": view_present, "coverage": coverage, "note": note}
 
 
 @pending(phase=6, checklist=("6.1", "6.2"), step="model")
@@ -531,6 +644,10 @@ def _rank_key(run: Mapping[str, Any]) -> tuple[float, float, str]:
     the name tie-break exists because ``max`` over equal keys otherwise picks by row order,
     which is not a reason to print one model as the best.
     """
+    if "error" in run or run.get("quota") is None:
+        # a refused row is not a model that scored nothing, and ``max`` over a table that mixes the
+        # two would hand "best" to whoever happens to sort first
+        return (float("-inf"), float("-inf"), run["scorer"])
     catch = run["quota"]["recall"]
     return (
         -1.0 if catch is None else catch,
@@ -549,14 +666,43 @@ def ablation(runs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """
     by_key = {(run["scorer"], run["feature_set"]): run for run in runs}
     contrasts = []
+    refused: list[dict[str, Any]] = []
     for scorer in sorted({run["scorer"] for run in runs}):
         outside = by_key.get((scorer, "no_external"))
         inside = by_key.get((scorer, "with_external"))
         if outside is None or inside is None:
             continue
+        if "error" in inside:
+            # the honest half of "did the signal help": say which side refused, rather than letting
+            # a missing column read as a measured difference of nothing
+            refused.append(
+                {"scorer": scorer, "side": "with_external", "error": inside["error"]}
+            )
+            continue
+        if "error" in outside:
+            refused.append(
+                {"scorer": scorer, "side": "no_external", "error": outside["error"]}
+            )
+            continue
+        if tuple(outside["features"]) == tuple(inside["features"]):
+            refused.append(
+                {
+                    "scorer": scorer,
+                    "side": "both",
+                    "error": "the two feature sets are the same list: no external column reached the "
+                    "frame, so the ablation has nothing to differ over",
+                }
+            )
+            continue
         contrasts.append(
             {
                 "scorer": scorer,
+                # a rule baseline reads no matrix, so its two arms are the same scores and its delta
+                # is zero by construction -- printing it beside a family's delta without this field
+                # would let a reader count "0.0000" as a finding about the signal. ``get`` because
+                # :func:`ablation` takes any run mappings, and a caller that did not classify a
+                # scorer gets ``None`` rather than a guess from this function
+                "kind": outside.get("kind"),
                 "catch_share_without": outside["quota"]["recall"],
                 "catch_share_with": inside["quota"]["recall"],
                 "delta_catch_share": _delta(outside["quota"]["recall"], inside["quota"]["recall"]),
@@ -567,6 +713,19 @@ def ablation(runs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         )
     return {
         "contrasts": contrasts,
+        # four states, because "absent", "nothing could be scored" and "some arms were scored" are
+        # three different sentences about a database, and a table with both a measured contrast and a
+        # refused one is the fourth -- none of them may be printed as the others
+        "status": (
+            "measured"
+            if contrasts and not refused
+            else "partial"
+            if contrasts
+            else "refused"
+            if refused
+            else "absent"
+        ),
+        "refused": refused,
         "density_column_present": DENSITY_COLUMN in {
             name for run in runs for name in run["features"]
         },
@@ -583,7 +742,25 @@ def _delta(before: float | None, after: float | None) -> float | None:
     return after - before
 
 
-def read_frame(config: CapstoneConfig, *, omit: Sequence[str] = ()) -> LabeledFrame:
+def _regclass(cursor: Any) -> bool:
+    """Does ``capstone.v_external_feature`` exist here? One statement, and it reads the catalog.
+
+    The relation name is a module constant, so it is written into the SQL rather than bound: a
+    placeholder here would make the answer depend on which driver's paramstyle the caller has, and
+    the question is not about the driver. Anything the user could steer is a parameter -- this is a
+    name this file owns.
+    """
+    cursor.execute(f"SELECT to_regclass('{EXTERNAL_VIEW}') IS NOT NULL")
+    return bool(cursor.fetchone()[0])
+
+
+def read_frame(
+    config: CapstoneConfig,
+    *,
+    omit: Sequence[str] = (),
+    external: str = "auto",
+    require_matched: bool = False,
+) -> LabeledFrame:
     """The frame and its label, read in one query, for the chain step that has no argument.
 
     ``omit`` is where a column that the model cannot take goes: a feature with NULLs is refused by
@@ -596,20 +773,70 @@ def read_frame(config: CapstoneConfig, *, omit: Sequence[str] = ()) -> LabeledFr
     separation -- the reason ``test_leak_gate.py`` can promise a feature query cannot inherit
     the label. This function is the one place allowed to put them side by side, and it is what
     ``train(config)`` reaches for.
+
+    ``external`` decides whether ``capstone.v_external_feature`` rides along (see
+    :data:`EXTERNAL_MODES`). Under ``auto`` one extra statement asks the catalog whether the view
+    exists: it is a ``to_regclass`` lookup and not a data read, and it is what lets the no-``006``
+    case answer with an empty ``external_*`` set instead of a driver error about a missing relation
+    -- which is the state of every tree before this one's patch is applied, and of a fresh clone
+    where ``006`` arrived but no fetch ever stored a row. ``require_matched`` then restricts the rows to the orders whose municipality the signal
+    actually reached, and it restricts *every* feature set at once: an ablation that compared the
+    matched rows to all the rows would be measuring the population, not the column.
     """
     from .features import connect, database_uri
 
-    sql = (
-        "SELECT f.*, l.is_negative, l.worst_score, l.review_count, l.has_review, "
-        "to_char(f.order_approved_at, 'YYYY-MM') AS decision_month "
-        "FROM capstone.v_feature_frame AS f "
-        "JOIN capstone.v_order_label AS l USING (order_id) "
-        "ORDER BY f.order_id"
-    )
+    if external not in EXTERNAL_MODES:
+        raise InputError(
+            f"external={external!r} is none of {', '.join(EXTERNAL_MODES)}; the mode is the one thing "
+            "that decides whether the ablation has two columns to differ over"
+        )
+    if require_matched and external == "off":
+        raise InputError(
+            "require_matched without an external join would filter on a column the frame never "
+            "reads -- the refusal is the point: that combination means 'matched rows of nothing'"
+        )
+    select = [
+        "f.*",
+        "l.is_negative",
+        "l.worst_score",
+        "l.review_count",
+        "l.has_review",
+        "to_char(f.order_approved_at, 'YYYY-MM') AS decision_month",
+    ]
+    joins = ["JOIN capstone.v_order_label AS l USING (order_id)"]
+    where: list[str] = []
     uri = database_uri(config, purpose="read the frame for the model step")
     connection = connect(uri, purpose="read the frame and its label for the model step")
     try:
         cursor = connection.cursor()
+        bridge = external != "off"
+        if external == "auto":
+            # one statement, and it reads the catalog: "no sql/006 here" is an answer, not an error
+            bridge = _regclass(cursor)
+        elif external == "required":
+            if not _regclass(cursor):
+                raise NotReadyError(
+                    f"{EXTERNAL_VIEW} is not in this database, and external='required' means the "
+                    "ablation has to run: apply sql/006_external_bridge.sql (it needs the table "
+                    "sql/005 created and a fetch that stored rows)",
+                    context={"view": EXTERNAL_VIEW, "mode": external},
+                )
+        if bridge:
+            select += [
+                "x.external_matched",
+                "x.external_ibge_code",
+                "x.external_indicator_count",
+                f"x.{DENSITY_COLUMN}",
+            ]
+            joins.append(f"LEFT JOIN {EXTERNAL_VIEW} AS x USING (order_id)")
+            if require_matched:
+                where.append("x.external_matched")
+        sql = (
+            "SELECT " + ", ".join(select) + " FROM capstone.v_feature_frame AS f " + " ".join(joins)
+        )
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY f.order_id"
         cursor.execute(sql)
         names = [column.name for column in cursor.description]
         rows = [dict(zip(names, values, strict=True)) for values in cursor.fetchall()]
@@ -624,9 +851,16 @@ def read_frame(config: CapstoneConfig, *, omit: Sequence[str] = ()) -> LabeledFr
     dropped = set(omit)
     unknown = sorted(dropped - set(names))
     if unknown:
+        skipped = sorted(name for name in unknown if name.startswith(EXTERNAL_PREFIX))
+        hint = (
+            f" -- the external columns are not in this read at all (external={external!r}), so "
+            "there is nothing here to omit"
+            if skipped
+            else ""
+        )
         raise InputError(
             f"omit names {unknown}, which the frame does not have; the frame's own columns are "
-            "the only ones worth dropping, and a typo here would drop a feature nobody chose"
+            f"the only ones worth dropping, and a typo here would drop a feature nobody chose{hint}"
         )
     columns = tuple(
         name

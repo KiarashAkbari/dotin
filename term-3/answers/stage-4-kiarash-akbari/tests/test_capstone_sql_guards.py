@@ -45,6 +45,10 @@ ORDER = [
     "003_feature_views.sql",
     "004_as_of_functions.sql",
     "005_external_signal.sql",
+    # 006 is the bridge the model step reads; it is in this list because the directory's plan and the
+    # directory's contents have to be the same six files, and a seventh name here without a file is
+    # exactly as much a lie as a file here without the name
+    "006_external_bridge.sql",
 ]
 # the tables whose rows can carry information from after the decision moment; an aggregate
 # over either one is where a leak would actually be written
@@ -493,6 +497,57 @@ class StaticSqlContractTests(unittest.TestCase):
             [],
             stale_drops("SELECT COUNT(*) FROM pg_depend;\nRAISE EXCEPTION 'x';\n"),
             msg="the markers alone are not a drop, and a check that invents offences is not a check",
+        )
+
+    def test_the_bridge_columns_year_is_the_year_its_guard_checks(self) -> None:
+        """`external_density_2022` earns its suffix, inside one file.
+
+        The column name is a claim about the data (the year the registered contract fetched), and the
+        `DO` block is what refuses a database that disagrees. Both live in `006`, so the rot that has
+        to be prevented is the pair drifting: somebody edits the guard to accept 2023, leaves the
+        column name alone, and the report then reads a 2023 number under a 2022 label. Nothing outside
+        this file can be compared against -- `external.py` takes the period from the response and the
+        URL that carried it sits in the student's ignored local config -- so the check is that the
+        file names exactly one year, and that the name and the check agree.
+        """
+        text = (SQL_DIR / "006_external_bridge.sql").read_text(encoding="utf-8")
+        body = re.sub(r"^--.*$", "", text, flags=re.MULTILINE)
+        years = set(re.findall(r"(?<![0-9])(?:19|20)[0-9]{2}(?![0-9])", body))
+        self.assertEqual(
+            years,
+            {"2022"},
+            msg=f"the bridge speaks {sorted(years)}; one column per period means one year per file, and a "
+            "second year has to arrive as a second column with its own decision",
+        )
+        self.assertIn("AS external_density_2022", text)
+        self.assertIn("e.period <> '2022'", text)
+        self.assertNotIn(
+            "LIKE '%@2022'",
+            text,
+            "filtering by a spelled key is how the indicator name sneaks back into SQL: the guard's job is "
+            "to refuse an ambiguous pick, not to guess a string",
+        )
+
+    def test_the_bridge_does_not_touch_the_frame_it_reads_through(self) -> None:
+        """`005`'s decision, kept: the frame does not learn about the external source.
+
+        `v_feature_frame` is what `capstone features` builds and what the audit governs; a migration
+        that added columns to it would move the 29-column count the timing item quotes *and* put an
+        unverified source inside the as-of story. So the bridge is a separate view joined by
+        `order_id`, and this refuses the tempting version -- including the one where `006` merely
+        grows a `CREATE OR REPLACE VIEW capstone.v_feature_frame` "for convenience".
+        """
+        text = (SQL_DIR / "006_external_bridge.sql").read_text(encoding="utf-8")
+        for forbidden in ("CREATE OR REPLACE VIEW capstone.v_feature_frame", "ALTER VIEW", "DROP VIEW"):
+            with self.subTest(pattern=forbidden):
+                self.assertNotIn(forbidden, text)
+        created = re.findall(r"CREATE OR REPLACE VIEW capstone\.(\w+)", text)
+        self.assertEqual(created, ["v_external_feature", "v_external_feature_coverage"])
+        self.assertEqual(
+            re.findall(r"FROM (olist\.\w+)", text),
+            [],
+            "the bridge reads the frame's own views, never a source table: that is what keeps the audit "
+            "guard's denominator unchanged",
         )
 
     def test_no_star_expansion_and_no_write_against_the_source_schema(self):

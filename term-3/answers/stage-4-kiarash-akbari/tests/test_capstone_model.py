@@ -22,6 +22,7 @@ from capstone.config import load_contract
 from capstone.errors import CapstoneError, InputError, NotReadyError
 from capstone.model import (
     DENSITY_COLUMN,
+    external_readiness,
     LABEL_KEY,
     MONTH_KEY,
     PRIOR_RATE,
@@ -490,15 +491,32 @@ class ReadFrameTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.features.connect = self.original_connect
 
-    def feed(self, values: list[tuple]) -> None:
+    def feed(self, values: list[tuple], *, bridge: bool = True, columns: list[str] | None = None) -> None:
+        """Script what the database answers, including the catalog probe ``read_frame`` may issue.
+
+        ``bridge`` is what ``to_regclass`` returns -- ``False`` is the fresh clone that never applied
+        ``sql/006``, and it is the case the whole ``auto`` mode exists for. ``columns`` replaces the
+        result's column names, which is how a test says "this read carried the external columns".
+        """
         from capstone import features
 
-        description = [type("Column", (), {"name": name})() for name in self.COLUMNS]
+        names = columns if columns is not None else self.COLUMNS
+        description = [type("Column", (), {"name": name})() for name in names]
         test = self
 
         class Cursor:
+            def __init__(self) -> None:
+                self.asked_about_the_catalog = False
+
             def execute(self, sql):
                 test.sql.append(sql)
+                self.asked_about_the_catalog = "to_regclass" in sql
+                return len(values)
+
+            def fetchone(self):
+                if self.asked_about_the_catalog:
+                    return (bridge,)
+                return values[0] if values else None
 
             def fetchall(self):
                 return values
@@ -526,7 +544,8 @@ class ReadFrameTests(unittest.TestCase):
             self.feed([("o1", 1.0, 0.0, True, 2, 1, True, "2018-06")])
             with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
                 frame = read_frame(config)
-            sql = self.sql[0]
+            self.assertIn("to_regclass", self.sql[0], msg="the catalog is asked before the data is read")
+            sql = self.sql[-1]
             self.assertIn("capstone.v_feature_frame", sql)
             self.assertIn("capstone.v_order_label", sql)
             self.assertNotIn("v_decision_moment", sql)
@@ -534,6 +553,105 @@ class ReadFrameTests(unittest.TestCase):
             self.assertEqual(frame.labels, [True])
             self.assertEqual(frame.months, ["2018-06"])
             self.assertEqual(self.closed, [True], msg="a frame reader that leaks connections is a bug")
+
+    def test_the_bridge_join_rides_along_when_the_view_is_there(self) -> None:
+        """``auto`` + an applied ``sql/006``: the density column enters the frame by name.
+
+        The frame's columns are what the scorer sees, so this is the assertion that the ablation has
+        two lists to differ over -- and the refusal of the next test is its pair.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            wide = self.COLUMNS + ["external_matched", "external_density_2022"]
+            values = [("o1", 1.0, 0.0, True, 2, 1, True, "2018-06", True, 12.4)]
+            self.feed(values, columns=wide)
+            with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+                frame = read_frame(config)
+            self.assertIn("capstone.v_external_feature", self.sql[-1])
+            self.assertIn(DENSITY_COLUMN, frame.columns)
+            self.assertEqual(frame.feature_sets()["density_only"][-1], DENSITY_COLUMN)
+
+    def test_a_database_without_the_bridge_answers_with_no_external_columns(self) -> None:
+        """The fresh clone: the read still works, and the ablation has nothing to measure.
+
+        This is the case a driver error would describe worst -- ``relation capstone.v_external_feature
+        does not exist`` reads like a broken migration, when the truth is ``sql/006`` has not been
+        applied here. One catalog statement decides that, and the frame comes back with the 29
+        internal features and no external block.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            self.feed([("o1", 1.0, 0.0, True, 2, 1, True, "2018-06")], bridge=False)
+            with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+                frame = read_frame(config)
+            self.assertNotIn("v_external_feature", self.sql[-1])
+            self.assertNotIn(DENSITY_COLUMN, frame.columns)
+            self.assertEqual(
+                list(frame.feature_sets()),
+                ["no_external", "with_external"],
+                msg="no signal means no density-only arm, and no arm invented",
+            )
+            self.assertEqual(
+                [s for s in self.sql if "to_regclass" in s],
+                [self.sql[0]],
+                msg="one catalog lookup, before the data read, not after",
+            )
+
+    def test_required_refuses_a_database_that_cannot_answer_the_ablation(self) -> None:
+        """``external="required"`` is what a reviewer runs when the table must include the signal.
+
+        A missing migration is a step to take, so the refusal names the file; a driver error about a
+        missing relation is not, and that is the whole difference this mode exists to keep.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            self.feed([("o1", 1.0, 0.0, True, 2, 1, True, "2018-06")], bridge=False)
+            with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+                with self.assertRaises(NotReadyError) as caught:
+                    read_frame(config, external="required")
+            self.assertIn("sql/006_external_bridge.sql", str(caught.exception))
+            self.assertEqual(len(self.sql), 1, msg="the refusal is before the data read, not after it")
+
+    def test_the_matched_filter_and_the_join_are_decided_together(self) -> None:
+        """Restricting rows is only meaningful while the column that restricts them is being read.
+
+        ``require_matched`` under ``external="off"`` would be a predicate on a table the query does
+        not join -- the SQL would still parse on some servers and return a quietly wrong population,
+        which is the kind of bug a review cannot see in a diff.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            wide = self.COLUMNS + ["external_matched", "external_density_2022"]
+            self.feed([("o1", 1.0, 0.0, True, 2, 1, True, "2018-06", True, 12.4)], columns=wide)
+            with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+                frame = read_frame(config, require_matched=True)
+            self.assertIn("WHERE x.external_matched", self.sql[-1])
+            self.assertIn(DENSITY_COLUMN, frame.columns)
+            with self.assertRaises(InputError) as caught:
+                read_frame(config, external="off", require_matched=True)
+            self.assertIn("matched rows of nothing", str(caught.exception))
+
+    def test_an_unknown_mode_is_refused_rather_than_defaulted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            with self.assertRaises(InputError) as caught:
+                read_frame(config, external="maybe")
+            self.assertIn("auto, off, required", str(caught.exception))
+
+    def test_dropping_an_external_column_that_was_never_read_says_so(self) -> None:
+        """The ``omit`` refusal gains the one fact that makes it actionable.
+
+        "the frame does not have it" is true and useless when the reason is that the join was
+        skipped; the message has to say which of the two happened, or the reader omits the name
+        forever and the ablation silently becomes a no-op.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            self.feed([("o1", 1.0, 0.0, True, 2, 1, True, "2018-06")], bridge=False)
+            with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+                with self.assertRaises(InputError) as caught:
+                    read_frame(config, omit=[DENSITY_COLUMN])
+            self.assertIn("not in this read at all", str(caught.exception))
 
     def test_an_omit_list_that_names_nothing_in_the_frame_is_a_refusal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -570,6 +688,271 @@ class ReadFrameTests(unittest.TestCase):
                     read_frame(config)
             self.assertIn("CAPSTONE_DATABASE_URI", str(caught.exception))
             self.assertIn("model step", str(caught.exception))
+
+
+class RefusalModeTests(unittest.TestCase):
+    """One unusable arm must not delete the measured ones -- and must not be smoothed over either.
+
+    This is the mode the ablation harness needs: a signal joined for most but not all orders leaves
+    NULLs that ``numeric`` rightly refuses, and a table where that kills the baseline rows too would
+    report nothing at all. ``on_refusal="record"`` keeps the refusal in the row, where the report can
+    print it as a blank with a reason; the default stays ``"raise"``, because a caller who wants a
+    guarantee should not have to remember to ask for it.
+    """
+
+    def frame(self, *, density: list[float | None]) -> LabeledFrame:
+        rows = [
+            {
+                "order_id": f"o{index}",
+                "promise_days": float(index),
+                "is_negative": index % 2 == 0,
+                "worst_score": 2 if index % 2 == 0 else 4,
+                "review_count": 1,
+                "has_review": True,
+                MONTH_KEY: "2018-06",
+                DENSITY_COLUMN: value,
+            }
+            for index, value in enumerate(density, start=1)
+        ]
+        return LabeledFrame.of(rows, ("promise_days", DENSITY_COLUMN))
+
+    def two_families(self) -> list[Scorer]:
+        return [
+            Scorer.family("linear.perfect", PerfectScorer()),
+            Scorer.family("tree.inverse", InverseScorer()),
+        ]
+
+    def test_the_default_still_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            frame = self.frame(density=[1.0, None, 3.0, 4.0])
+            with self.assertRaises(InputError) as caught:
+                train(config, frame, scorers=self.two_families(), share=0.5)
+            self.assertIn(DENSITY_COLUMN, str(caught.exception))
+
+    def test_record_mode_keeps_the_healthy_rows_and_marks_the_rest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            frame = self.frame(density=[1.0, 2.0, 3.0, 4.0])
+            result = train(
+                config, frame, scorers=self.two_families(), share=0.5, on_refusal="record"
+            )
+            self.assertEqual(result["refused_runs"], [])
+            self.assertEqual(result["ablation"]["status"], "measured")
+            self.assertEqual(
+                len(result["ablation"]["contrasts"]),
+                len({run["scorer"] for run in result["runs"]}),
+                msg="one contrast per scorer, the baseline included",
+            )
+            self.assertEqual(
+                {contrast["kind"] for contrast in result["ablation"]["contrasts"]},
+                {"rule", "family"},
+                msg="the harness needs the kind to know which zero means something",
+            )
+            for contrast in result["ablation"]["contrasts"]:
+                self.assertIsNotNone(contrast["delta_auc"])
+                self.assertIn("not a measured lift", result["ablation"]["reading"])
+
+            broken = self.frame(density=[1.0, None, 3.0, 4.0])
+            recorded = train(
+                config, broken, scorers=self.two_families(), share=0.5, on_refusal="record"
+            )
+            families = [run for run in recorded["runs"] if run["kind"] == "family"]
+            refused = recorded["refused_runs"]
+            self.assertEqual(
+                {run["feature_set"] for run in families if "error" not in run}, {"no_external"}
+            )
+            self.assertEqual(
+                {run["feature_set"] for run in refused},
+                {"with_external", "density_only"},
+                msg="exactly the arms that read the NULL column refuse",
+            )
+            self.assertEqual(
+                {run["scorer"] for run in recorded["runs"] if "error" not in run},
+                {"prior_rate", "linear.perfect", "tree.inverse"},
+                msg="a rule reads no matrix, so the baseline survives in every arm",
+            )
+            for run in refused:
+                self.assertIsNone(run["quota"])
+                self.assertIsNone(run["auc"])
+                self.assertEqual(run["scores"], [])
+                self.assertIn("NULL", run["error"])
+            self.assertEqual(
+                recorded["ablation"]["status"],
+                "partial",
+                msg="one measured contrast (the baseline's, which is zero by construction) and refused "
+                "family rows -- neither 'measured' nor 'refused' would be true",
+            )
+            self.assertIn("with_external", str(recorded["ablation"]["refused"]))
+            self.assertEqual(
+                {c["kind"] for c in recorded["ablation"]["contrasts"]},
+                {"rule"},
+                msg="the only contrast left is the vacuous one, and the row says so",
+            )
+
+    def test_the_best_run_never_comes_from_a_refused_row(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            frame = self.frame(density=[1.0, None, 3.0, 4.0])
+            result = train(
+                config, frame, scorers=self.two_families(), share=0.5, on_refusal="record"
+            )
+            self.assertNotIn("error", result["best"])
+            self.assertEqual(result["best"]["feature_set"], "no_external")
+
+    def test_everything_refusing_is_said_as_a_missing_table(self) -> None:
+        """Not a table of None values: a refusal that names the first reason.
+
+        A caller who passed ``record`` to a frame nobody can score would otherwise read back a
+        structure with ``runs`` full of errors and ``best`` missing -- which is a bug report, not a
+        result. So the roster here has no baseline to fall back on: with only the two families, every
+        row refuses, and the refusal is the answer.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            rows = [
+                {
+                    "order_id": f"o{index}",
+                    "promise_days": None,
+                    "is_negative": index % 2 == 0,
+                    "worst_score": 2 if index % 2 == 0 else 4,
+                    "review_count": 1,
+                    "has_review": True,
+                    MONTH_KEY: "2018-06",
+                }
+                for index in range(1, 5)
+            ]
+            frame = LabeledFrame.of(rows, ("promise_days",))
+            with self.assertRaises(InputError) as caught:
+                train(
+                    config,
+                    frame,
+                    scorers=self.two_families(),
+                    baseline_rules=(),
+                    share=0.5,
+                    on_refusal="record",
+                )
+            self.assertIn("runs refused", str(caught.exception))
+            self.assertIn("NULL", str(caught.exception))
+
+    def test_a_baseline_survives_a_feature_that_no_model_can_read(self) -> None:
+        """Why ``record`` exists at all: the rate operations can act on is still measured.
+
+        ``prior_rate`` never builds a matrix, so a column of NULLs stops the families and not the
+        baseline. Reporting "nothing was measured" there would be a false confession, and reporting
+        the baseline as a model would be worse -- hence the ``kind`` on both sides of the split.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            rows = [
+                {
+                    "order_id": f"o{index}",
+                    "promise_days": None,
+                    "is_negative": index % 2 == 0,
+                    "worst_score": 2 if index % 2 == 0 else 4,
+                    "review_count": 1,
+                    "has_review": True,
+                    MONTH_KEY: "2018-06",
+                }
+                for index in range(1, 5)
+            ]
+            frame = LabeledFrame.of(rows, ("promise_days",))
+            result = train(
+                config, frame, scorers=self.two_families(), share=0.5, on_refusal="record"
+            )
+            self.assertEqual({run["kind"] for run in result["refused_runs"]}, {"family"})
+            self.assertEqual(
+                {run["kind"] for run in result["runs"] if "error" not in run}, {"rule"}
+            )
+            self.assertEqual(result["best"]["kind"], "rule")
+            self.assertEqual(result["ablation"]["status"], "refused")
+
+    def test_an_unknown_refusal_mode_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = decided_config(Path(tmp))
+            with self.assertRaises(InputError) as caught:
+                train(
+                    config,
+                    self.frame(density=[1.0, 2.0, 3.0, 4.0]),
+                    scorers=self.two_families(),
+                    on_refusal="ignore",
+                )
+            self.assertIn("honest", str(caught.exception))
+
+
+class ExternalReadinessTests(unittest.TestCase):
+    """The one reader that tells a missing migration apart from a signal with nothing in it."""
+
+    def setUp(self) -> None:
+        from capstone import features
+
+        self.features = features
+        self.original = features.connect
+
+    def tearDown(self) -> None:
+        self.features.connect = self.original
+
+    def script(self, *, bridge: bool, valued: int, rows: int = 100) -> None:
+        class Cursor:
+            def __init__(self) -> None:
+                self.mode = "catalog"
+
+            def execute(self, sql):
+                self.mode = "catalog" if "to_regclass" in sql else "coverage"
+                return 1
+
+            def fetchone(self):
+                if self.mode == "catalog":
+                    return (bridge,)
+                return (rows, rows, valued, valued / rows)
+
+            def close(self) -> None:
+                return None
+
+            @property
+            def description(self):
+                # the coverage view's own four names: the reader zips what the server says it
+                # returned, exactly like read_frame, rather than trusting an order in this file
+                return [
+                    type("Column", (), {"name": name})()
+                    for name in ("frame_rows", "matched_rows", "valued_rows", "value_share")
+                ]
+
+        class Connection:
+            def cursor(self):
+                return Cursor()
+
+            def close(self):
+                return None
+
+        self.features.connect = lambda uri, **kwargs: Connection()
+
+    def config(self) -> object:
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        return decided_config(Path(holder.name))
+
+    def test_no_bridge_names_the_migration(self) -> None:
+        self.script(bridge=False, valued=0)
+        with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+            report = external_readiness(self.config())  # type: ignore[arg-type]
+        self.assertFalse(report["view_present"])
+        self.assertIn("sql/006_external_bridge.sql", report["note"])
+
+    def test_a_bridge_with_no_values_is_not_a_zero(self) -> None:
+        self.script(bridge=True, valued=0)
+        with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+            report = external_readiness(self.config())  # type: ignore[arg-type]
+        self.assertTrue(report["view_present"])
+        self.assertIn("refused and not zero", report["note"])
+
+    def test_a_partial_signal_reports_the_population_it_covers(self) -> None:
+        self.script(bridge=True, valued=93, rows=100)
+        with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
+            report = external_readiness(self.config())  # type: ignore[arg-type]
+        self.assertIn("93 of 100", report["note"])
+        self.assertIn("the report has to say so", report["note"])
+        self.assertEqual(report["coverage"]["valued_rows"], 93)
 
 
 if __name__ == "__main__":

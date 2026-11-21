@@ -18,6 +18,11 @@ What it deliberately does not do:
 
 * it does not zero-fill or drop NULLs -- ``numeric`` refuses them, and :option:`--omit` is where a
   decision to leave a column out gets recorded, so the report can print what was excluded;
+* the external signal is read through the bridge view of ``sql/006`` (see ``decisions.md`` §13), never
+  by editing ``v_feature_frame``. A database where the bridge is absent, or present with no matched
+  rows, is a *reported* state: every family refuses on a NULL column, so this runs ``train`` with
+  ``on_refusal="record"`` and prints which arms refused and what the coverage view counted. A refusal
+  is not a zero, and a coverage of zero is not a lift;
 * it does not claim a lift; section 4 prints differences and the sentence that qualifies them;
 * it does not fail when scikit-learn is missing. The two families are the point of that section, so
   it says the module is not importable and exits 0 -- a machine without the project's lock has not
@@ -40,8 +45,10 @@ from capstone.errors import CapstoneError  # noqa: E402
 from capstone.exit_codes import ExitCode  # noqa: E402
 from capstone.model import (  # noqa: E402
     DENSITY_COLUMN,
+    EXTERNAL_MODES,
     PRIOR_RATE,
     Scorer,
+    external_readiness,
     label_definition,
     read_frame,
     train,
@@ -105,6 +112,19 @@ def main(argv: list[str] | None = None) -> int:
         help="override the operational quota for this run (default: capacity.share from config)",
     )
     parser.add_argument(
+        "--external",
+        choices=EXTERNAL_MODES,
+        default="auto",
+        help="auto: join the bridge view of sql/006 if the database has it; off: never join it; "
+        "required: refuse if it is missing",
+    )
+    parser.add_argument(
+        "--require-matched",
+        action="store_true",
+        help="keep only the orders the bridge matched -- this changes the population, so n_orders "
+        "below is read beside this flag",
+    )
+    parser.add_argument(
         "--omit",
         default="",
         help="comma-separated frame columns to leave out of every feature set, e.g. the ones with NULLs",
@@ -123,7 +143,12 @@ def main(argv: list[str] | None = None) -> int:
 
     omit = tuple(name for name in args.omit.split(",") if name.strip())
     try:
-        frame = read_frame(config, omit=omit)
+        frame = read_frame(
+            config,
+            omit=omit,
+            external=args.external,
+            require_matched=args.require_matched,
+        )
     except CapstoneError as exc:
         print(f"\nerror: {exc}")
         return int(ExitCode.CONFIG)
@@ -136,6 +161,17 @@ def main(argv: list[str] | None = None) -> int:
     labelled = sum(1 for row in frame.rows if row["is_negative"] is not None)
     print(f"  labelled rows: {labelled}  (unlabelled = D2's separate population, reported as a count)")
     print(f"  external columns in the frame: {', '.join(frame.external_columns()) or 'none'}")
+    if args.external != "off":
+        # a second catalog/aggregate read, never a frame read: this is the sentence that tells the
+        # reader whether the numbers below come from a signal or from an empty bridge
+        ready = external_readiness(config)
+        print(f"  bridge: {ready['note']}")
+        if ready["coverage"] is not None:
+            cov = ready["coverage"]
+            print(
+                f"  bridge coverage: {cov['matched_rows']} of {cov['frame_rows']} orders matched, "
+                f"{cov['valued_rows']} carry a value"
+            )
     if skipped:
         print(f"  families NOT measured here: {', '.join(skipped)}")
         print("  sections 2 to 4 still run for the baseline alone, and every family row is absent")
@@ -145,7 +181,11 @@ def main(argv: list[str] | None = None) -> int:
     for name, columns in frame.feature_sets().items():
         print(f"  {name:<14} {len(columns)} columns: {', '.join(columns)}")
     if DENSITY_COLUMN not in frame.columns:
-        print(f"  note: {DENSITY_COLUMN} is not in the frame, so the density-only contrast is absent")
+        print(f"  note: {DENSITY_COLUMN} is not in this read, so the density-only contrast is absent")
+        if args.external == "off":
+            print("        --external=off asked for that; the frame itself was left alone by design")
+        else:
+            print("        apply sql/006_external_bridge.sql and re-run -- 003 and 005 never put it here")
 
     try:
         result = train(
@@ -155,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
             baseline_rules=(PRIOR_RATE,),
             share=args.share,
             omit=omit,
+            # record, not raise: on a database whose bridge is empty the NULL column makes every
+            # family refuse, and a traceback there would hide the one number worth printing -- the
+            # coverage above -- behind an exit code. train() still refuses to rank a refused row.
+            on_refusal="record",
         )
     except CapstoneError as exc:
         print(f"\nerror: {exc}")
@@ -209,6 +253,19 @@ def main(argv: list[str] | None = None) -> int:
                 f"{bullet(run['quota']['recall'])}   delta "
                 f"{bullet(subtract(run['quota']['recall'], pair['quota']['recall']))}"
             )
+    for refused in result["refused_runs"]:
+        print(
+            f"  refused: {refused['scorer']} on {refused['feature_set']}: {refused['error'].splitlines()[0]}"
+        )
+    # one word, four states, and a sentence that does not let the vacuous one read as a finding
+    status = result["ablation"]["status"]
+    gloss = {
+        "measured": "both arms of every row below were scored",
+        "partial": "some arms refused -- the differences printed are only the pairs that were scored",
+        "refused": "no arm was scored, so this section carries no difference at all",
+        "absent": "no scorer ran on both feature sets, so there was nothing to compare",
+    }[status]
+    print(f"  ablation status: {status} -- {gloss}")
     print(f"  reading: {result['ablation']['reading']}")
 
     rule("5. the capacity table, from the best run's own scores")
@@ -224,6 +281,10 @@ def main(argv: list[str] | None = None) -> int:
 
     checks = [
         ("every run has a quota row", all("quota" in run for run in result["runs"])),
+        (
+            "a refused run is never the best row",
+            "error" not in result["best"] and result["best"]["auc"] is not None,
+        ),
         (
             "the ablation is a difference of rows in section 2, not a new measurement",
             all(any(r["scorer"] == c["scorer"] for r in result["runs"]) for c in contrasts),
