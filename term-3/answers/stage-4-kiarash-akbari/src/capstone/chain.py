@@ -103,7 +103,10 @@ CHAIN: tuple[Step, ...] = (
         checklist=("4.1", "4.2"),
     ),
     Step(name="features", phase=4, entrypoint="capstone.features:run", checklist=("5.1", "5.3")),
-    Step(name="model", phase=5, entrypoint="capstone.model:train", checklist=("6.1", "6.2")),
+    # ``model`` points at ``run``, not at ``train``: the arithmetic of phase 5 is written and
+    # tested, and the step still cannot finish until the config names its two families and the
+    # scored frame has a place to live -- see the placeholder's docstring for the pairing.
+    Step(name="model", phase=5, entrypoint="capstone.model:run", checklist=("6.1", "6.2")),
     Step(name="capacity-list", phase=5, entrypoint="capstone.capacity:report", checklist=("6.3",)),
 )
 

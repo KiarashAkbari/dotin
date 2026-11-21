@@ -45,6 +45,21 @@ LATER_DOCS = ("report.md", "decisions.md", "manager_summary.md", "requirements.t
 TRACKED_TABLE_EXCEPTIONS = {"term-3/answers/stage-4-kiarash-akbari/docs/evidence/column_audit.csv": 65_536}
 #: extensions that mean "the data itself", whatever the file is called
 DATA_SUFFIXES = (".csv", ".ipynb", ".zip", ".parquet", ".joblib")
+#: the only two ``.ipynb`` paths this tree may ever track, named by the delivery guide's "this
+#: challenge's deliverables" section (`04`, and `AGENTS.md` 6.6). They are phase 5-7 products, so
+#: the names are recorded here before the files exist: the guard treats a notebook as data -- which
+#: it is, once it holds cell outputs over 800k orders -- and the brief asks for two of them. Without
+#: a named slot those two requirements contradict each other, and the resolution a reader reaches in
+#: a hurry is the bad one: widen ``DATA_SUFFIXES`` and lose the data rule with it.
+NOTEBOOK_DELIVERABLES = frozenset(
+    {
+        "term-3/answers/stage-4-kiarash-akbari/01_exploration.ipynb",
+        "term-3/answers/stage-4-kiarash-akbari/02_system.ipynb",
+    }
+)
+#: empty until those phases land. Adding a notebook means adding its exact path here -- one
+#: deliberate line, rather than inventing a rule -- and the test below refuses a stale or wider entry.
+NOTEBOOK_EXCEPTIONS: frozenset = frozenset()
 
 
 def ignored(relative: str) -> bool:
@@ -132,6 +147,24 @@ class CodeLanguageTest(unittest.TestCase):
                 self.assertRegex(first, r"[A-Za-z]")
 
 
+def tracked_data_files() -> list[str]:
+    """Every path git carries under stage 4 that looks like data by its extension.
+
+    A helper rather than two copies of the same ``git ls-files`` pipeline: the raw-data rule and the
+    notebook slots have to look at the same listing, or a file can be legal to one test and an
+    offender to the other, which is how an exemption ends up meaning nothing.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "term-3/answers/stage-4-kiarash-akbari"],
+        cwd=helpers.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line.endswith(DATA_SUFFIXES)]
+
+
+
 class NoRawDataTest(unittest.TestCase):
     def test_no_csv_or_notebook_is_tracked_under_stage_4(self) -> None:
         """No raw data in Git, with one named exception, and the exception is checked too.
@@ -140,15 +173,9 @@ class NoRawDataTest(unittest.TestCase):
         ``TRACKED_TABLE_EXCEPTIONS``), and a rule a build has to route around is a rule
         nobody follows. So the exemption is explicit, pathed, and capped.
         """
-        result = subprocess.run(
-            ["git", "ls-files", "term-3/answers/stage-4-kiarash-akbari"],
-            cwd=helpers.REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        tracked = [line for line in result.stdout.splitlines() if line.endswith(DATA_SUFFIXES)]
-        offenders = [line for line in tracked if line not in TRACKED_TABLE_EXCEPTIONS]
+        allowed = TRACKED_TABLE_EXCEPTIONS.keys() | NOTEBOOK_EXCEPTIONS
+        tracked = tracked_data_files()
+        offenders = [line for line in tracked if line not in allowed]
         self.assertEqual(offenders, [])
         for path, ceiling in TRACKED_TABLE_EXCEPTIONS.items():
             with self.subTest(path=path):
@@ -165,6 +192,48 @@ class NoRawDataTest(unittest.TestCase):
                     header,
                     "table,column,available_at,at_approval,source,verdict",
                     "the exempt CSV must be the audit table, header included",
+                )
+
+    def test_the_notebook_exception_slots_match_the_brief(self) -> None:
+        """The two notebooks are a *recorded* absence, not a forgotten one.
+
+        Three failure modes are worth pinning, and each is one a real build hits: an exception that is
+        wider than the two names (that is the data rule, gone); a notebook on disk that nobody
+        registered (that is the delivered-but-invisible case, since ``git`` will not track it without a
+        deliberate line); and a registered slot whose file has vanished (a hole waiting for a
+        filename). Checklist 9.1 and 9.2 own the status text; this owns the mechanism, in ASCII,
+        because no Persian belongs in a source file.
+        """
+        self.assertTrue(
+            NOTEBOOK_EXCEPTIONS <= NOTEBOOK_DELIVERABLES,
+            "only the two notebooks the brief names may be exempted; a third is a data drop in disguise",
+        )
+        self.assertEqual(
+            NOTEBOOK_DELIVERABLES,
+            frozenset(
+                {
+                    "term-3/answers/stage-4-kiarash-akbari/01_exploration.ipynb",
+                    "term-3/answers/stage-4-kiarash-akbari/02_system.ipynb",
+                }
+            ),
+            "the slots drifted from the two files the brief asks for",
+        )
+        on_disk = sorted(
+            path.relative_to(helpers.REPO_ROOT).as_posix() for path in STAGE.rglob("*.ipynb")
+        )
+        self.assertEqual(
+            on_disk,
+            sorted(NOTEBOOK_EXCEPTIONS),
+            "a notebook on disk must be registered in NOTEBOOK_EXCEPTIONS, and every registered path "
+            "must exist -- a slot kept after its file is gone is a hole waiting for a filename",
+        )
+        for path in sorted(NOTEBOOK_EXCEPTIONS):
+            with self.subTest(registered=path):
+                self.assertIn(
+                    path,
+                    tracked_data_files(),
+                    "registered and not tracked is half a delivery: the file is on this machine and "
+                    "will never reach a reviewer, which is the mistake the exemption exists to prevent",
                 )
 
     def test_the_gitignore_carries_the_rules_the_test_relies_on(self) -> None:

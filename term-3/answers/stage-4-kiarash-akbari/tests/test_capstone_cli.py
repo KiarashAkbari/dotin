@@ -79,6 +79,9 @@ class ChainPlanTest(unittest.TestCase):
         self.assertTrue(rows["features"]["ready"])
         self.assertEqual(rows["features"]["reason"], "")
         self.assertFalse(rows["model"]["ready"])
+        # still a placeholder, and still worth asserting after phase 5 landed: the step is
+        # ``model:run``, whose body is blocked on the config and on the list writer -- see
+        # the docstring of that function for what exactly is missing
         self.assertIn("placeholder", rows["model"]["reason"])
         # Where the chain stops is a fact about the interpreter, not about this code: the two stage-1
         # steps count as ready exactly when ``find_spec`` can see that package, so in a venv that has
@@ -99,8 +102,12 @@ class ChainPlanTest(unittest.TestCase):
 
     def test_the_placeholders_refuse_with_their_phase(self) -> None:
         # features.build is absent on purpose: its body landed with phase 4, and
-        # LayerStatusTests in test_capstone_features.py pins that it no longer carries the marker
-        for function in (model.train, predict._score_rows):
+        # LayerStatusTests in test_capstone_features.py pins that it no longer carries the marker.
+        # model.train is absent for the same reason and with the opposite sign -- phase 5 wrote it,
+        # so the list names the step that wraps it (model.run) instead. A placeholder that stops
+        # being one has to leave this list deliberately, in the commit that replaces it, or the
+        # test quietly stops covering anything.
+        for function in (model.run, predict._score_rows):
             with self.assertRaises(NotReadyError) as caught:
                 function(None, [])  # type: ignore[arg-type]
             self.assertIn("ROADMAP phase", str(caught.exception))
