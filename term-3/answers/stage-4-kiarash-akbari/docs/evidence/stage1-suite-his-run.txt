@@ -1,0 +1,40 @@
+stage-1's own suite, run by the student on the tree that carries the external source -- recorded, not
+reproduced
+==========================================================================================================
+
+Provenance. Supplied by Kiarash Akbari in chat on 2026-10-26, from his machine, against his own stage-1
+checkout at the pushed tree `c7375a7`. This is the witness checklist item ۱۲.۶ asks for — «the stage-1 tests
+must not break for a new source» — and it is the only run of that suite anybody has. Nothing in this file was
+produced in the agent's sandbox, and no number here was recomputed.
+
+[his report, transcribed as sent]
+  برای ۱۲.۶ (اجرای تست‌های stage-1):
+
+  دستور: cd ../stage-1-kiarash-akbari && PYTHONPATH=src:tests .venv/bin/python3 -m unittest discover -s tests -t .
+
+  نتیجه: Ran 265 tests in 7.921s — OK (skipped=2)
+
+[end of his report]
+
+What the sentence in the checklist demands, and what this answers. ۱۲.۶ is not «stage-1 was re-audited»:
+it is «a new source did not force glue into stage-1, and stage-1's tests still pass». Both halves are here.
+The run is the suite as it ships in `stage-1-kiarash-akbari`, from that directory, with its own `.venv`, so
+the interpreter is the one stage-1 was built with; nothing about the external source is imported by it. The
+`265` is that checkout's own test count and is left exactly that — this repository's stage-1 directory is a
+different checkout and runs `170`, so the two numbers are not a disagreement and neither is a progress bar.
+
+The two skips are unnamed in the report, so this file does not guess what they skip. `unittest` prints them
+by name when the run is made with `-v`, and the reason is in his checkout, one command away — recording a
+count without inventing an explanation for the remainder is the whole of what this row can do.
+
+What the sandbox could not do, said out loud. Running stage-1's suite here fails before testing anything:
+`PYTHONPATH=src:tests python3 -m unittest discover -s tests -t .` answers `Ran 170 tests … FAILED
+(errors=12)` and every one of the `12` is a `ModuleNotFoundError` (`pandas` and friends), because this
+sandbox's interpreter has no such packages and `pip install` is refused under PEP 668. That is an absence of
+an environment, not a failure of the contract, and it is recorded here so the item does not quietly rest on
+a green-looking number that was never produced.
+
+Read together with `decisions.md` §۱۲, which is where the contract is now written down: ۱۲.۶ closes because
+the source contract lives in one file, is stated as shapes rather than values, and needed no change in
+stage-1 — and the suite that would have caught a glue-patch is the one above, green on the machine that owns
+it.

@@ -1,0 +1,40 @@
+access to the official IBGE endpoints, attested by the student from his own network -- recorded, not
+reproduced
+==========================================================================================================
+
+Provenance. Supplied by Kiarash Akbari in chat on 2026-10-26, from the same machine and the same tree
+(`c7375a7`) as `stage1-suite-his-run.txt`. Checklist item ۱۲.۲ asks that the source be free and reachable
+without access restrictions from Iran, or that its replacement be recorded. This file is the attestation
+for the first half; the second half is already registered (see below).
+
+[his report, transcribed as sent]
+  برای ۱۲.۲ (شهادت دسترسی شبکه به IBGE):
+
+  https://servicodados.ibge.gov.br/api/v3/agregados/4714/periodos/2022/variaveis/614?localidades=N6 → HTTP 200
+  https://servicodados.ibge.gov.br/api/v1/localidades/municipios/1100015 → HTTP 200
+
+  (علاوه بر این، اجرای قبلی --fetch --load روی olist_phase0_test هم در patch-0017-student-run.txt ثبت
+  شده است.)
+
+[end of his report]
+
+What two `200` lines are worth here, stated narrowly. They are the two URLs the shipped code actually
+calls — the aggregate body and the administrative municipality list — from a network where the item's
+question is a live one. A `200` on those two is the honest form of «reachable and no key asked», and it is
+the third such datum: `patch-0017-student-run.txt` already records `fetched: 5570 row(s)` /
+`stored: 5570 row(s)` taken from his machine against `olist_phase0_test`, which is a bulk fetch of the same
+shape rather than a single probe.
+
+What is deliberately not claimed. No rate limit was studied, no quota, no behaviour under a burst of
+requests; the project's own budget (at most one extra reference request per run, and only when the signal
+response omits the state) is a constraint we imposed, not evidence that the host would have refused more.
+One request from his network and one bulk fetch do not describe a service's policy, and this file does not
+pretend to.
+
+The alternative is recorded, because the item asks for it in the same breath. `apisidra.ibge.gov.br/values/t/4714/n6/all/v/93/p/2022`
+is the SIDRA mirror named in `decisions.md` §۸ as the escape hatch; switching to it is a new `CONTRACTS`
+entry plus a config URL, not a rewrite, and that is the whole of what «یا جایگزینش ثبت شود» requires. The
+mirror answers with a different shape (`resultados[].series[]` at the top level, per
+`docs/evidence/ibge-4714-614-sample.json`), which is exactly why the parser reads paths instead of assuming
+one key — see `decisions.md` §۱۲.
+
