@@ -1,0 +1,137 @@
+========================================================================
+feature frame performance -- timing, plan, and what the plan says about the ceiling
+========================================================================
+tree: KiarashAkbari/dotin @ HEAD a42126b, no tracked file differs from HEAD -- the plan below is that tree's plan
+
+database: olist_phase0_test
+server:   PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+source tables (the frame's inputs, so a small number here means a small measurement):
+      olist.customers                        99441 rows
+      olist.geolocation                     738332 rows
+      olist.monthly_category_snapshot            0 rows
+      olist.order_items                     112650 rows
+      olist.order_reviews                    99224 rows
+      olist.orders                           99441 rows
+      olist.payments                        103886 rows
+      olist.product_category_name_translation        71 rows
+      olist.products                         32951 rows
+      olist.sellers                           3095 rows
+      olist.v_delivered_orders               96470 rows
+      olist.v_order_item_sales              112101 rows
+
+frame: 99281 rows, 32 columns, 29 feature columns (the brief asks for at least 10)
+
+timing, 5 runs, cold first (the ceiling in config is 500 ms)
+      timed (what capstone features judges)    mean 488.6 ms | cold 523.2 ms | warm 480.0 ms | min 451.9 | max 523.2
+      read (with transfer)                     mean 3783.7 ms | cold 3631.6 ms | warm 3821.8 ms | min 3531.2 | max 4072.6
+
+------------------------------------------------------------------------
+1. EXPLAIN (ANALYZE, BUFFERS) -- the statement the ceiling is measured on
+------------------------------------------------------------------------
+  Finalize Aggregate  (cost=60113.19..60113.20 rows=1 width=8) (actual time=584.041..594.438 rows=1 loops=1)
+    Buffers: shared hit=36563 read=3988, temp read=659 written=1144
+    ->  Gather  (cost=60112.98..60113.19 rows=2 width=8) (actual time=584.029..594.430 rows=3 loops=1)
+          Workers Planned: 2
+          Workers Launched: 2
+          Buffers: shared hit=36563 read=3988, temp read=659 written=1144
+          ->  Partial Aggregate  (cost=59112.98..59112.99 rows=1 width=8) (actual time=562.222..562.235 rows=1 loops=3)
+                Buffers: shared hit=36563 read=3988, temp read=659 written=1144
+                ->  Parallel Hash Right Join  (cost=27458.81..59009.59 rows=41356 width=0) (actual time=287.385..559.884 rows=33094 loops=3)
+                      Hash Cond: ((agg.order_id)::text = (o_1.order_id)::text)
+                      Buffers: shared hit=36563 read=3988, temp read=659 written=1144
+                      ->  Hash Join  (cost=8857.60..39753.92 rows=36544 width=259) (actual time=159.830..401.655 rows=32889 loops=3)
+                            Hash Cond: ((i.order_id)::text = (agg.order_id)::text)
+                            Buffers: shared hit=22812 read=3988, temp read=659 written=1144
+                            ->  Merge Join  (cost=1.06..30801.45 rows=36544 width=132) (actual time=5.664..221.327 rows=32889 loops=3)
+                                  Merge Cond: ((o_2.order_id)::text = (i.order_id)::text)
+                                  Buffers: shared hit=11837 read=1169
+                                  ->  Parallel Index Only Scan using pk_orders on orders o_2  (cost=0.42..5647.96 rows=41434 width=33) (actual time=5.165..65.749 rows=33147 loops=3)
+                                        Heap Fetches: 0
+                                        Buffers: shared hit=7 read=1169
+                                  ->  Unique  (cost=0.65..23588.16 rows=87705 width=135) (actual time=0.300..126.294 rows=98628 loops=3)
+                                        Buffers: shared hit=11830
+                                        ->  Incremental Sort  (cost=0.65..23306.53 rows=112650 width=135) (actual time=0.299..108.656 rows=112607 loops=3)
+                                              Sort Key: i.order_id, ((i.price + i.freight_value)) DESC, i.order_item_id
+                                              Presorted Key: i.order_id
+                                              Full-sort Groups: 3499  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
+                                              Buffers: shared hit=11830
+                                              Worker 0:  Full-sort Groups: 3496  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
+                                              Worker 1:  Full-sort Groups: 3500  Sort Method: quicksort  Average Memory: 29kB  Peak Memory: 29kB
+                                              ->  Index Scan using pk_order_items on order_items i  (cost=0.42..19110.35 rows=112650 width=135) (actual time=0.049..48.638 rows=112613 loops=3)
+                                                    Buffers: shared hit=11732
+                            ->  Hash  (cost=7760.23..7760.23 rows=87705 width=33) (actual time=153.111..153.112 rows=98666 loops=3)
+                                  Buckets: 131072  Batches: 1  Memory Usage: 7287kB
+                                  Buffers: shared hit=10975 read=2819, temp read=659 written=1144
+                                  ->  Subquery Scan on agg  (cost=6006.12..7760.23 rows=87705 width=33) (actual time=67.784..120.034 rows=98666 loops=3)
+                                        Buffers: shared hit=10975 read=2819, temp read=659 written=1144
+                                        ->  HashAggregate  (cost=6006.12..6883.18 rows=87705 width=193) (actual time=67.782..111.815 rows=98666 loops=3)
+                                              Group Key: i_1.order_id
+                                              Batches: 5  Memory Usage: 8241kB  Disk Usage: 1792kB
+                                              Buffers: shared hit=10975 read=2819, temp read=659 written=1144
+                                              Worker 0:  Batches: 5  Memory Usage: 8241kB  Disk Usage: 1776kB
+                                              Worker 1:  Batches: 5  Memory Usage: 8241kB  Disk Usage: 1776kB
+                                              ->  Seq Scan on order_items i_1  (cost=0.00..5724.50 rows=112650 width=33) (actual time=0.035..18.984 rows=112650 loops=3)
+                                                    Buffers: shared hit=10975 read=2819
+                      ->  Parallel Hash  (cost=18084.26..18084.26 rows=41356 width=33) (actual time=126.661..126.669 rows=33094 loops=3)
+                            Buckets: 131072  Batches: 1  Memory Usage: 8064kB
+                            Buffers: shared hit=13751
+                            ->  Parallel Hash Join  (cost=13313.68..18084.26 rows=41356 width=33) (actual time=66.802..114.076 rows=33094 loops=3)
+                                  Hash Cond: ((o_1.order_id)::text = (o.order_id)::text)
+                                  Buffers: shared hit=13751
+                                  ->  Parallel Hash Right Join  (cost=8764.42..13426.44 rows=41356 width=33) (actual time=51.168..86.826 rows=33094 loops=3)
+                                        Hash Cond: ((o_3.order_id)::text = (o_1.order_id)::text)
+                                        Buffers: shared hit=10134
+                                        ->  Parallel Hash Join  (cost=4216.13..8356.03 rows=41356 width=172) (actual time=29.383..51.402 rows=33094 loops=3)
+                                              Hash Cond: ((o_3.customer_id)::text = (c.customer_id)::text)
+                                              Buffers: shared hit=6517
+                                              ->  Parallel Seq Scan on orders o_3  (cost=0.00..4031.34 rows=41356 width=74) (actual time=0.451..6.140 rows=33094 loops=3)
+                                                    Filter: (order_approved_at IS NOT NULL)
+                                                    Rows Removed by Filter: 53
+                                                    Buffers: shared hit=3617
+                                              ->  Parallel Hash  (cost=3484.95..3484.95 rows=58495 width=66) (actual time=27.286..27.287 rows=33147 loops=3)
+                                                    Buckets: 131072  Batches: 1  Memory Usage: 11168kB
+                                                    Buffers: shared hit=2900
+                                                    ->  Parallel Seq Scan on customers c  (cost=0.00..3484.95 rows=58495 width=66) (actual time=0.374..5.026 rows=33147 loops=3)
+                                                          Buffers: shared hit=2900
+                                        ->  Parallel Hash  (cost=4031.34..4031.34 rows=41356 width=66) (actual time=21.440..21.440 rows=33094 loops=3)
+                                              Buckets: 131072  Batches: 1  Memory Usage: 11168kB
+                                              Buffers: shared hit=3617
+                                              ->  Parallel Seq Scan on orders o_1  (cost=0.00..4031.34 rows=41356 width=66) (actual time=0.679..6.310 rows=33094 loops=3)
+                                                    Filter: (order_approved_at IS NOT NULL)
+                                                    Rows Removed by Filter: 53
+                                                    Buffers: shared hit=3617
+                                  ->  Parallel Hash  (cost=4031.34..4031.34 rows=41434 width=33) (actual time=15.084..15.087 rows=33147 loops=3)
+                                        Buckets: 131072  Batches: 1  Memory Usage: 8096kB
+                                        Buffers: shared hit=3617
+                                        ->  Parallel Seq Scan on orders o  (cost=0.00..4031.34 rows=41434 width=33) (actual time=0.169..3.549 rows=33147 loops=3)
+                                              Buffers: shared hit=3617
+  Planning:
+    Buffers: shared hit=32
+  Planning Time: 1.129 ms
+  Execution Time: 596.630 ms
+   spill: temp read 659 blocks / written 1146, worst batch count 1 (> 1 means work_mem sent a hash to disk)
+
+   hottest nodes by self time (a parent is not the work when its child is):
+      Hash Join: 173.071 ms (31% of the query), 33094 rows x 3 loops, buffers 37391 hit / 3158 read
+      Hash Join: 166.318 ms (30% of the query), 32889 rows x 3 loops, buffers 23640 hit / 3158 read
+      Aggregate: 90.39 ms (16% of the query), 98666 rows x 3 loops, buffers 10636 hit / 3158 read
+
+------------------------------------------------------------------------
+2. the same frame read whole, which is what a person waits for
+------------------------------------------------------------------------
+   spill: temp read 13356 blocks / written 16140, worst batch count 2 (> 1 means work_mem sent a hash to disk); spilling at: Sort, Hash
+      Hash Join: 955.452 ms self time, 99281 rows
+      Hash Join: 707.684 ms self time, 99281 rows
+      Aggregate: 546.931 ms self time, 13368 rows
+
+------------------------------------------------------------------------
+verdict
+------------------------------------------------------------------------
+within the ceiling: the timed mean is 488.6 ms against 500 ms. The whole-frame read is 3783.7 ms, which the ceiling does not cover and the brief does not ask about -- recorded so nobody has to guess it later.
+
+numbers, machine-readable: {"ceiling_ms": 500, "database": "olist_phase0_test", "frame_columns": 32, "frame_features": 29, "frame_rows": 99281, "over_ceiling_ms": null, "read_mean_ms": 3783.7, "timed_mean_ms": 488.6}
+
+statistics: 2 of 14 olist tables have never been ANALYZEd, so their row estimates are guesses -- the timings are still real, the plan beside them is partly not
+protocol note: no cache clearing was attempted -- a script that cannot write
+/proc/sys/vm/drop_caches reports warm timings, and says so, rather than implying a cold
+run it did not perform.

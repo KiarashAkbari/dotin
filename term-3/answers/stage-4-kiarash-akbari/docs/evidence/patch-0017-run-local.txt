@@ -1,0 +1,73 @@
+
+------------------------------------------------------------------------
+1. the offline suite, plain interpreter, no database and no network
+------------------------------------------------------------------------
+$ /home/rash/Code/PROJECTS/dotin/term-3/answers/stage-1-kiarash-akbari/.venv/bin/python3 -m
+  ... unittest discover -s tests -t .
+  | 
+  | ...............................................................................................
+  | ----------------------------------------------------------------------
+  | Ran 308 tests in <t>s
+  | 
+  | OK (skipped=14)
+  [exit 0] the whole suite, with MunicipalityNameTests in it
+  check[offline suite green]: ok -- exit 0
+  tally: 308 tests -- OK (skipped=14)
+
+------------------------------------------------------------------------
+2. the three codes the student printed, through the old parser and the new one
+------------------------------------------------------------------------
+  pre-patch src: the previous commit's own `src/`, unpacked into a scratch directory
+$ python3 probe.py <scratch>/signal.json <scratch>/reference.json
+  | reference type: bare sigla
+  | normalize keyword: uf_by_code
+  | 3 row(s), 3 codes consulted
+  |   1100015  alta floresta d'oeste - ro|ro  3.04  <- display suffix
+  |   3550308  sao paulo - sp|sp  1094.75  <- display suffix
+  |   3304557  rio de janeiro - rj|rj  None  <- display suffix
+  | rows whose key still carries the answer's suffix: 3 of 3
+  [exit 0] what 0016 produced: rows that exist and keys that join to nothing
+  check[the old tree fetched rows]: ok -- exit 0
+  check[and every key carried the display suffix]: ok -- rows whose key still carries the answer's 
+  check[sao paulo - sp|sp is what their table held]: ok
+$ python3 probe.py <scratch>/signal.json <scratch>/reference.json
+  | reference type: Municipality(sigla, name)
+  | normalize keyword: municipality_by_code
+  | 3 row(s), 3 codes consulted
+  |   1100015  alta floresta d'oeste|ro  3.04
+  |   3550308  sao paulo|sp  1094.75
+  |   3304557  rio de janeiro|rj  None
+  | rows whose key still carries the answer's suffix: 0 of 3
+  [exit 0] what 0017 produces: the same three rows, keyed the way 005 spells them
+  check[this tree fetched rows]: ok -- exit 0
+  check[key sao paulo|sp]: ok
+  check[key rio de janeiro|rj]: ok
+  check[key alta floresta d'oeste|ro]: ok
+  check[and no row carries the suffix any more]: ok -- rows whose key still carries the answer's su
+
+------------------------------------------------------------------------
+3. the shipped CLI: the budget is unchanged, and the report says where the names came from
+------------------------------------------------------------------------
+$ python3 -m capstone external --fetch --config config/patch-0017-evidence.toml
+  | fetched: 3 row(s)
+  |       uf map: 3 of 3 municipality codes and their names from http://127.0.0.1:<port>/municipios
+  | match rate: not read (pass --report or --load to ask the database)
+  [exit 0] the answer is named but not located, so the list is asked for both halves
+  check[--fetch exits 0]: ok -- exit 0
+  check[it counted the rows]: ok
+  check[the report line says the names came from the list]: ok --       uf map: 3 of 3 municipality
+  check[two requests, no more]: ok -- signal, municipios
+$ python3 -m capstone external --fetch --config config/patch-0017-evidence.toml
+  | fetched: 3 row(s)
+  | match rate: not read (pass --report or --load to ask the database)
+  [exit 0] a body that answers both questions: no second request, and no name rewrite
+  check[--fetch on a complete body exits 0]: ok -- exit 0
+  check[exactly one request for a body that needs nothing]: ok -- with-uf
+  check[and no uf-map line is printed]: ok
+
+------------------------------------------------------------------------
+4. the join, measured on a real server: the same fetch, keyed two ways
+------------------------------------------------------------------------
+  skipped: pgserver is not importable on this interpreter (No module named 'pgserver').
+  install it -- pip install pgserver 'psycopg[binary]' -- and re-run; a machine without
+  the dev extra has not failed a measurement, so this section exits 0.
