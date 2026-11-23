@@ -37,7 +37,10 @@ from .cost import (
     metrics,
     select_threshold,
 )
-from .prep import PrepStats
+from .prep import PrepPlan, PrepStats
+from .prep import apply as prep_apply
+from .prep import fit as prep_fit
+from .prep import for_family as prep_for_family
 
 CV_FOLDS = 5
 
@@ -51,6 +54,8 @@ class Family:
     requires_scaling: bool
     scaling_note: str
     family_note: str
+    #: whether the estimator can be fitted on NaN (the ``native`` prep plan)
+    handles_missing: bool = False
 
     def make(self, *, seed: int) -> object:
         return self.build(random_state=seed)
@@ -97,8 +102,24 @@ FAMILIES: dict[str, Family] = {
             "changes neither the split nor the prediction; NaNs are also handled natively"
         ),
         family_note="non-linear and interaction-carrying, which is what a credit file implies",
+        handles_missing=True,
     ),
 }
+
+#: share of a fold's training rows held back to choose that fold's threshold
+INNER_FRACTION = 0.25
+
+
+def plan_for(family: str, plan: PrepPlan) -> PrepPlan:
+    """The missing-data plan with the scaling this family needs (``requires_scaling``)."""
+    spec = FAMILIES[family]
+    return prep_for_family(
+        plan, scaled=spec.requires_scaling, handles_missing=spec.handles_missing
+    )
+
+
+def compatible(family: str, plan: PrepPlan) -> bool:
+    return plan.impute != "none" or FAMILIES[family].handles_missing
 
 
 @dataclass(frozen=True)
@@ -173,33 +194,152 @@ def cross_validate_cost(
     folds: list[tuple[pd.Index, pd.Index]],
     *,
     plan: str,
+    seed: int,
     matrix: CostMatrix = CHALLENGE_MATRIX,
     fixed_threshold: float | None = None,
+    inner_fraction: float = INNER_FRACTION,
 ) -> CVResult:
-    """Fit on each fold's training half, score its held-out half, repeat.
+    """Cross-validated cost of a matrix that is already prepared.
 
-    With ``fixed_threshold`` the caller supplies the operating point the whole
-    comparison is measured at - the number the report quotes. Without it, each fold
-    picks its own cost-curve minimum, which turns the threshold's own stability into
-    a measured quantity (``threshold_std``) instead of an assumption.
+    Use :func:`cross_validate_recipe` when the preparation has fitted constants:
+    this function cannot refit them inside each fold. See ``_run_folds`` for how the
+    threshold is chosen without looking at the fold being scored.
+    """
+    matrix_X = X
+
+    def prepare(_fit_index: pd.Index) -> Callable[[pd.Index], pd.DataFrame]:
+        return lambda index: matrix_X.loc[index]
+
+    return _run_folds(
+        family,
+        X.index,
+        y,
+        folds,
+        prepare,
+        plan=plan,
+        seed=seed,
+        matrix=matrix,
+        fixed_threshold=fixed_threshold,
+        inner_fraction=inner_fraction,
+    )
+
+
+def cross_validate_recipe(
+    family: str,
+    frame: pd.DataFrame,
+    y: pd.Series,
+    folds: list[tuple[pd.Index, pd.Index]],
+    *,
+    plan: PrepPlan,
+    columns: tuple[str, ...],
+    seed: int,
+    matrix: CostMatrix = CHALLENGE_MATRIX,
+    fixed_threshold: float | None = None,
+    inner_fraction: float = INNER_FRACTION,
+) -> CVResult:
+    """Cross-validated cost of the whole recipe: prep, model, threshold.
+
+    Inside every fold the preparation is fitted on that fold's own model-fitting
+    rows - never on the rows it is scored on - and with the scaling the family needs
+    (:func:`plan_for`). That is the same boundary the final model keeps against the
+    validation and holdout splits, applied once per fold.
+    """
+    family_plan = plan_for(family, plan)
+
+    def prepare(fit_index: pd.Index) -> Callable[[pd.Index], pd.DataFrame]:
+        stats = prep_fit(frame.loc[fit_index], plan=family_plan, columns=columns)
+        names = list(stats.feature_names())
+        return lambda index: prep_apply(frame.loc[index], stats)[names]
+
+    return _run_folds(
+        family,
+        frame.index,
+        y,
+        folds,
+        prepare,
+        plan=plan.name,
+        seed=seed,
+        matrix=matrix,
+        fixed_threshold=fixed_threshold,
+        inner_fraction=inner_fraction,
+    )
+
+
+def inner_split(
+    index: pd.Index, labels: np.ndarray, *, seed: int, fraction: float = INNER_FRACTION
+) -> tuple[pd.Index, pd.Index]:
+    """Stratified (fit, threshold) split of one fold's training rows."""
+    if not 0.0 < fraction < 1.0:
+        raise ValueError("inner fraction must be between 0 and 1")
+    rng = np.random.default_rng(seed)
+    held: list[int] = []
+    for label in (0, 1):
+        positions = np.flatnonzero(labels == label)
+        rng.shuffle(positions)
+        held.extend(positions[: int(round(len(positions) * fraction))].tolist())
+    mask = np.zeros(len(index), dtype=bool)
+    mask[held] = True
+    return index[~mask], index[mask]
+
+
+def _run_folds(
+    family: str,
+    index: pd.Index,
+    y: pd.Series,
+    folds: list[tuple[pd.Index, pd.Index]],
+    prepare: Callable[[pd.Index], Callable[[pd.Index], pd.DataFrame]],
+    *,
+    plan: str,
+    seed: int,
+    matrix: CostMatrix,
+    fixed_threshold: float | None,
+    inner_fraction: float,
+) -> CVResult:
+    """Fit on each fold's training rows, score its held-out rows, repeat.
+
+    With ``fixed_threshold`` the caller supplies the operating point and the model is
+    fitted on the whole training part of the fold. Without it, the threshold must be
+    *chosen*, and it is chosen the way the final model's is: the fold's training rows
+    are split (stratified, ``inner_fraction`` held back), the model is fitted on the
+    larger part, the threshold is the cost-curve minimum on the held-back part, and
+    that same model is then scored on the fold's test rows at that threshold. The test
+    rows never influence their own operating point, so a fold's cost is an honest
+    out-of-sample number rather than the best cost achievable on rows already seen.
+
+    Every estimator gets ``random_state=seed``: the notebook's SEED is the only source
+    of randomness, and the inner splits derive from it and the fold number.
     """
     spec = FAMILIES[family]
-    index = X.index
     y_al = pd.Series(y).reindex(index).to_numpy(dtype="int64")
     results: list[FoldResult] = []
     for number, (train_index, test_index) in enumerate(folds, start=1):
-        model = spec.build(random_state=number)
-        model.fit(X.loc[train_index], y_al[_positions(index, train_index)])
-        heldout = _positions(index, test_index)
-        proba = np.asarray(
-            model.predict_proba(X.loc[test_index])[:, 1], dtype="float64"
-        )
-        truth = y_al[heldout]
+        train_labels = y_al[_positions(index, train_index)]
         if fixed_threshold is None:
-            choice: ThresholdChoice = select_threshold(truth, proba, matrix=matrix)
-            threshold = choice.threshold
+            fit_index, tune_index = inner_split(
+                train_index,
+                train_labels,
+                seed=seed + number,
+                fraction=inner_fraction,
+            )
         else:
+            fit_index, tune_index = train_index, None
+        transform = prepare(fit_index)
+        model = spec.build(random_state=seed)
+        model.fit(transform(fit_index), y_al[_positions(index, fit_index)])
+        if tune_index is None:
             threshold = float(fixed_threshold)
+        else:
+            tune_proba = np.asarray(
+                model.predict_proba(transform(tune_index))[:, 1], dtype="float64"
+            )
+            tuned: ThresholdChoice = select_threshold(
+                y_al[_positions(index, tune_index)], tune_proba, matrix=matrix
+            )
+            threshold = tuned.threshold
+        proba = np.asarray(
+            model.predict_proba(transform(test_index))[:, 1], dtype="float64"
+        )
+        truth = y_al[_positions(index, test_index)]
         choice = _choice_at(truth, proba, threshold=threshold, matrix=matrix)
         results.append(
             FoldResult(

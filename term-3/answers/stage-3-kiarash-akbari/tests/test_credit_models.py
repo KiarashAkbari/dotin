@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -43,12 +44,22 @@ from credit.models import (
     build_bundle,
     compare,
     cross_validate_cost,
+    cross_validate_recipe,
     importances,
+    inner_split,
     pick_best,
+    plan_for,
 )
 from credit.prep import INDICATOR_SUFFIX, PLANS, PrepStats
 
 SEED = 20261103
+#: the plans as the linear family uses them (log1p + z-scaling); the prep tests
+#: check the scaling arithmetic, so they need the scaled variant
+SCALED = {
+    name: plan_for("logistic", plan)
+    for name, plan in PLANS.items()
+    if plan.impute != "none"
+}
 BASE_COLUMNS = ("row_id", VIEW_TARGET_COLUMN) + tuple(MODEL_FEATURE_COLUMNS)
 
 
@@ -167,7 +178,7 @@ class PrepTests(unittest.TestCase):
     def test_the_fitted_median_is_the_training_rows_and_nothing_else(self):
         stats = prep.fit(
             self.splits.train,
-            plan=PLANS["median+indicator"],
+            plan=SCALED["median+indicator"],
             columns=MODEL_FEATURE_COLUMNS,
         )
         train_median = float(self.splits.train["monthly_income"].median())
@@ -177,9 +188,10 @@ class PrepTests(unittest.TestCase):
         self.assertNotAlmostEqual(stats.medians["monthly_income"], val_median, places=3)
 
     def test_the_valued_rows_are_left_alone_by_imputation(self):
+        # scaling without the log, so the expected value is plain z-score arithmetic
         stats = prep.fit(
             self.splits.train,
-            plan=PLANS["median+indicator"],
+            plan=replace(SCALED["median+indicator"], log_columns=()),
             columns=MODEL_FEATURE_COLUMNS,
         )
         raw = prep.apply(self.splits.validation, stats)
@@ -203,8 +215,10 @@ class PrepTests(unittest.TestCase):
             )
         )
 
-    def test_no_plan_leaves_a_single_nan_behind(self):
+    def test_no_filling_plan_leaves_a_single_nan_behind(self):
         for name, plan in PLANS.items():
+            if plan.impute == "none":
+                continue  # the native plan leaves NaN on purpose, for the trees
             with self.subTest(plan=name):
                 stats = prep.fit(
                     self.splits.train, plan=plan, columns=MODEL_FEATURE_COLUMNS
@@ -215,7 +229,7 @@ class PrepTests(unittest.TestCase):
                 )
 
     def test_the_indicator_marks_exactly_the_rows_that_were_missing(self):
-        plan = PLANS["median+indicator"]
+        plan = SCALED["median+indicator"]
         stats = prep.fit(self.splits.train, plan=plan, columns=MODEL_FEATURE_COLUMNS)
         matrix = prep.apply(self.splits.validation, stats)
         column = "monthly_income" + INDICATOR_SUFFIX
@@ -242,7 +256,7 @@ class PrepTests(unittest.TestCase):
         """
         subset = ("monthly_income", "age", "num_late_30_59")
         stats = prep.fit(
-            self.splits.train, plan=PLANS["median+indicator"], columns=subset
+            self.splits.train, plan=SCALED["median+indicator"], columns=subset
         )
         names = stats.feature_names()
         self.assertEqual(names[: len(subset)], subset)
@@ -261,7 +275,7 @@ class PrepTests(unittest.TestCase):
         frame = build_features(self.splits.train)
         stats = prep.fit(
             frame,
-            plan=PLANS["median+indicator"],
+            plan=SCALED["median+indicator"],
             columns=tuple(MODEL_FEATURE_COLUMNS) + engineered,
         )
         names = stats.feature_names()
@@ -278,11 +292,11 @@ class PrepTests(unittest.TestCase):
     def test_the_zero_plan_is_the_other_policy_and_differs(self):
         median_stats = prep.fit(
             self.splits.train,
-            plan=PLANS["median+indicator"],
+            plan=SCALED["median+indicator"],
             columns=MODEL_FEATURE_COLUMNS,
         )
         zero_stats = prep.fit(
-            self.splits.train, plan=PLANS["zero+none"], columns=MODEL_FEATURE_COLUMNS
+            self.splits.train, plan=SCALED["zero+none"], columns=MODEL_FEATURE_COLUMNS
         )
         self.assertEqual(zero_stats.medians["monthly_income"], 0.0)
         self.assertEqual(zero_stats.indicator_columns, ())
@@ -292,7 +306,7 @@ class PrepTests(unittest.TestCase):
         frame = self.splits.train.copy()
         frame["num_dependents"] = 3.0
         stats = prep.fit(
-            frame, plan=PLANS["median+indicator"], columns=MODEL_FEATURE_COLUMNS
+            frame, plan=SCALED["median+indicator"], columns=MODEL_FEATURE_COLUMNS
         )
         self.assertEqual(stats.stds["num_dependents"], 1.0)
         matrix = prep.apply(frame, stats)
@@ -301,7 +315,7 @@ class PrepTests(unittest.TestCase):
     def test_missing_columns_are_named_rather_than_silently_filled(self):
         stats = prep.fit(
             self.splits.train,
-            plan=PLANS["median+indicator"],
+            plan=SCALED["median+indicator"],
             columns=MODEL_FEATURE_COLUMNS,
         )
         with self.assertRaises(KeyError) as caught:
@@ -310,14 +324,14 @@ class PrepTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             prep.fit(
                 self.splits.train.drop(columns=["age"]),
-                plan=PLANS["median+indicator"],
+                plan=SCALED["median+indicator"],
                 columns=MODEL_FEATURE_COLUMNS,
             )
 
     def test_stats_round_trip_through_json(self):
         stats = prep.fit(
             self.splits.train,
-            plan=PLANS["median+indicator"],
+            plan=SCALED["median+indicator"],
             columns=MODEL_FEATURE_COLUMNS,
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -332,7 +346,7 @@ class PrepTests(unittest.TestCase):
     def test_audit_rows_all_come_from_the_training_split(self):
         stats = prep.fit(
             self.splits.train,
-            plan=PLANS["median+indicator"],
+            plan=SCALED["median+indicator"],
             columns=MODEL_FEATURE_COLUMNS,
         )
         table = prep.audit(stats)
@@ -377,7 +391,7 @@ class ModelTests(unittest.TestCase):
     def test_cross_validation_reports_every_fold_and_the_arithmetic_holds(self):
         folds = split.stratified_folds(self.splits.train, seed=SEED, k=3)
         result = cross_validate_cost(
-            "logistic", self.X, self.y, folds, plan=self.plan.name, fixed_threshold=0.5
+            "logistic", self.X, self.y, folds, plan=self.plan.name, seed=SEED, fixed_threshold=0.5
         )
         self.assertEqual(len(result.folds), 3)
         for fold in result.folds:
@@ -395,7 +409,7 @@ class ModelTests(unittest.TestCase):
     def test_a_fold_scores_itself_and_never_another_folds_rows(self):
         folds = split.stratified_folds(self.splits.train, seed=SEED, k=3)
         result = cross_validate_cost(
-            "logistic", self.X, self.y, folds, plan=self.plan.name
+            "logistic", self.X, self.y, folds, plan=self.plan.name, seed=SEED
         )
         self.assertEqual(
             sum(fold.rows for fold in result.folds), len(self.splits.train)
@@ -414,7 +428,7 @@ class ModelTests(unittest.TestCase):
             self.X,
             self.y,
             folds,
-            plan=self.plan.name,
+            plan=self.plan.name, seed=SEED,
             matrix=CHALLENGE_MATRIX,
         )
         mild = cross_validate_cost(
@@ -422,7 +436,7 @@ class ModelTests(unittest.TestCase):
             self.X,
             self.y,
             folds,
-            plan=self.plan.name,
+            plan=self.plan.name, seed=SEED,
             matrix=FLATTER_MATRIX,
         )
         self.assertLess(mild.mean_cost, harsh.mean_cost)
@@ -430,14 +444,14 @@ class ModelTests(unittest.TestCase):
     def test_compare_sorts_and_pick_best_breaks_ties_by_spread(self):
         folds = split.stratified_folds(self.splits.train, seed=SEED, k=3)
         logistic = cross_validate_cost(
-            "logistic", self.X, self.y, folds, plan=self.plan.name, fixed_threshold=0.5
+            "logistic", self.X, self.y, folds, plan=self.plan.name, seed=SEED, fixed_threshold=0.5
         )
         boosted = cross_validate_cost(
             "boosted_trees",
             self.X,
             self.y,
             folds,
-            plan=self.plan.name,
+            plan=self.plan.name, seed=SEED,
             fixed_threshold=0.5,
         )
         table = compare([boosted, logistic])
@@ -463,7 +477,7 @@ class ModelTests(unittest.TestCase):
     def test_permutation_importance_finds_the_signal_column(self):
         folds = split.stratified_folds(self.splits.train, seed=SEED, k=3)
         result = cross_validate_cost(
-            "logistic", self.X, self.y, folds, plan=self.plan.name, fixed_threshold=0.5
+            "logistic", self.X, self.y, folds, plan=self.plan.name, seed=SEED, fixed_threshold=0.5
         )
         threshold = float(np.mean([fold.threshold for fold in result.folds]))
         model = FAMILIES["logistic"].make(seed=SEED)
@@ -475,6 +489,86 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(table.iloc[0]["feature"], "monthly_income")
         self.assertGreater(table.iloc[0]["importance_mean"], 0.0)
         self.assertTrue(table["importance_mean"].is_monotonic_decreasing)
+
+
+class HonestCrossValidationTests(unittest.TestCase):
+    """A fold's threshold comes from its training rows; prep is refitted per fold."""
+
+    def setUp(self):
+        self.frame = build_features(synthetic_frame(rows=360))
+        self.splits = split.stratified_split(self.frame, seed=SEED)
+        self.train = self.splits.train
+        self.y = prep.target(self.train)
+        self.columns = tuple(MODEL_FEATURE_COLUMNS) + tuple(s.name for s in FEATURES)
+        self.folds = split.stratified_folds(self.train, seed=SEED, k=3)
+
+    def run_recipe(self, y: pd.Series, family: str = "logistic"):
+        return cross_validate_recipe(
+            family,
+            self.train,
+            y,
+            self.folds,
+            plan=PLANS["median+indicator"],
+            columns=self.columns,
+            seed=SEED,
+        )
+
+    def test_the_scored_rows_cannot_move_their_own_threshold(self):
+        """Flip every label in fold 1's test rows: its threshold must not change.
+
+        Under the old rule the threshold was the cost minimum on those very rows,
+        so changing their labels moved it; now only the fold's training rows can.
+        """
+        honest = self.run_recipe(self.y)
+        flipped = self.y.copy()
+        test_rows = self.folds[0][1]
+        flipped.loc[test_rows] = 1 - flipped.loc[test_rows]
+        changed = self.run_recipe(flipped)
+        self.assertEqual(honest.folds[0].threshold, changed.folds[0].threshold)
+        self.assertNotEqual(honest.folds[0].counts, changed.folds[0].counts)
+
+    def test_the_inner_split_is_stratified_disjoint_and_seeded(self):
+        index = self.train.index
+        labels = self.y.to_numpy()
+        fit_a, tune_a = inner_split(index, labels, seed=SEED)
+        fit_b, tune_b = inner_split(index, labels, seed=SEED)
+        self.assertTrue(fit_a.equals(fit_b) and tune_a.equals(tune_b))
+        self.assertEqual(len(set(fit_a) & set(tune_a)), 0)
+        self.assertEqual(len(fit_a) + len(tune_a), len(index))
+        self.assertGreater(int(self.y.loc[tune_a].sum()), 0)
+
+    def test_the_recipe_is_deterministic_under_one_seed(self):
+        first = self.run_recipe(self.y, "boosted_trees")
+        second = self.run_recipe(self.y, "boosted_trees")
+        self.assertEqual(first.as_dict(), second.as_dict())
+
+    def test_scaling_follows_the_family_not_the_missing_data_plan(self):
+        plan = PLANS["zero+indicator"]
+        linear = plan_for("logistic", plan)
+        trees = plan_for("boosted_trees", plan)
+        self.assertTrue(linear.scale)
+        self.assertIn("debt_ratio", linear.log_columns)
+        self.assertFalse(trees.scale)
+        self.assertEqual(trees.log_columns, ())
+        self.assertEqual((linear.impute, linear.indicator), (plan.impute, plan.indicator))
+
+    def test_the_native_plan_is_refused_for_a_family_that_cannot_read_nan(self):
+        with self.assertRaises(ValueError):
+            plan_for("logistic", PLANS["native"])
+        trees = plan_for("boosted_trees", PLANS["native"])
+        stats = prep.fit(self.train, plan=trees, columns=self.columns)
+        matrix = prep.apply(self.splits.validation, stats)
+        self.assertGreater(int(matrix["monthly_income"].isna().sum()), 0)
+
+    def test_the_logistic_recipe_actually_scales_its_matrix(self):
+        stats = prep.fit(
+            self.train,
+            plan=plan_for("logistic", PLANS["median+none"]),
+            columns=self.columns,
+        )
+        matrix = prep.apply(self.train, stats)[list(stats.feature_names())]
+        means = matrix.mean().abs()
+        self.assertLess(float(means.max()), 1e-6)
 
 
 class BundleTests(unittest.TestCase):
