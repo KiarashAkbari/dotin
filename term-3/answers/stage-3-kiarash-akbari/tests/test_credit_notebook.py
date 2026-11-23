@@ -155,7 +155,8 @@ OPTIONAL_DEPENDENCY_CALLS = {
     "read_html(": "lxml",
 }
 
-#: the one pair of modules the delivery does not pin, and the one file allowed to use them
+#: the notebook-runner modules: pinned in requirements.txt (a Run All needs them), but
+#: only the runner script may import them - the package and the notebook never do
 TOOLING_UNPINNED = {"nbclient", "nbformat"}
 TOOLING_FILES = {"scripts/run_notebook.py"}
 
@@ -745,26 +746,20 @@ class LockClosureTests(unittest.TestCase):
             # what it is missing - so say which and stop, rather than report a gap in a
             # file that is fine.
             self.skipTest(f"install the lock first, missing: {', '.join(absent)}")
+        from packaging.requirements import Requirement
+
         gaps: list[str] = []
         for dist in sorted(pins):
-            requires = metadata.requires(dist) or []
-            for line in requires:
-                if "extra ==" in line:
+            for line in metadata.requires(dist) or []:
+                requirement = Requirement(line)
+                # a marker that is false here (an extra, another OS, PyPy) is not a
+                # dependency of this install; evaluating it beats string-matching it
+                if requirement.marker is not None and not requirement.marker.evaluate(
+                    {"extra": ""}
+                ):
                     continue
-                spec = line.split(";")[0].strip()
-                if not spec:
-                    continue
-                name = (
-                    spec.replace(" ", "")
-                    .split(">=")[0]
-                    .split("==")[0]
-                    .split("<")[0]
-                    .split("!")[0]
-                    .split("[")[0]
-                    .lower()
-                    .replace("_", "-")
-                )
-                if name and name not in pins:
+                name = requirement.name.lower().replace("_", "-")
+                if name not in pins:
                     gaps.append(f"{dist} requires {name}")
         self.assertEqual(
             gaps,

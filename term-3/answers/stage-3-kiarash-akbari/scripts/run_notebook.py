@@ -100,19 +100,18 @@ def absolute_paths(notebook) -> list[str]:
 def _jupyter():
     """Import the notebook toolchain, or explain the alternative.
 
-    ``nbclient`` and ``nbformat`` arrive with Jupyter, so they are the one pair of names
-    this project does not pin: nothing graded imports them - not the package, not the
-    notebook - and an environment built from requirements.txt can deliver everything by
-    pressing Restart & Run All in the UI. Importing them here rather than at module scope
-    is what keeps that true, and a test says so.
+    ``nbclient``, ``nbformat`` and ``ipykernel`` are pinned in requirements.txt, because a
+    Run All of the delivered notebook needs them. Nothing in the package or the notebook
+    imports them; importing them here rather than at module scope keeps the runner's
+    own tooling out of the graded path, and a test says so.
     """
     try:
         import nbformat
         from nbclient import NotebookClient
     except ImportError as exc:
         raise SystemExit(
-            f"the runner needs nbclient/nbformat ({exc}); install jupyter, or run "
-            "solution.ipynb with Restart & Run All in the notebook UI"
+            f"the runner needs nbclient/nbformat ({exc}); pip install -r requirements.txt, "
+            "or run solution.ipynb with Restart & Run All in the notebook UI"
         ) from exc
     return nbformat, NotebookClient
 
