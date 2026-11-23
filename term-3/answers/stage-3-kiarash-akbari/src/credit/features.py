@@ -218,6 +218,12 @@ def _income_not_reported(frame: pd.DataFrame) -> pd.Series:
     return numeric(frame, "monthly_income").isna().astype("float64")
 
 
+def _late_history_coded(frame: pd.DataFrame) -> pd.Series:
+    values = frame[list(LATE_PAYMENT_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+    # the view turns 96/98 into NULL, and the file never leaves these columns blank,
+    # so "all three buckets missing" is exactly "the bureau sent a code"
+    return values.isna().all(axis=1).astype("float64")
+
 
 FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec(
@@ -286,6 +292,18 @@ FEATURES: tuple[FeatureSpec, ...] = (
         requires_evidence="missing_income_may_be_informative",
         leakage_boundary="a presence indicator cannot leak an outcome, but it must not be kept "
         "if the missingness test shows a random pattern",
+    ),
+    FeatureSpec(
+        name="late_history_coded",
+        hypothesis=(
+            "a 96/98 code in the late-payment buckets is a separate bureau state, not zero "
+            "lateness; keeping it as a flag stops any imputation from erasing it"
+        ),
+        source_columns=tuple(LATE_PAYMENT_COLUMNS),
+        decision_time_available=True,
+        availability_note="the code is on the bureau report at the decision",
+        transform=_late_history_coded,
+        leakage_boundary="a row-wise flag on the report as received; no outcome is involved",
     ),
 )
 

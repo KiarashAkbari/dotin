@@ -200,6 +200,34 @@ class FeatureMathTests(unittest.TestCase):
         self.assertEqual(float(built["income_not_reported"].iloc[1]), 0.0)
 
 
+class LateCodeFlagTests(unittest.TestCase):
+    """96/98 survive as a flag, whatever the imputation plan later does to the counts."""
+
+    def test_a_coded_row_is_flagged_and_a_clean_zero_is_not(self):
+        built = build_features(
+            frame(
+                [
+                    {TARGET: 1, "num_late_30_59": 98.0, "num_late_90": 98.0, "num_late_60_89": 98.0},
+                    {TARGET: 0, "num_late_30_59": 0.0, "num_late_90": 0.0, "num_late_60_89": 0.0},
+                ]
+            )
+        )
+        self.assertEqual(built["late_history_coded"].tolist(), [1.0, 0.0])
+
+    def test_the_view_shape_is_flagged_too(self):
+        """The view already returns the codes as NULL; the flag must still fire."""
+        built = build_features(
+            frame([{TARGET: 1, "num_late_30_59": None, "num_late_90": None, "num_late_60_89": None}])
+        )
+        self.assertEqual(float(built["late_history_coded"].iloc[0]), 1.0)
+
+    def test_one_missing_bucket_is_not_a_code(self):
+        built = build_features(
+            frame([{TARGET: 0, "num_late_30_59": None, "num_late_90": 0.0, "num_late_60_89": 0.0}])
+        )
+        self.assertEqual(float(built["late_history_coded"].iloc[0]), 0.0)
+
+
 class DomainPolicyTests(unittest.TestCase):
     """Impossible values become missing; the row stays and nothing is clipped."""
 
