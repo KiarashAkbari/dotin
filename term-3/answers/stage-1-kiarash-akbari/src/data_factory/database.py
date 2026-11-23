@@ -24,7 +24,14 @@ from sqlalchemy.engine import URL
 
 
 from .config import Config
-from .errors import DataError
+from .errors import (
+    ConfigError,
+    DatabaseDataError,
+    DatabaseSchemaError,
+    DatabaseUnavailableError,
+    DataError,
+    PipelineError,
+)
 from .outputs import (
     COUNT_PREFIX,
     DATASET_FILENAME,
@@ -116,10 +123,53 @@ LOAD_LOCK_KEY = "data_factory:load"
 
 
 
+# SQLSTATE class 42 is "syntax error or access rule violation"; 42P01 (undefined
+# table), 3F000 (undefined schema) and 42883 (undefined function) all mean the
+# migrations that create the object were not applied, which is a setup problem.
+MISSING_OBJECT_SQLSTATES = frozenset({"42P01", "3F000", "42883", "42704"})
+
+
+def _first_line(exc: BaseException) -> str:
+    text = str(getattr(exc, "orig", None) or exc).strip()
+    return text.splitlines()[0] if text else type(exc).__name__
+
+
+def translate_database_error(exc: sa.exc.SQLAlchemyError) -> PipelineError:
+    """Map a driver error to the project hierarchy, so it gets an exit code.
+
+    Unreachable server or lost connection -> DatabaseUnavailableError (69, the
+    same class as an unreachable API); a missing table, schema or function ->
+    DatabaseSchemaError (78, migrations not applied); a rejected value or
+    constraint -> DatabaseDataError (65). Anything else stays a PipelineError
+    (1) but still prints one readable line instead of a traceback.
+    """
+    message = _first_line(exc)
+    sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+    context = {"error": message}
+    if sqlstate:
+        context["sqlstate"] = sqlstate
+    if isinstance(exc, sa.exc.NoSuchTableError):
+        return DatabaseSchemaError(
+            "Database table not found; apply the SQL migrations first",
+            context={"table": str(exc)},
+        )
+    if isinstance(exc, (sa.exc.OperationalError, sa.exc.InterfaceError)) and (
+        sqlstate is None or sqlstate.startswith("08") or sqlstate.startswith("57P")
+    ):
+        return DatabaseUnavailableError("Database is unavailable", context=context)
+    if sqlstate in MISSING_OBJECT_SQLSTATES:
+        return DatabaseSchemaError(
+            "Database object not found; apply the SQL migrations first", context=context
+        )
+    if isinstance(exc, (sa.exc.IntegrityError, sa.exc.DataError)):
+        return DatabaseDataError("Database rejected the data", context=context)
+    return PipelineError("Database error", context=context)
+
+
 def build_database_url(cfg: Config) -> URL:
     """Keep the password outside versioned configuration."""
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
     parsed = urlsplit(cfg.database.url)
     return URL.create(
         drivername=parsed.scheme,
@@ -274,7 +324,7 @@ def load_olist(
 ) -> dict[str, dict[str, int]]:
     """Replace Olist tables atomically; dispose an owned engine on every path."""
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
 
     def _load(target_connection: sa.Connection) -> dict[str, dict[str, int]]:
         clear_olist_tables(target_connection)
@@ -883,7 +933,7 @@ def load_stage1_sink(
     keeps the right to roll the whole thing back.
     """
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
     paths = factory_sink_paths(cfg.database.stage1_curated_dir)
     if connection is not None:
         truncate_factory(connection)

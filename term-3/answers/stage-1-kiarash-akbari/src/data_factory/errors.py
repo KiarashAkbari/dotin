@@ -26,3 +26,17 @@ class QuarantineThresholdError(DataError):
 
 class SchemaDriftError(DataError):
     """The source no longer matches the expected columns or value types."""
+
+
+class DatabaseUnavailableError(PipelineError):
+    """The database server could not be reached or dropped the connection."""
+
+    exit_code = ExitCode.NETWORK
+
+
+class DatabaseSchemaError(ConfigError):
+    """The database lacks an object the run needs: migrations were not applied."""
+
+
+class DatabaseDataError(DataError):
+    """The database rejected a value or a row (constraint, type, range)."""

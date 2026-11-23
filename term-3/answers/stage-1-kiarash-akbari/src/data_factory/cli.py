@@ -18,6 +18,7 @@ from .database import (
     reset_factory_schema,
     reset_olist_schema,
     sql_migration_files,
+    translate_database_error,
 )
 from .errors import ConfigError, DataError, PipelineError
 from .exit_codes import ExitCode
@@ -211,7 +212,12 @@ def _load_database(
     with_sink: bool = True,
 ) -> None:
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
+    if reset and not apply_migrations:
+        raise ConfigError(
+            "--reset drops the schema and --skip-sql-migrations would not recreate it; "
+            "use one of them"
+        )
 
     lock_engine = sa.create_engine(build_database_url(cfg))
     lock_connection = lock_engine.connect()
@@ -322,10 +328,16 @@ def _load_database(
             lock_connection.rollback()
             raise
     finally:
-        lock_connection.execute(
-            sa.text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
-            {"lock_key": LOAD_LOCK_KEY},
-        )
+        try:
+            lock_connection.execute(
+                sa.text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
+                {"lock_key": LOAD_LOCK_KEY},
+            )
+        except sa.exc.SQLAlchemyError:
+            # A dead connection cannot unlock, and does not need to: a session
+            # lock ends with its session. Re-raising here would hide the error
+            # that actually stopped the run.
+            pass
         lock_connection.close()
         lock_engine.dispose()
 
@@ -357,11 +369,18 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _build(cfg, 0, utc_now_iso(), mark)
         return int(ExitCode.OK)
+    except sa.exc.SQLAlchemyError as exc:
+        return _report(translate_database_error(exc))
     except PipelineError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        if exc.context:
-            print(
-                json.dumps(exc.context, ensure_ascii=False, sort_keys=True),
-                file=sys.stderr,
-            )
-        return int(exc.exit_code)
+        return _report(exc)
+
+
+def _report(exc: PipelineError) -> int:
+    """One readable error line plus its context; the exit code names the class."""
+    print(f"error: {exc}", file=sys.stderr)
+    if exc.context:
+        print(
+            json.dumps(exc.context, ensure_ascii=False, sort_keys=True),
+            file=sys.stderr,
+        )
+    return int(exc.exit_code)
