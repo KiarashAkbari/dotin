@@ -99,6 +99,47 @@ class TrackedContractTest(unittest.TestCase):
         self.assertIn("student decisions", str(caught.exception))
 
 
+class TrackedDecidedConfigTest(unittest.TestCase):
+    """config/capstone.default.toml is what a fresh clone runs, so it must load as decided."""
+
+    def test_the_default_config_is_fully_decided(self) -> None:
+        config = load_config(helpers.DEFAULT_CONFIG)
+        self.assertEqual(config.undecided_keys(), ())
+        self.assertEqual(config.model.no_review, "separate_population")
+        self.assertEqual(config.model.no_approved_at, "drop_before_training")
+        self.assertEqual(config.model.multi_review, "worst_score_wins")
+        self.assertEqual(config.split.boundary, date(2018, 5, 31))
+
+    def test_the_default_config_names_two_model_families_and_a_validation_window(self) -> None:
+        config = load_config(helpers.DEFAULT_CONFIG)
+        self.assertGreaterEqual(len({name.split(".")[0] for name in config.model.families}), 2)
+        self.assertGreaterEqual(config.model.validation_months or 0, 1)
+        self.assertIsNotNone(config.model.random_seed)
+
+    def test_the_default_config_carries_no_credential(self) -> None:
+        text = helpers.DEFAULT_CONFIG.read_text(encoding="utf-8").lower()
+        for marker in ("password =", "postgresql://", "@localhost"):
+            self.assertNotIn(marker, text)
+
+    def test_every_default_value_is_recorded_in_decisions_md(self) -> None:
+        config = load_config(helpers.DEFAULT_CONFIG)
+        self.assertEqual(documented_decisions(helpers.STAGE_ROOT / "decisions.md", config), [])
+
+    def test_a_family_list_with_a_malformed_name_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "config"
+            root.mkdir()
+            (Path(tmp) / "decisions.md").write_text(decisions_text(), encoding="utf-8")
+            text = decided_text().replace(
+                'multi_review = "worst_score_wins"',
+                'multi_review = "worst_score_wins"\nfamilies = ["LogReg"]',
+            )
+            path = root / "capstone.toml"
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
+
+
 class DecidedConfigTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

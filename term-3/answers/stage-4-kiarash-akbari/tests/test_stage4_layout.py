@@ -66,6 +66,10 @@ NOTEBOOK_EXCEPTIONS: frozenset = frozenset(
 )
 
 
+#: the classes below ask git (check-ignore, ls-files); an exported folder has no repository
+needs_git = unittest.skipIf(helpers.REPO_ROOT is None, "not inside a git checkout")
+
+
 def ignored(relative: str) -> bool:
     """Does git's own ignore rule match this path? Checked from the repo root."""
     result = subprocess.run(
@@ -169,6 +173,7 @@ def tracked_data_files() -> list[str]:
 
 
 
+@needs_git
 class NoRawDataTest(unittest.TestCase):
     def test_no_csv_or_notebook_is_tracked_under_stage_4(self) -> None:
         """No raw data in Git, with one named exception, and the exception is checked too.
@@ -257,6 +262,7 @@ class NoRawDataTest(unittest.TestCase):
         """The one-command chain needs a tracked config to copy, so this is load-bearing."""
         self.assertTrue(ignored("term-3/answers/stage-4-kiarash-akbari/config/capstone.toml"))
         self.assertFalse(ignored("term-3/answers/stage-4-kiarash-akbari/config/capstone.example.toml"))
+        self.assertFalse(ignored("term-3/answers/stage-4-kiarash-akbari/config/capstone.default.toml"))
         self.assertFalse(ignored("term-3/answers/stage-4-kiarash-akbari/docs/REQUIREMENTS_CHECKLIST.md"))
         self.assertFalse(ignored("term-3/answers/stage-4-kiarash-akbari/docs/evidence/scaffold-run.txt"))
         self.assertTrue(ignored("term-3/answers/stage-4-kiarash-akbari/data/raw/olist_orders_demo.csv"))
@@ -321,15 +327,13 @@ class DecisionsDocumentTest(unittest.TestCase):
         line that nobody ran. Presence is a weak check -- it cannot judge the argument -- but
         its absence is exactly "the config says one thing, the record another".
         """
-        local = STAGE / "config" / "capstone.toml"
-        if not local.is_file():
-            self.skipTest(
-                "config/capstone.toml is ignored by design and absent on this machine, so "
-                "nothing is decided here and the value-token check did not run"
-            )
+        # The decided contract is tracked (config/capstone.default.toml), so this check always
+        # runs; a machine-local config/capstone.toml, when present, is checked instead because
+        # it is the one the commands would read.
+        from capstone.cli import default_config_path
         from capstone.config import documented_decisions, load_config
 
-        config = load_config(local)
+        config = load_config(default_config_path(STAGE))
         self.assertEqual(documented_decisions(STAGE / "decisions.md", config), [])
 
 

@@ -73,6 +73,13 @@ class ModelDecisions:
     no_review: str
     no_approved_at: str
     multi_review: str
+    #: the model roster as ``family.variant`` names; empty means "not chosen yet", and the model
+    #: step refuses rather than picking two families for the student
+    families: tuple[str, ...] = ()
+    #: how many trailing months of the training window are held out for model selection
+    validation_months: int | None = None
+    #: one seed for every estimator that has randomness, so a re-run reproduces the table
+    random_seed: int | None = None
 
     @property
     def undecided(self) -> tuple[str, ...]:
@@ -296,6 +303,9 @@ def load_contract(path: Path) -> CapstoneConfig:
         no_review=_policy(model_values, "model", "no_review"),
         no_approved_at=_policy(model_values, "model", "no_approved_at"),
         multi_review=_policy(model_values, "model", "multi_review"),
+        families=_families(model_values),
+        validation_months=_optional_integer(model_values, "model", "validation_months"),
+        random_seed=_optional_integer(model_values, "model", "random_seed", minimum=0),
     )
     if model.negative_max_score != NEGATIVE_MAX_SCORE:
         raise ConfigError(
@@ -322,6 +332,29 @@ def load_contract(path: Path) -> CapstoneConfig:
         budget=Budget(chain_minutes=_integer(budget_values, "budget", "chain_minutes")),
         external=external,
     )
+
+
+_FAMILY_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9_]+$")
+
+
+def _families(values: dict) -> tuple[str, ...]:
+    """``model.families``: optional, but when present a list of ``family.variant`` names."""
+    raw = values.get("families", [])
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        raise ConfigError("model.families must be an array of 'family.variant' strings")
+    names = tuple(item.strip() for item in raw)
+    bad = [name for name in names if not _FAMILY_RE.match(name)]
+    if bad:
+        raise ConfigError(f"model.families entries must look like 'logreg.c1', got {bad}")
+    if len(set(names)) != len(names):
+        raise ConfigError(f"model.families names a model twice: {list(names)}")
+    return names
+
+
+def _optional_integer(values: dict, section: str, key: str, *, minimum: int = 1) -> int | None:
+    if key not in values:
+        return None
+    return _integer(values, section, key, minimum=minimum)
 
 
 def _report_shares(values: dict, share: float) -> tuple[float, ...]:

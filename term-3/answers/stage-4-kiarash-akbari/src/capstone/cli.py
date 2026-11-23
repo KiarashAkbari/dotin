@@ -37,7 +37,9 @@ from .exit_codes import ExitCode
 from .predict import score_file
 
 #: the local file first, the tracked contract second -- the same order stage 3 uses
-CONFIG_CANDIDATES = ("capstone.toml", "capstone.example.toml")
+#: a machine-local override first (gitignored), then the decided tracked contract, then the
+#: undecided example -- so a fresh clone runs with the decisions recorded in decisions.md
+CONFIG_CANDIDATES = ("capstone.toml", "capstone.default.toml", "capstone.example.toml")
 
 
 def default_config_path(root: Path) -> Path:
@@ -48,8 +50,8 @@ def default_config_path(root: Path) -> Path:
             return candidate
     raise ConfigError(
         f"no config in {root / 'config'}; expected one of {', '.join(CONFIG_CANDIDATES)}. "
-        "A fresh clone ships only the example: copy it to capstone.toml and fill the "
-        "student decisions in (ROADMAP phase 1)"
+        "A fresh clone ships config/capstone.default.toml with the recorded decisions; "
+        "restore it from git rather than deciding again"
     )
 
 

@@ -1,0 +1,69 @@
+# Stage 4 (capstone) config -- the DECIDED, tracked, password-free contract.
+#
+# This is the file every command reads on a fresh clone (capstone.cli.CONFIG_CANDIDATES:
+# config/capstone.toml, then this file, then the undecided example). Every value below is
+# the one recorded in decisions.md; a decision changes here and there together, and
+# `capstone doctor` / tests/test_stage4_layout.py check that each value appears verbatim in
+# decisions.md. No credential lives here: the database URI comes from CAPSTONE_DATABASE_URI
+# (and the stage-1 loader reads its password from OLIST_DB_PASSWORD), so this file can be
+# committed. Machine-specific overrides go to config/capstone.toml, which stays gitignored.
+#
+[time_guard]
+# The brief's whole constraint: only what existed at this moment may be read.
+decision_column = "order_approved_at"
+# Every column the model is handed must appear in this file with a verdict and a
+# source for that verdict; the anti-leak test reads the file, so the audit is an
+# input to the pipeline and not only prose in report.md. Written in phase 2, and
+# kept under docs/evidence/ with the other witnesses rather than in config/, which
+# in this repository holds only machine-specific settings.
+audit_file = "../docs/evidence/column_audit.csv"
+
+[features]
+schema = "capstone"
+sql_migrations_dir = "../sql"
+curated_dir = "../data/curated"
+# The brief's ceilings, kept in config so the measurement scripts and the report
+# quote the same numbers instead of each hard-coding its own.
+feature_query_ms = 500
+
+[model]
+# A review is negative at score 1 or 2: the brief's definition, not a tuned value.
+negative_max_score = 2
+# D1/D2/D3, decided in decisions.md sections 1-3.
+no_review = "separate_population"
+no_approved_at = "drop_before_training"
+multi_review = "worst_score_wins"
+# The model roster (decisions.md section 14): every entry is family.variant, at least two
+# families, and model selection happens on the last `validation_months` months of the
+# training window -- never on the evaluation months after split.boundary.
+families = ["logreg.c0_1", "logreg.c1", "hgb.d3", "hgb.d6"]
+validation_months = 3
+random_seed = 20181
+
+[capacity]
+# The operational quota is the decision itself: rank, then take a share. A
+# probability threshold would answer a different question than the one asked.
+share = 0.10
+report_shares = [0.05, 0.10, 0.20]
+
+[split]
+# Time split only, on order_approved_at, inclusive of the boundary day (decisions.md
+# section 4): train <= 2018-05-31 < evaluation, which leaves three evaluation months.
+boundary = "2018-05-31"
+# The second metric is the same number on the last month of the evaluation window.
+last_month_as_secondary = true
+
+[budget]
+# 45 minutes is the whole chain from an empty environment to the final list, not
+# a per-notebook ceiling; each step's own time is measured and recorded.
+chain_minutes = 45
+
+[external]
+# decisions.md section 8: IBGE census 2010 population density per municipality
+# (agregado 1301, variable 616). 2010 is used, not 2022, because a 2022 census number did
+# not exist when a 2016-2018 order was approved.
+name = "ibge_agregados_municipio"
+url = "https://servicodados.ibge.gov.br/api/v3/agregados/1301/periodos/2010/variaveis/616?localidades=N6[all]"
+token_env = ""
+# how the signal joins to an order: a date, a place, or both.
+join_on = "city_state"
