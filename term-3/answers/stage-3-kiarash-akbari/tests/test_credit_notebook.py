@@ -1095,5 +1095,42 @@ class ArchivedEvidenceConsistencyTests(unittest.TestCase):
         self.assertTrue(all(row["threshold_source"] == "validation" for row in rows))
         self.assertEqual(rows[0]["threshold"], holdout["threshold"])
 
+
+class RunnerPathTests(unittest.TestCase):
+    """The runner refuses absolute paths in saved outputs, not only in cell sources."""
+
+    @staticmethod
+    def _notebook(source: str, output: str):
+        from types import SimpleNamespace
+
+        cell = {
+            "cell_type": "code",
+            "source": [source],
+            "execution_count": 1,
+            "outputs": [{"output_type": "stream", "name": "stderr", "text": output}],
+        }
+        return SimpleNamespace(cells=[cell])
+
+    def test_a_venv_path_in_a_warning_is_caught(self):
+        import run_notebook
+
+        hits = run_notebook.absolute_paths(
+            self._notebook("x = 1", "/tmp/v3/lib/python3.11/site-packages/sklearn/x.py:1: Warning")
+        )
+        self.assertEqual(len(hits), 1)
+        self.assertIn("output", hits[0])
+
+    def test_relative_paths_and_urls_are_fine(self):
+        import run_notebook
+
+        hits = run_notebook.absolute_paths(
+            self._notebook(
+                'Path("data/curated/model")',
+                "model: data/curated/model/model.joblib\nsee https://example.org/tmp/x",
+            )
+        )
+        self.assertEqual(hits, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
