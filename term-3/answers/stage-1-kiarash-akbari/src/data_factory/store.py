@@ -47,6 +47,11 @@ class RawPageStore:
             os.fsync(fh.fileno())
         os.replace(tmp, final)
 
+    def iter_page(self, index: int) -> Iterator[dict]:
+        with self.page_path(index).open("r", encoding="utf-8") as fh:
+            for line in fh:
+                yield json.loads(line)
+
     def iter_rows(self) -> Iterator[dict]:
         for index in range(self.completed_pages()):
             with self.page_path(index).open("r", encoding="utf-8") as fh:
