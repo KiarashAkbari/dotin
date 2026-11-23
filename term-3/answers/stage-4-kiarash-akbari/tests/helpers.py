@@ -14,7 +14,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 STAGE_ROOT = HERE.parent
 SRC = STAGE_ROOT / "src"
-REPO_ROOT = next(p for p in STAGE_ROOT.parents if (p / ".git").exists())
+#: ``None`` outside a git checkout (an exported or zipped folder): the tests that need git skip
+#: on it instead of every module failing to import with StopIteration
+REPO_ROOT = next((p for p in STAGE_ROOT.parents if (p / ".git").exists()), None)
 
 for candidate in (HERE, SRC):
     if str(candidate) not in sys.path:
@@ -22,6 +24,8 @@ for candidate in (HERE, SRC):
 
 #: the tracked contract: valid shape, deliberately undecided decisions
 EXAMPLE_CONFIG = STAGE_ROOT / "config" / "capstone.example.toml"
+#: the tracked decided contract a fresh clone runs with (decisions.md holds the reasoning)
+DEFAULT_CONFIG = STAGE_ROOT / "config" / "capstone.default.toml"
 #: stage 2's DDL, which is where the audit's denominator comes from
 STAGE2_DDL = STAGE_ROOT.parent / "stage-2-kiarash-akbari" / "sql" / "001_create_olist_schema.sql"
 
