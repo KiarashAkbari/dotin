@@ -288,3 +288,65 @@ class KeysetPagingTests(unittest.TestCase):
     def test_a_row_without_a_cursor_cannot_be_paged_past(self):
         with self.assertRaises(FetchError):
             cursor_of({"unique_key": "1"})
+
+
+class OpenWindowTests(unittest.TestCase):
+    """A second run on the same day must see cases created since the first one."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.store = RawPageStore(Path(tmp.name) / "raw")
+        self.table = LiveTable(range(25))
+        fetch_all(KeysetLive(self.table), self.store)
+        self.table.rows.append({"unique_key": "0099", "created_date": "2025-01-01T23:59:59.000"})
+
+    def test_a_closed_window_trusts_its_cache(self):
+        again = KeysetLive(self.table)
+        result = fetch_all(again, self.store)
+        self.assertTrue(result.already_complete)
+        self.assertEqual(again.cursors, [])
+
+    def test_an_open_window_refetches_the_short_last_page(self):
+        again = KeysetLive(self.table)
+        result = fetch_all(again, self.store, refresh_tail=True)
+        self.assertFalse(result.already_complete)
+        self.assertEqual(result.resumed_from_page, 2)
+        self.assertEqual(again.cursors, [cursor_of(live_row(19))])
+        keys = [r["unique_key"] for r in self.store.iter_rows()]
+        self.assertIn("0099", keys)
+        self.assertEqual(len(keys), len(set(keys)), "the refreshed page replaces, not appends")
+
+    def test_an_open_window_with_offset_paging_also_refreshes(self):
+        store = RawPageStore(self.store.directory.parent / "offset")
+        fetch_all(FakeSource(total=25), store)
+        again = FakeSource(total=27)
+        fetch_all(again, store, refresh_tail=True)
+        self.assertEqual(again.calls, [20])
+        self.assertEqual(sum(1 for _ in store.iter_rows()), 27)
+
+
+class CliOpenWindowTests(unittest.TestCase):
+    def _fetch_with(self, today):
+        from data_factory import cli
+        from config_helpers import make_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(Path(tmp))
+            client = mock.Mock(request_count=0)
+            with (
+                mock.patch.object(cli, "_today", return_value=today),
+                mock.patch.object(cli, "fetch_all") as fetch,
+                mock.patch("builtins.print"),
+            ):
+                fetch.return_value = mock.Mock(
+                    pages_total=0, pages_fetched=0, rows_fetched=0, resumed_from_page=0
+                )
+                cli._fetch(cfg, client)
+            return fetch.call_args.kwargs["refresh_tail"]
+
+    def test_window_ending_today_refreshes_its_tail(self):
+        self.assertTrue(self._fetch_with(date(2025, 3, 31)))
+
+    def test_window_that_ended_trusts_the_cache(self):
+        self.assertFalse(self._fetch_with(date(2025, 4, 1)))

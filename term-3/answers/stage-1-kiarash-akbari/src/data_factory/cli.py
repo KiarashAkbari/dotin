@@ -84,12 +84,20 @@ def _require_raw(store: RawPageStore) -> None:
         )
 
 
+def _today(cfg: Config):
+    """Today's date where the source records its timestamps."""
+    return datetime.now(cfg.source.timezone).date()
+
+
 def _fetch(cfg: Config, client: HttpClient) -> None:
     source = SocrataSource.from_env(client, cfg.source)
     store = _raw_store(cfg)
     before = client.request_count
+    # A window that has not ended yet is still being written upstream: a cached
+    # short last page is not proof that nothing more exists.
+    window_open = cfg.source.end_date >= _today(cfg)
     try:
-        result = fetch_all(source, store)
+        result = fetch_all(source, store, refresh_tail=window_open)
     finally:
         record_requests(store.directory, client.request_count - before)
     print(
@@ -348,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(args.config)
         mark = None
         if args.since_last_run:
-            today = datetime.now(cfg.source.timezone).date()
+            today = _today(cfg)
             mark = load_mark(cfg.paths.manifest_path)
             cfg = rolling_config(cfg, load_watermark(cfg.paths.manifest_path), today)
         if args.command == "run":

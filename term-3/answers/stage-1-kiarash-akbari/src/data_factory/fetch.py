@@ -151,13 +151,26 @@ def _last_cursor(source: KeysetPageSource, store: RawPageStore, index: int) -> C
     return source.cursor_of(last)
 
 
-def fetch_all(source: PageSource | KeysetPageSource, store: RawPageStore) -> FetchResult:
-    """Download pages into the store until a short page; resume at the first missing one."""
+def fetch_all(
+    source: PageSource | KeysetPageSource,
+    store: RawPageStore,
+    *,
+    refresh_tail: bool = False,
+) -> FetchResult:
+    """Download pages into the store until a short page; resume at the first missing one.
+
+    A store that ends in a short page is complete for a window that is over. For a
+    window that is still open (it ends today or later) new cases keep arriving
+    after that page was written, so refresh_tail fetches the short last page
+    again and continues from there instead of trusting the cache.
+    """
     page_size = source.page_size
     keyset = hasattr(source, "fetch_after")
     start = store.completed_pages()
     if start > 0 and store.row_count(start - 1) < page_size:
-        return FetchResult(start, 0, 0, start, True)
+        if not refresh_tail:
+            return FetchResult(start, 0, 0, start, True)
+        start -= 1
 
     index = start
     rows_fetched = 0
