@@ -159,18 +159,30 @@ def _build(
     zip_index = build_zip_index(read_reference(ref.path))
     store = _raw_store(cfg)
     _require_raw(store)
+    # Staged, not yet published: the manifest is computed from the staged files,
+    # the set is renamed into place, and the manifest is written last as the
+    # commit point (publish.py).
     result = process(
-        after_watermark(store.iter_rows(), mark), cfg, zip_index, allow_empty=rolling
+        after_watermark(store.iter_rows(), mark),
+        cfg,
+        zip_index,
+        allow_empty=rolling,
+        publish=False,
     )
-    manifest = build_manifest(
-        cfg=cfg,
-        result=result,
-        requests=requests,
-        started_at=started_at,
-        finished_at=utc_now_iso(),
-        case_requests_total=read_requests_total(store.directory),
-        previous_mark=mark,
-    )
+    try:
+        manifest = build_manifest(
+            cfg=cfg,
+            result=result,
+            requests=requests,
+            started_at=started_at,
+            finished_at=utc_now_iso(),
+            case_requests_total=read_requests_total(store.directory),
+            previous_mark=mark,
+        )
+    except BaseException:
+        result.staging.discard()
+        raise
+    result = result.publish()
     write_manifest(cfg.paths.manifest_path, manifest)
     if latest_manifest_path is not None:
         # The increment's own manifest stays in its folder; this copy only tells

@@ -42,6 +42,7 @@ from .outputs import (
     sha256_file,
 )
 from .profile import REPORT_FILENAME
+from .publish import verify_outputs
 
 
 
@@ -935,6 +936,16 @@ def load_stage1_sink(
     if cfg.database is None:
         raise ConfigError("Missing config section: [database]")
     paths = factory_sink_paths(cfg.database.stage1_curated_dir)
+    # A set left half-published by a killed run must not reach the database.
+    verify_outputs(
+        cfg.paths.manifest_path,
+        cfg.root,
+        {
+            "dataset": paths[SINK_CASE_TABLE],
+            "wide_table": paths[SINK_WIDE_TABLE],
+            "quality_report": paths[SINK_QUALITY_TABLE],
+        },
+    )
     if connection is not None:
         truncate_factory(connection)
         return _load_sink(connection, cfg, paths)

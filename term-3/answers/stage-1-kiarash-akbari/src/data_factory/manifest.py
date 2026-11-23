@@ -112,7 +112,7 @@ def build_manifest(
             "case_requests_total": case_requests_total,
         },
         "outputs": {
-            name: {"path": display_path(cfg, path), "sha256": sha256_file(path)}
+            name: {"path": display_path(cfg, path), "sha256": sha256_file(result.readable_path(name))}
             for name, path in sorted(result.output_paths.items())
         },
     }

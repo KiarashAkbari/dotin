@@ -18,13 +18,17 @@ from .outputs import (
 )
 from .population import ZipArea
 from .profile import REPORT_FILENAME, QualityProfile, write_profile
+from .publish import OutputStaging
 from .quality import ClassifiedRecord, QualityReport, classify_records, enforce_threshold
-from .quarantine import QuarantineWriter
+from .quarantine import FAILED_FILENAME, QuarantineWriter
 
 OUTPUT_DATASET = "dataset"
 OUTPUT_WIDE = "wide_table"
 OUTPUT_QUARANTINE = "quarantine"
 OUTPUT_QUALITY = "quality_report"
+# The dataset goes last among the data files: a reader that only looks for
+# cases.csv never sees it before the files derived from the same run.
+PUBLISH_ORDER = (OUTPUT_QUARANTINE, OUTPUT_QUALITY, OUTPUT_WIDE, OUTPUT_DATASET)
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,24 @@ class ProcessResult:
     report: QualityReport
     stats: JoinStats
     output_paths: dict[str, Path]
+    # Set while the files still wait in staging (process(..., publish=False)).
+    staging: OutputStaging | None = None
+
+    def readable_path(self, name: str) -> Path:
+        """Where the bytes of an output are right now: staged or published."""
+        final = self.output_paths[name]
+        return self.staging.path_for(final) if self.staging is not None else final
+
+    def publish(self) -> "ProcessResult":
+        """Rename the staged set onto the final names; a no-op once published."""
+        if self.staging is None:
+            return self
+        quarantine = self.output_paths[OUTPUT_QUARANTINE]
+        self.staging.commit(
+            [self.output_paths[name] for name in PUBLISH_ORDER],
+            remove=[quarantine.with_name(FAILED_FILENAME)],
+        )
+        return ProcessResult(self.report, self.stats, self.output_paths)
 
 
 def _tee_quarantine(
@@ -57,22 +79,62 @@ def process(
     zip_index: Mapping[str, ZipArea],
     *,
     allow_empty: bool = False,
+    publish: bool = True,
 ) -> ProcessResult:
-    """One streaming pass; a failed run keeps its quarantine as quarantine.failed.jsonl and leaves the last good outputs untouched."""
+    """One streaming pass into staging, then the whole output set is published.
+
+    A failed run keeps its quarantine as quarantine.failed.jsonl and leaves the last
+    good outputs untouched. With publish=False the files stay staged so the caller
+    can hash them into the manifest and call result.publish() itself.
+    """
     zone = cfg.source.timezone
     report, stats = QualityReport(), JoinStats()
     aggregator = AreaMonthAggregator(
         months_between(cfg.source.start_date, cfg.source.end_date)
     )
     profile = QualityProfile(CLEAN_COLUMNS)
-    dataset_path = cfg.paths.curated_dir / DATASET_FILENAME
-    wide_path = cfg.paths.curated_dir / WIDE_FILENAME
-    quality_path = cfg.paths.curated_dir / REPORT_FILENAME
+    curated_dir, quarantine_dir = cfg.paths.curated_dir, cfg.paths.quarantine_dir
+    dataset_path = curated_dir / DATASET_FILENAME
+    wide_path = curated_dir / WIDE_FILENAME
+    quality_path = curated_dir / REPORT_FILENAME
+    staging = OutputStaging(curated_dir, quarantine_dir)
+    try:
+        result = _process_into(
+            rows, cfg, zip_index, staging, report, stats, aggregator, profile, zone,
+            allow_empty,
+        )
+    except QuarantineThresholdError:
+        failed = staging.folder(quarantine_dir) / FAILED_FILENAME
+        if failed.exists():
+            staging.move_out(failed, quarantine_dir / FAILED_FILENAME)
+        staging.discard()
+        raise
+    except BaseException:
+        staging.discard()
+        raise
+    pending = ProcessResult(
+        report,
+        stats,
+        {
+            OUTPUT_DATASET: dataset_path,
+            OUTPUT_WIDE: wide_path,
+            OUTPUT_QUARANTINE: quarantine_dir / result,
+            OUTPUT_QUALITY: quality_path,
+        },
+        staging,
+    )
+    return pending.publish() if publish else pending
 
+
+def _process_into(
+    rows, cfg, zip_index, staging, report, stats, aggregator, profile, zone, allow_empty
+) -> str:
+    """Write every output into staging; returns the quarantine file's name."""
+    curated = staging.folder(cfg.paths.curated_dir)
     threshold_error: QuarantineThresholdError | None = None
-    with QuarantineWriter(cfg.paths.quarantine_dir) as quarantine:
+    with QuarantineWriter(staging.folder(cfg.paths.quarantine_dir)) as quarantine:
         try:
-            with DatasetWriter(dataset_path) as dataset:
+            with DatasetWriter(curated / DATASET_FILENAME) as dataset:
                 classified = _tee_quarantine(
                     classify_records(rows, report, zone), quarantine
                 )
@@ -97,15 +159,6 @@ def process(
         "borough_modzcta_conflicts": conflicts,
         "borough_modzcta_conflict_count": len(conflicts),
     }
-    write_wide(wide_path, aggregator)
-    write_profile(quality_path, profile, extra)
-    return ProcessResult(
-        report,
-        stats,
-        {
-            OUTPUT_DATASET: dataset_path,
-            OUTPUT_WIDE: wide_path,
-            OUTPUT_QUARANTINE: quarantine.path,
-            OUTPUT_QUALITY: quality_path,
-        },
-    )
+    write_wide(curated / WIDE_FILENAME, aggregator)
+    write_profile(curated / REPORT_FILENAME, profile, extra)
+    return quarantine.path.name
