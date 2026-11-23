@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
 
-from .config import MAX_SOCRATA_PAGE, Config
+from .config import MAX_SOCRATA_PAGE, Config, display_path
 from .fetch_log import minimum_requests
 from .outputs import sha256_file
 from .pipeline import ProcessResult
@@ -103,7 +103,7 @@ def build_manifest(
             "case_requests_total": case_requests_total,
         },
         "outputs": {
-            name: {"path": path.as_posix(), "sha256": sha256_file(path)}
+            name: {"path": display_path(cfg, path), "sha256": sha256_file(path)}
             for name, path in sorted(result.output_paths.items())
         },
     }

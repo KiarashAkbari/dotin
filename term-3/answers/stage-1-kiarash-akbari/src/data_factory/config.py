@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 
+import os
 import tomllib
 from dataclasses import dataclass
 from datetime import date
@@ -85,6 +86,9 @@ class Config:
     quality: QualityConfig
     reference: ReferenceConfig | None = None
     database: DatabaseConfig | None = None
+    # Folder every relative path in the file was resolved against; None when the
+    # config was built in memory without a base (paths then stay as written).
+    root: Path | None = None
 
 
 
@@ -139,7 +143,51 @@ def _is_number(value) -> bool:
 
 
 
-def _parse_reference(section: dict) -> ReferenceConfig:
+class _PathResolver:
+    """Resolve relative paths against one root instead of the current directory.
+
+    A config file used to mean different folders depending on where the command was
+    started (a run from stage 4 found nothing). Now a relative path in the file is
+    relative to `[paths] root`, which is itself relative to the config file's folder
+    and defaults to it. Absolute paths are kept as written.
+    """
+
+    def __init__(self, root: Path | None) -> None:
+        self.root = root
+
+    def __call__(self, value) -> Path:
+        path = Path(value)
+        if self.root is None or path.is_absolute():
+            return path
+        return Path(os.path.normpath(self.root / path))
+
+
+def _root(paths_section: dict, base_dir: Path | None) -> Path | None:
+    value = paths_section.get("root")
+    if value is not None and not isinstance(value, str):
+        raise ConfigError("paths.root must be a string path")
+    if base_dir is None:
+        return Path(value) if value is not None and Path(value).is_absolute() else None
+    base = Path(os.path.abspath(base_dir))
+    return Path(os.path.normpath(base / value)) if value is not None else base
+
+
+def display_path(cfg: "Config", path: Path) -> str:
+    """POSIX path relative to the config root when it lies under it, else as is.
+
+    The manifest records output paths this way, so the file reads the same on every
+    machine and no absolute path from the run leaks into it.
+    """
+    path = Path(path)
+    if cfg.root is not None and path.is_absolute():
+        try:
+            return path.relative_to(cfg.root).as_posix()
+        except ValueError:
+            pass
+    return path.as_posix()
+
+
+def _parse_reference(section: dict, resolve: _PathResolver) -> ReferenceConfig:
     limit = _get(section, "limit", "reference")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
         raise ConfigError("reference.limit must be an integer >= 1")
@@ -147,12 +195,12 @@ def _parse_reference(section: dict) -> ReferenceConfig:
         url=str(_get(section, "url", "reference")),
         columns=_str_tuple(_get(section, "columns", "reference"), "reference.columns"),
         limit=limit,
-        path=Path(_get(section, "path", "reference")),
+        path=resolve(_get(section, "path", "reference")),
     )
 
 
 
-def _parse_database(section: dict) -> DatabaseConfig:
+def _parse_database(section: dict, resolve: _PathResolver) -> DatabaseConfig:
     batch_size = _get(section, "batch_size", "database")
     if not _is_int(batch_size) or batch_size < 1:
         raise ConfigError("database.batch_size must be an integer >= 1")
@@ -164,21 +212,24 @@ def _parse_database(section: dict) -> DatabaseConfig:
     return DatabaseConfig(
         url=str(_get(section, "url", "database")),
         password_env=str(_get(section, "password_env", "database")),
-        olist_csv_dir=Path(_get(section, "olist_csv_dir", "database")),
-        stage1_curated_dir=Path(_get(section, "stage1_curated_dir", "database")),
+        olist_csv_dir=resolve(_get(section, "olist_csv_dir", "database")),
+        stage1_curated_dir=resolve(_get(section, "stage1_curated_dir", "database")),
         batch_size=batch_size,
         sql_migrations_dir=(
-            Path(sql_migrations_dir) if sql_migrations_dir is not None else None
+            resolve(sql_migrations_dir) if sql_migrations_dir is not None else None
         ),
     )
 
 
 
-def parse_config(data: dict) -> Config:
+def parse_config(data: dict, *, base_dir: Path | None = None) -> Config:
+    """Validate a parsed TOML mapping; base_dir anchors its relative paths."""
     s = _section(data, "source")
     h = _section(data, "http")
     p = _section(data, "paths")
     q = _section(data, "quality")
+    root = _root(p, base_dir)
+    resolve = _PathResolver(root)
 
 
     start = _get(s, "start_date", "source")
@@ -227,8 +278,12 @@ def parse_config(data: dict) -> Config:
         raise ConfigError("quality.min_rows_for_threshold must be an integer >= 1")
 
 
-    reference = _parse_reference(_section(data, "reference")) if "reference" in data else None
-    database = _parse_database(_section(data, "database")) if "database" in data else None
+    reference = (
+        _parse_reference(_section(data, "reference"), resolve) if "reference" in data else None
+    )
+    database = (
+        _parse_database(_section(data, "database"), resolve) if "database" in data else None
+    )
 
 
     return Config(
@@ -251,14 +306,15 @@ def parse_config(data: dict) -> Config:
             retry_statuses=frozenset(statuses),
         ),
         paths=PathsConfig(
-            raw_dir=Path(_get(p, "raw_dir", "paths")),
-            curated_dir=Path(_get(p, "curated_dir", "paths")),
-            quarantine_dir=Path(_get(p, "quarantine_dir", "paths")),
-            manifest_path=Path(_get(p, "manifest_path", "paths")),
+            raw_dir=resolve(_get(p, "raw_dir", "paths")),
+            curated_dir=resolve(_get(p, "curated_dir", "paths")),
+            quarantine_dir=resolve(_get(p, "quarantine_dir", "paths")),
+            manifest_path=resolve(_get(p, "manifest_path", "paths")),
         ),
         quality=QualityConfig(float(ratio), min_rows),
         reference=reference,
         database=database,
+        root=root,
     )
 
 
@@ -272,4 +328,4 @@ def load_config(path: str | Path) -> Config:
         raise ConfigError(f"Config file not found: {path}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"Invalid TOML in {path}: {exc}") from exc
-    return parse_config(data)
+    return parse_config(data, base_dir=path.parent)

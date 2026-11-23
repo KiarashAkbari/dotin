@@ -27,4 +27,4 @@
     python -m data_factory fetch | fetch-reference | validate | clean
     python -m data_factory run --since-last-run   # فقط داده‌ی بعد از آخرین اجرا
 
-تنظیمات در `config/default.toml`. نوت‌بوک: `solution.ipynb` (Restart & Run All).
+تنظیمات در `config/default.toml`. مسیرهای نسبیِ این فایل نسبت به `[paths] root` حل می‌شوند و خودِ `root` نسبت به پوشه‌ی فایل config است (`".."` یعنی پوشه‌ی stage-1)، پس فرمان از هر پوشه‌ای با `--config <مسیر>` همان فایل‌ها را پیدا می‌کند. اگر نسخه‌ی محلیِ دیگری از config دارید، `root = ".."` را به آن اضافه کنید. نوت‌بوک: `solution.ipynb` (Restart & Run All).
