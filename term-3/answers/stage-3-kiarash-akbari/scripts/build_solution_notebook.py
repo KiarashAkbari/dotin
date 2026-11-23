@@ -102,10 +102,9 @@ CELLS: list[tuple[str, str]] = [
             "و ``report.md`` مجاز است فقط از همان اعداد نقل کند (سلول آخر این را چک می‌کند).\n\n"
             "**زمان:** اگر به سقف ۲۰ دقیقه نزدیک شدیم، ``RUN_LIGHT = True`` فولدها را از ۵ به ۳ کم "
             "می‌کند؛ این یک تخمین است، نه عدد اندازه‌گیری‌شده.\n\n"
-            "**خروجی‌های این فایل:** از اجرای کامل ``Run All`` روی PostgreSQL ۱۶ و یک دادهٔ fixture "
-            "آزمایشی (۱۵۰٬۰۰۰ ردیف تولید‌شده، نه فایل Kaggle) نوشته شده‌اند تا نشان دهند ماشین‌افزار "
-            "از سر تا پا کار می‌کند؛ این‌ها نتیجهٔ چالش نیستند. برای اعداد واقعی، همین نوت‌بوک را روی "
-            "دیتابیس خودتان با فایل اصلی Run All کنید - خروجی‌های تازه جای همین‌ها را می‌گیرند.\n\n"
+            "**خروجی‌های این فایل:** از اجرای کامل ``Run All`` روی فایل واقعی ``cs-training.csv`` "
+            "(۱۵۰٬۰۰۰ ردیف) در PostgreSQL ۱۶ و Python 3.12 آمده‌اند؛ همان اجرا "
+            "``docs/evidence/real/credit_evidence.json`` را نوشته است.\n\n"
             "| # | بخش | معیار پذیرش |\n|---|---|---|\n"
             "| ۱ | ممیزی نشتی زمان-تصمیم | اولین بخش |\n"
             "| ۲ | ساختار، sentinel، گم‌شدگی | سیاست با عدد، ≥۲ سیاست imputation |\n"
@@ -172,7 +171,7 @@ print(f"provenance ok: {rows_view} rows, sha256 {str(provenance['sha256'])[:12]}
     (
         "code",
         """audit = features.audit_table()
-tables.md_table(print(audit))
+print(tables.md_table(audit))
 unavailable = audit.loc[audit["available before the decision"] == "NO", "feature"].tolist()
 print(f"\\nnot available at decision time: {unavailable or 'none'}")
 assert not unavailable, "a feature unavailable at decision time cannot be used"
@@ -195,9 +194,9 @@ print(f"\\n{tables.md_table(needs_evidence) if len(needs_evidence) else 'no feat
         """spikes_sql = measure.run_query(engine, "sentinel_spikes", sql_dir=Path("sql"))
 raw = read.load_frame(engine, "raw", schema=credit_cfg.schema)
 spikes_py = features.sentinel_spike_counts(raw)
-tables.md_table(print(spikes_sql))
+print(tables.md_table(spikes_sql))
 print(f"\\nsql rows={len(spikes_sql)} python rows={len(spikes_py)}")
-tables.md_table(print(spikes_py))
+print(tables.md_table(spikes_py))
 """,
     ),
     (
@@ -239,7 +238,7 @@ print("why not one-hot: each is ordered and zero is a real value; binning would 
     (
         "code",
         """parity = measure.run_query(engine, "missingness_parity", sql_dir=Path("sql"))
-tables.md_table(print(parity))
+print(tables.md_table(parity))
 profile = missingness.missingness_profile(frame, tuple(columns.MODEL_FEATURE_COLUMNS))
 print(f"\\n{tables.md_table(profile)}")
 no_income = frame["income_missing"] == 1
@@ -250,7 +249,7 @@ print(f"\\nincome reported vs not: {json.dumps(test, default=str)}")""",
     (
         "code",
         """splits = split.stratified_split(frame, seed=SEED)
-tables.md_table(print(split.boundary_audit(splits)))
+print(tables.md_table(split.boundary_audit(splits)))
 feature_names = tuple(spec.name for spec in features.FEATURES)
 # prep owns the missingness flags, so the list handed to fit() is what the frame
 # already holds: raw model columns plus the engineered ones, never a flag
@@ -264,7 +263,7 @@ print(f"\\nplans compared: {sorted(fitted)}")""",
     (
         "code",
         """chosen = fitted["median+indicator"]
-tables.md_table(print(prep.audit(chosen)))
+print(tables.md_table(prep.audit(chosen)))
 prepared_val = prep.apply(splits.validation, chosen)
 left = prep.remaining_missing(prepared_val, list(chosen.feature_names()))
 print(f"\\nNaN left after preparation: {int(left['nan_after_prep'].sum())}")
@@ -288,7 +287,7 @@ for name, stats in fitted.items():
     X = prep.apply(splits.train, stats)[list(stats.feature_names())]
     sweep.append(models.cross_validate_cost("logistic", X, train_y, folds, plan=name))
 print(f"k={k} folds, plan sweep on the fast family:")
-tables.md_table(print(models.compare(sweep)))
+print(tables.md_table(models.compare(sweep)))
 best_plan = min(sweep, key=lambda r: r.mean_cost).plan
 print(f"\\nbest plan by mean cost: {best_plan}")""",
     ),
@@ -301,7 +300,7 @@ families = []
 for family in models.FAMILIES:
     families.append(models.cross_validate_cost(family, X_train, train_y, folds, plan=best_plan))
 table = models.compare(sweep + families)
-tables.md_table(print(table))
+print(tables.md_table(table))
 best = models.pick_best(sweep + families)
 print(f"\\nselected {best.family} / {best.plan}: mean {best.mean_cost:.2f} std {best.std_cost:.2f} worst {best.worst_cost:.2f}")""",
     ),
@@ -315,7 +314,7 @@ for spec in features.FEATURES:
 ablation_frame = pd.DataFrame(ablation).sort_values("delta", ascending=False)
 full_cost = next(r.mean_cost for r in families if r.family == best.family)
 print(f"full model (all {len(names)} features): cost {full_cost:.3f}\\n")
-tables.md_table(print(ablation_frame))""",
+print(tables.md_table(ablation_frame))""",
     ),
     (
         "markdown",
@@ -400,7 +399,7 @@ plt.show()""",
     (
         "code",
         """sensitivity = cost.matrix_sensitivity(val_y, val_proba, [cost.CHALLENGE_MATRIX, cost.FLATTER_MATRIX])
-tables.md_table(print(pd.DataFrame(sensitivity)))""",
+print(tables.md_table(pd.DataFrame(sensitivity)))""",
     ),
     (
         "markdown",
@@ -443,7 +442,7 @@ print(f"reduction vs flag-nobody: {holdout.reduction_vs_flagging_nobody_pct:.2f}
     (
         "code",
         """importance = models.importances(model, val[kept_names], val_y, threshold=choice.threshold, seed=SEED, n_repeats=5)
-tables.md_table(print(importance.head(5)))
+print(tables.md_table(importance.head(5)))
 holdout_flags = (holdout_proba >= bundle.threshold).astype("int64")
 bands = evaluate.define_bands(splits.holdout)
 fair = evaluate.subgroup_table(splits.holdout.assign(age_band=bands), holdout_y, holdout_flags, holdout_proba)
@@ -490,7 +489,7 @@ fresh = Path("data/raw/cs-validation.csv")
 if fresh.is_file():
     scored = score_file(engine, credit_cfg, fresh, bundle)
     print(f"\\n{scored.summary()}")
-    tables.md_table(print(scored.scored.head(5)))
+    print(tables.md_table(scored.scored.head(5)))
 else:
     print(f"\\nno fresh file to score; run: python -m credit.predict --file <csv> --bundle data/curated/model")""",
     ),
