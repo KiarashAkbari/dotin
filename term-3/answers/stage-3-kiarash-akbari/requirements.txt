@@ -1,4 +1,4 @@
-# Python floor: >=3.12, declared in ../stage-1/pyproject.toml
+# Python floor: >=3.12, declared in ../stage-1-kiarash-akbari/pyproject.toml
 # (numpy 2.5.4 requires it).
 #
 # These are the versions stage 2's environment already carries, plus the one new
@@ -48,4 +48,4 @@ typing_extensions==4.16.0
 urllib3==2.8.0
 
 # Shared package from stage 1; install from the stage-3 directory.
--e ../stage-1
+-e ../stage-1-kiarash-akbari

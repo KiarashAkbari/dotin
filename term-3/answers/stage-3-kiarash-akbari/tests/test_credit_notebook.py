@@ -25,7 +25,7 @@ for candidate in (
     HERE,
     ROOT / "src",
     ROOT / "scripts",
-    ROOT.parents[1] / "stage-1" / "src",
+    ROOT.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -773,13 +773,24 @@ class LockClosureTests(unittest.TestCase):
         )
 
     def test_the_local_editable_dependency_is_written_down(self):
-        """`-e ../stage-1` is a dependency too, so the lock has to carry it.
+        """The stage-1 package is a dependency too, so the lock has to carry it.
 
         Without it the notebook imports `data_factory` from wherever PYTHONPATH happens
-        to point, and the delivery stops being self-describing.
+        to point, and the delivery stops being self-describing. The line must name the
+        sibling folder the delivery layout really has (`stage-1-kiarash-akbari`): the
+        old `-e ../stage-1` made pip abort before it installed a single pin.
         """
         text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-        self.assertIn("-e ../stage-1", text)
+        editable = [
+            line.split(maxsplit=1)[1]
+            for line in text.splitlines()
+            if line.startswith("-e ")
+        ]
+        self.assertEqual(editable, ["../stage-1-kiarash-akbari"])
+        # pip resolves the path against the directory it runs in, and the README runs it
+        # from this folder, so the target has to exist next to this folder
+        target = (ROOT / editable[0]).resolve()
+        self.assertTrue((target / "pyproject.toml").is_file(), target)
 
 
 class MeasureTests(unittest.TestCase):
