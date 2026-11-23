@@ -282,8 +282,14 @@ def checksum_mismatch_hint() -> str:
     )
 
 
-def collect_records(cfg: CreditConfig) -> tuple[list[dict], QualityReport, FetchResult]:
+def collect_records(
+    cfg: CreditConfig, *, label_required: bool = True
+) -> tuple[list[dict], QualityReport, FetchResult]:
     """Page the file, classify every row, quarantine the rejects.
+
+    ``label_required`` is True for the training table, where a row without an
+    outcome cannot be learned from, and False for the scoring path in
+    :mod:`credit.predict`, where an unlabeled row is exactly what arrives.
 
     The raw payload stays paged: it lands in ``RawPageStore`` one page at a time and
     is read back as a stream. Valid records are kept in a list because the insert
@@ -309,7 +315,9 @@ def collect_records(cfg: CreditConfig) -> tuple[list[dict], QualityReport, Fetch
     valid: list[dict] = []
     cfg.quarantine_dir.mkdir(parents=True, exist_ok=True)
     with QuarantineWriter(cfg.quarantine_dir) as writer:
-        for parsed, raw in parse_stream(store.iter_rows()):
+        for parsed, raw in parse_stream(
+            store.iter_rows(), label_required=label_required
+        ):
             report.add(parsed.reasons)
             if parsed.reasons:
                 writer.write(ClassifiedRecord(raw, parsed.reasons))

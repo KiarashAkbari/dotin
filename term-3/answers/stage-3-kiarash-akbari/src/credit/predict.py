@@ -93,7 +93,9 @@ def stage_file(
 ) -> tuple[int, int, str, str]:
     """Validate and insert a fresh file into ``credit.staging_application``."""
     staging_cfg = staging_config(cfg, csv_path)
-    records, report, _fetch = collect_records(staging_cfg)
+    # the outcome is unknown for a file that is being scored, which is the point of
+    # scoring it; sql/011 already declares the staging target nullable
+    records, report, _fetch = collect_records(staging_cfg, label_required=False)
     target = application_table(staging_cfg.schema, DB_STAGING_TABLE)
     with engine.begin() as connection:
         connection.execute(sa.delete(target))
