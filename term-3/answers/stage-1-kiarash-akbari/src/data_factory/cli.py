@@ -141,12 +141,16 @@ def _validate(cfg: Config) -> None:
     )
 
 
-def _build(cfg: Config, requests: int, started_at: str, mark=None) -> None:
+def _build(
+    cfg: Config, requests: int, started_at: str, mark=None, rolling: bool = False
+) -> None:
     ref = _reference_config(cfg)
     zip_index = build_zip_index(read_reference(ref.path))
     store = _raw_store(cfg)
     _require_raw(store)
-    result = process(after_watermark(store.iter_rows(), mark), cfg, zip_index)
+    result = process(
+        after_watermark(store.iter_rows(), mark), cfg, zip_index, allow_empty=rolling
+    )
     manifest = build_manifest(
         cfg=cfg,
         result=result,
@@ -154,6 +158,7 @@ def _build(cfg: Config, requests: int, started_at: str, mark=None) -> None:
         started_at=started_at,
         finished_at=utc_now_iso(),
         case_requests_total=read_requests_total(store.directory),
+        previous_mark=mark,
     )
     write_manifest(cfg.paths.manifest_path, manifest)
     report, stats = result.report, result.stats
@@ -168,14 +173,14 @@ def _build(cfg: Config, requests: int, started_at: str, mark=None) -> None:
     )
 
 
-def _run(cfg: Config, mark=None) -> None:
+def _run(cfg: Config, mark=None, rolling: bool = False) -> None:
     started_at = utc_now_iso()
     client = HttpClient(cfg.http)
     _fetch(cfg, client)
     ref = _reference_config(cfg)
     if not ref.path.is_file():
         _fetch_reference(cfg, client)
-    _build(cfg, client.request_count, started_at, mark)
+    _build(cfg, client.request_count, started_at, mark, rolling)
 
 
 def _is_base_migration(path: Path) -> bool:
@@ -360,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
             mark = load_mark(cfg.paths.manifest_path)
             cfg = rolling_config(cfg, load_watermark(cfg.paths.manifest_path), today)
         if args.command == "run":
-            _run(cfg, mark)
+            _run(cfg, mark, args.since_last_run)
         elif args.command == "fetch":
             _fetch(cfg, HttpClient(cfg.http))
         elif args.command == "fetch-reference":
@@ -375,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
                 with_sink=not args.skip_factory_sink,
             )
         else:
-            _build(cfg, 0, utc_now_iso(), mark)
+            _build(cfg, 0, utc_now_iso(), mark, args.since_last_run)
         return int(ExitCode.OK)
     except sa.exc.SQLAlchemyError as exc:
         return _report(translate_database_error(exc))

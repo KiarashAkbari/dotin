@@ -82,3 +82,52 @@ class MaxCreatedTests(unittest.TestCase):
                 NY, {}, stats,
             )
         self.assertEqual(stats.max_created_at, "2025-01-09T08:00:00")
+
+class EmptyIncrementTests(unittest.TestCase):
+    """--since-last-run with nothing new succeeds with zero rows instead of exit 65."""
+
+    def test_threshold_accepts_an_empty_increment_only_when_asked(self):
+        from data_factory.quality import QualityReport, enforce_threshold
+
+        enforce_threshold(QualityReport(), max_ratio=0.01, min_rows=1, allow_empty=True)
+        with self.assertRaises(DataError):
+            enforce_threshold(QualityReport(), max_ratio=0.01, min_rows=1)
+
+    def test_an_increment_where_nothing_passed_still_fails(self):
+        from data_factory.errors import QuarantineThresholdError
+        from data_factory.quality import QualityReport, enforce_threshold
+        from data_factory.contract import ReasonCode
+
+        report = QualityReport()
+        report.add((ReasonCode.DUPLICATE_UNIQUE_KEY,))
+        with self.assertRaises(QuarantineThresholdError):
+            enforce_threshold(report, max_ratio=0.5, min_rows=1, allow_empty=True)
+
+    def test_empty_increment_publishes_zero_rows_and_keeps_the_mark(self):
+        from data_factory.manifest import build_manifest
+        from data_factory.pipeline import process
+        from data_factory.rolling import Watermark
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(Path(tmp))
+            result = process([], cfg, {}, allow_empty=True)
+            self.assertEqual(result.report.total, 0)
+            lines = (cfg.paths.curated_dir / "cases.csv").read_text("utf-8").splitlines()
+            self.assertEqual(len(lines), 1, "header only")
+            mark = Watermark("2025-03-05T10:00:00", frozenset({"a", "b"}))
+            manifest = build_manifest(
+                cfg=cfg, result=result, requests=1, started_at="s", finished_at="f",
+                previous_mark=mark,
+            )
+            self.assertEqual(manifest["records"]["raw"], 0)
+            self.assertEqual(
+                manifest["watermark"],
+                {"max_created_at": "2025-03-05T10:00:00", "keys_at_max_created_at": ["a", "b"]},
+            )
+
+    def test_a_full_run_with_no_rows_still_fails(self):
+        from data_factory.pipeline import process
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(DataError):
+                process([], make_config(Path(tmp)), {})

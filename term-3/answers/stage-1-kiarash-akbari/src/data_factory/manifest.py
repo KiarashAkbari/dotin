@@ -53,8 +53,17 @@ def build_manifest(
     started_at: str,
     finished_at: str,
     case_requests_total: int | None = None,
+    previous_mark=None,
 ) -> dict:
     report, stats = result.report, result.stats
+    # An empty increment saw no new case; it keeps the position it started from so
+    # the next --since-last-run still knows where to begin.
+    if stats.max_created_at is None and previous_mark is not None:
+        max_created_at = previous_mark.created_at
+        keys_at_max = sorted(previous_mark.keys)
+    else:
+        max_created_at = stats.max_created_at
+        keys_at_max = sorted(stats.keys_at_max_created)
     reference_url = cfg.reference.url if cfg.reference else None
     return {
         "code_version": code_version(),
@@ -66,8 +75,8 @@ def build_manifest(
             "timezone": cfg.source.timezone.key,
         },
         "watermark": {
-            "max_created_at": stats.max_created_at,
-            "keys_at_max_created_at": sorted(stats.keys_at_max_created),
+            "max_created_at": max_created_at,
+            "keys_at_max_created_at": keys_at_max,
         },
         "restriction": {
             "agency": cfg.source.agency,

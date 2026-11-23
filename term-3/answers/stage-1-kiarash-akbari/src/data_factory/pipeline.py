@@ -55,6 +55,8 @@ def process(
     rows: Iterable[Mapping[str, object]],
     cfg: Config,
     zip_index: Mapping[str, ZipArea],
+    *,
+    allow_empty: bool = False,
 ) -> ProcessResult:
     """One streaming pass; a failed run keeps its quarantine as quarantine.failed.jsonl and leaves the last good outputs untouched."""
     zone = cfg.source.timezone
@@ -82,6 +84,7 @@ def process(
                     report,
                     max_ratio=cfg.quality.max_quarantine_ratio,
                     min_rows=cfg.quality.min_rows_for_threshold,
+                    allow_empty=allow_empty,
                 )
         except QuarantineThresholdError as exc:
             threshold_error = exc
