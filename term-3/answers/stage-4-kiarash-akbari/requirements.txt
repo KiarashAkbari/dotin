@@ -1,35 +1,85 @@
-# Stage 4's own requirements, in the same shape as ../stage-3-kiarash-akbari/requirements.txt.
+# Stage 4's full lock: everything the chain, the model, the prediction entrypoint and the two
+# notebooks import, plus their transitive closure, pinned with ==.
 #
-# Python floor: >=3.12, declared in ../stage-1-kiarash-akbari/pyproject.toml.
+# Python floor: >=3.12 (../stage-1-kiarash-akbari/pyproject.toml; numpy 2.5.4 needs it).
 #
-# These pins are *inherited*, not resolved here: psycopg 3.3.6 is what stages 1, 2 and 3 already
-# ship, and ``capstone.features.connect`` imports exactly the module a URI names -- a bare
-# ``postgresql://`` or ``postgresql+psycopg://`` for this one, ``postgresql+psycopg2://`` for a
-# machine that only has psycopg2. A second, independently "fresh" resolution would produce a
-# different environment on a different week, which is the failure the == pins exist to prevent
-# (00 §۲.۹: «آخرین نسخه» pin نیست).
+# Produced by `pip freeze` from the venv that ran the numbers in docs/evidence/ (Python
+# 3.12.16, 2026-11-23), not written by hand. The direct dependencies and why:
+#   psycopg / psycopg-binary / SQLAlchemy -- the database (stage 1's loader and this stage)
+#   numpy / pandas / scikit-learn / scipy / joblib -- the model layer, drift tests, the saved model
+#   matplotlib -- the plots in 01_exploration.ipynb and 02_system.ipynb
+#   nbclient / nbformat / ipykernel -- running both notebooks end to end from a script
+#   requests / tzdata -- stage 1's package, which the chain's ingest step imports
+# Same versions as ../stage-3-kiarash-akbari/requirements.txt wherever the two overlap.
 #
-# Nothing in this file was installed or import-checked in the sandbox that wrote it -- there is no
-# PostgreSQL and no driver there, so the offline suite stays stdlib-only and these two lines are
-# attributable to stage 3's lock and to the student's machine, not to a run here («بررسی نشده از
-# این محیط»). The command that makes this list honest, on a machine with the venv:
+# Install from this directory:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 #
-#   ../stage-3-kiarash-akbari/.venv/bin/python -m pip freeze | grep -iE '^psycopg' > requirements.txt
-#
-# Phase 5 adds the model (numpy/pandas/scikit-learn) and the notebooks add matplotlib; those lines
-# are deliberately absent, because a requirements file that lists what a later phase might want is
-# not a contract about what this phase needs. They are in stage 3's file, unchanged, until then.
+# Stage 1's package, which the chain's ingest/load steps run (`python -m data_factory`):
+-e ../stage-1-kiarash-akbari
+asttokens==3.0.2
+attrs==26.1.0
+certifi==2026.10.23
+charset-normalizer==3.5.2
+cloudpickle==3.1.2
+comm==0.2.3
+contourpy==1.4.0
+cycler==0.12.1
+debugpy==1.8.22
+executing==2.3.0
+fastjsonschema==2.22.3
+fonttools==4.67.0
+idna==3.20
+ipykernel==7.4.0
+ipython==9.19.1
+ipython_pygments_lexers==1.1.1
+jedi==0.20.1
+joblib==1.6.0
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+jupyter_client==8.10.0
+jupyter_core==5.9.1
+kiwisolver==1.5.1
+matplotlib==3.11.2
+matplotlib-inline==0.2.2
+narwhals==2.28.0
+nbclient==0.11.0
+nbformat==5.11.1
+nest-asyncio2==1.7.4
+numpy==2.5.4
+packaging==26.3
+pandas==3.1.0
+parso==0.8.7
+pexpect==4.9.0
+pillow==13.0.0
+platformdirs==4.14.8
+prompt_toolkit==3.0.53
+psutil==7.2.2
 psycopg==3.3.6
 psycopg-binary==3.3.6
+ptyprocess==0.7.0
+pure_eval==0.2.4
+Pygments==2.21.0
+pyparsing==3.3.3
+python-dateutil==3.0.0
+pyzmq==27.3.0
+referencing==0.37.0
+requests==2.34.2
+rpds-py==2026.9.1
+scikit-learn==1.9.1
+scipy==1.18.1
+six==1.17.0
+SQLAlchemy==2.1.6
+stack-data==0.6.3
+threadpoolctl==3.7.0
+tornado==6.6.1
+traitlets==5.16.1
+typing_extensions==4.16.0
+tzdata==2026.5
+urllib3==2.8.0
+wcwidth==0.9.5
 #
-# Optional, and only for tests/test_postgres_smoke.py, which starts a throwaway PostgreSQL so that a
-# catalog predicate is executed rather than read. Deliberately not pinned above: a bundled server is not
-# a dependency of the deliverable, and a reader who never runs that module needs nothing.
-#
+# Optional, and only for tests/test_postgres_smoke.py's throwaway cluster. Not pinned above:
+# the module also runs against a server you already have, with
+#   CAPSTONE_SMOKE_DATABASE_URI=<uri> CAPSTONE_SMOKE_ALLOW_DESTROY=1
 #   python3 -m venv .venv && .venv/bin/pip install "pgserver==0.1.4" "psycopg2-binary==2.9.13"
-#
-# psycopg 3, pinned above, is the driver the smoke module also uses; psycopg2 is there only so
-# DriverAgreementTests can name two exception classes and compare them. With no extra installed the
-# module skips and prints why -- and `CAPSTONE_SMOKE_DATABASE_URI=<uri>
-# CAPSTONE_SMOKE_ALLOW_DESTROY=1` runs the same ten tests against a server you chose, which is the
-# shorter path if you already have one.
