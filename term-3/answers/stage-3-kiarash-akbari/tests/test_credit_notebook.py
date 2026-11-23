@@ -1083,37 +1083,22 @@ class ArchivedEvidenceConsistencyTests(unittest.TestCase):
             "the archived report states a number the archived evidence does not contain",
         )
 
-    def test_no_report_number_depends_on_the_holdout_sensitivity_row(self):
-        """``holdout.matrix_sensitivity`` re-picks its threshold on the holdout rows, so the cost
-        in that row is what the best threshold *on those rows* would have cost - a fact about the
-        matrix, not an estimate of the policy. The validation-side rows are where threshold
-        movement may be quoted. This is the guard that keeps the optimistic number out: drop that
-        block from the evidence and no number in the report may become untraceable.
-        """
-        from credit import report
+    def test_the_holdout_evidence_holds_no_re_tuned_threshold(self):
+        """Every holdout row is priced at a threshold chosen on validation.
 
+        ``holdout_report`` used to re-pick each matrix's threshold on the holdout rows - a
+        second look at them, and an optimistic number. The archived evidence must now carry
+        only fixed points, each saying where its threshold came from.
+        """
         evidence = self._evidence()
         if evidence is None:
-            self.skipTest("no evidence file: nothing to subtract from")
-        text = (ROOT / "report.md").read_text(encoding="utf-8")
-        body = report_body(text)
-        with_block = report.check_traceability(body, evidence)
-        stripped = {
-            **evidence,
-            "holdout": {
-                k: v
-                for k, v in evidence["holdout"].items()
-                if k != "matrix_sensitivity"
-            },
-        }
-        without_block = report.check_traceability(body, stripped)
-        only_there = sorted(set(without_block) - set(with_block) - DEFINITIONAL_NUMBERS)
-        self.assertEqual(
-            only_there,
-            [],
-            "the report quotes a number that exists only in the holdout sensitivity row",
-        )
-
+            self.skipTest("no evidence file to inspect")
+        holdout = evidence["holdout"]
+        self.assertNotIn("matrix_sensitivity", holdout)
+        rows = holdout["at_validation_thresholds"]
+        self.assertGreaterEqual(len(rows), 2)
+        self.assertTrue(all(row["threshold_source"] == "validation" for row in rows))
+        self.assertEqual(rows[0]["threshold"], holdout["threshold"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -48,7 +48,7 @@ class HoldoutReportTests(unittest.TestCase):
             threshold=0.5,
             family="logistic",
             cv=(3000.0, 100.0),
-            sensitivity_matrix=cost.FLATTER_MATRIX,
+            fixed_points=[(cost.FLATTER_MATRIX, 0.85)],
         )
 
     def test_counts_and_cost_at_the_threshold(self):
@@ -91,6 +91,19 @@ class HoldoutReportTests(unittest.TestCase):
         text = json.dumps(rows, default=str)
         self.assertIn("12:1", text)
         self.assertIn("4:1", text)
+
+    def test_the_holdout_is_priced_at_given_thresholds_never_re_tuned(self):
+        """At 0.85 only the 0.9 score is flagged: 1 tp, 1 fn, 0 fp, 2 tn under 4:1.
+
+        The best threshold on these four rows would be lower (0.8 or 0.2 catch more),
+        so a re-tuned row would show a different threshold and a lower cost.
+        """
+        chosen, flatter = self.report.sensitivity
+        self.assertEqual(chosen["threshold"], 0.5)
+        self.assertEqual(flatter["threshold"], 0.85)
+        self.assertTrue(all(row["threshold_source"] == "validation" for row in self.report.sensitivity))
+        self.assertAlmostEqual(flatter["cost_per_1000"], 1 * 4 / 4 * 1000, places=6)
+        self.assertEqual(self.report.as_dict()["at_validation_thresholds"], self.report.sensitivity)
 
 
 class BandTests(unittest.TestCase):

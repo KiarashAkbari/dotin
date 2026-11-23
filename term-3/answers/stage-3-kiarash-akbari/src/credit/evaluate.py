@@ -27,7 +27,6 @@ from .cost import (
     binary_counts,
     constant_baselines,
     cost_per_1000,
-    matrix_sensitivity,
     metrics,
     reduction_vs_baseline,
 )
@@ -133,7 +132,7 @@ class HoldoutReport:
                 if self.cv_mean_cost is None
                 else round(self.cost_per_1000 - self.cv_mean_cost, 3)
             ),
-            "matrix_sensitivity": self.sensitivity,
+            "at_validation_thresholds": self.sensitivity,
         }
 
 
@@ -145,9 +144,15 @@ def holdout_report(
     family: str,
     matrix: CostMatrix = CHALLENGE_MATRIX,
     cv: tuple[float, float] | None = None,
-    sensitivity_matrix: CostMatrix | None = None,
+    fixed_points: Sequence[tuple[CostMatrix, float]] = (),
 ) -> HoldoutReport:
     """Score the reserved rows once, at the threshold chosen on validation data.
+
+    ``fixed_points`` are (matrix, threshold) pairs whose thresholds were also chosen
+    on validation - typically the 4:1 matrix's own optimum - and the holdout reports
+    what each *costs* there. It never searches for a threshold: a minimum taken on
+    the holdout is a second look at it and an optimistic number, which is why the
+    old re-tuned sensitivity row is gone.
 
     ``cv`` is the (mean, std) from cross-validation, passed in so the gap between
     "what the folds said" and "what the holdout said" is part of the same record as
@@ -165,8 +170,10 @@ def holdout_report(
     cost = cost_per_1000(counts, matrix, n=len(truth_array))
     baselines = baseline_costs(truth_array, matrix=matrix)
     nobody = baselines["flag-nobody"]
-    matrices = [matrix] if sensitivity_matrix is None else [matrix, sensitivity_matrix]
-    sensitivity = matrix_sensitivity(truth_array, scores_array, matrices)
+    sensitivity = [
+        _cost_at_fixed_point(truth_array, scores_array, point_matrix, point)
+        for point_matrix, point in [(matrix, float(threshold)), *fixed_points]
+    ]
     return HoldoutReport(
         rows=len(truth_array),
         positives=int(truth_array.sum()),
@@ -183,6 +190,23 @@ def holdout_report(
         cv_std_cost=None if cv is None else float(cv[1]),
         sensitivity=sensitivity,
     )
+
+
+def _cost_at_fixed_point(
+    truth: np.ndarray, scores: np.ndarray, matrix: CostMatrix, threshold: float
+) -> dict[str, object]:
+    """Cost of one matrix at a threshold chosen elsewhere; nothing is optimised here."""
+    counts = binary_counts(truth, (scores >= threshold).astype("int64"))
+    rates = metrics(counts)
+    return {
+        "matrix": matrix.name,
+        "ratio": matrix.ratio,
+        "threshold": float(threshold),
+        "threshold_source": "validation",
+        "cost_per_1000": cost_per_1000(counts, matrix, n=len(truth)),
+        "recall": rates["recall"],
+        "flag_rate": rates["flag_rate"],
+    }
 
 
 def subgroup_table(
