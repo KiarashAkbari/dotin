@@ -576,3 +576,31 @@ def build_bundle(
         trained_rows=len(X_train),
         code_version=code_version,
     )
+
+
+def wrap_bundle(
+    model: object,
+    family: str,
+    X_train: pd.DataFrame,
+    *,
+    prep_stats: PrepStats,
+    threshold: float,
+    matrix: CostMatrix = CHALLENGE_MATRIX,
+    code_version: str = "unknown",
+) -> Bundle:
+    """Bundle an estimator that is already fitted, without refitting it.
+
+    The threshold was chosen on validation scores of *this* model; refitting on more
+    rows would give a model whose scores the threshold was never chosen for. So the
+    delivered bundle is the model the threshold belongs to, and the holdout scores it.
+    """
+    return Bundle(
+        model=model,
+        family=FAMILIES[family].name,
+        feature_names=tuple(X_train.columns),
+        prep_stats=prep_stats,
+        threshold=float(threshold),
+        matrix=matrix.name,
+        trained_rows=len(X_train),
+        code_version=code_version,
+    )
