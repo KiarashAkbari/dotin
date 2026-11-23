@@ -30,7 +30,13 @@ from .pipeline import process
 from .population import build_zip_index, fetch_reference, read_reference, write_reference
 from .quality import QualityReport, classify_records, enforce_threshold
 from .quarantine import VALIDATE_FILENAME, QuarantineWriter
-from .rolling import after_watermark, load_mark, load_watermark, rolling_config
+from .rolling import (
+    after_watermark,
+    load_mark,
+    load_watermark,
+    rolling_config,
+    rolling_manifest_path,
+)
 from .store import RawPageStore
 
 DEFAULT_CONFIG = "config/default.toml"
@@ -142,7 +148,12 @@ def _validate(cfg: Config) -> None:
 
 
 def _build(
-    cfg: Config, requests: int, started_at: str, mark=None, rolling: bool = False
+    cfg: Config,
+    requests: int,
+    started_at: str,
+    mark=None,
+    rolling: bool = False,
+    latest_manifest_path: Path | None = None,
 ) -> None:
     ref = _reference_config(cfg)
     zip_index = build_zip_index(read_reference(ref.path))
@@ -161,6 +172,10 @@ def _build(
         previous_mark=mark,
     )
     write_manifest(cfg.paths.manifest_path, manifest)
+    if latest_manifest_path is not None:
+        # The increment's own manifest stays in its folder; this copy only tells
+        # the next --since-last-run where the latest increment ended.
+        write_manifest(latest_manifest_path, manifest)
     report, stats = result.report, result.stats
     print(
         f"window={cfg.source.start_date}..{cfg.source.end_date} "
@@ -173,14 +188,16 @@ def _build(
     )
 
 
-def _run(cfg: Config, mark=None, rolling: bool = False) -> None:
+def _run(
+    cfg: Config, mark=None, rolling: bool = False, latest_manifest_path: Path | None = None
+) -> None:
     started_at = utc_now_iso()
     client = HttpClient(cfg.http)
     _fetch(cfg, client)
     ref = _reference_config(cfg)
     if not ref.path.is_file():
         _fetch_reference(cfg, client)
-    _build(cfg, client.request_count, started_at, mark, rolling)
+    _build(cfg, client.request_count, started_at, mark, rolling, latest_manifest_path)
 
 
 def _is_base_migration(path: Path) -> bool:
@@ -360,12 +377,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(args.config)
         mark = None
+        latest = None
         if args.since_last_run:
             today = _today(cfg)
             mark = load_mark(cfg.paths.manifest_path)
+            latest = rolling_manifest_path(cfg.paths.manifest_path)
             cfg = rolling_config(cfg, load_watermark(cfg.paths.manifest_path), today)
         if args.command == "run":
-            _run(cfg, mark, args.since_last_run)
+            _run(cfg, mark, args.since_last_run, latest)
         elif args.command == "fetch":
             _fetch(cfg, HttpClient(cfg.http))
         elif args.command == "fetch-reference":
@@ -380,7 +399,7 @@ def main(argv: list[str] | None = None) -> int:
                 with_sink=not args.skip_factory_sink,
             )
         else:
-            _build(cfg, 0, utc_now_iso(), mark, args.since_last_run)
+            _build(cfg, 0, utc_now_iso(), mark, args.since_last_run, latest)
         return int(ExitCode.OK)
     except sa.exc.SQLAlchemyError as exc:
         return _report(translate_database_error(exc))

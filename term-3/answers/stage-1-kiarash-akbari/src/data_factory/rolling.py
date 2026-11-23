@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .config import Config
@@ -12,6 +12,8 @@ from .errors import ConfigError, DataError
 
 ROLLING_DIR = "rolling"
 DATE_LENGTH = 10
+RUN_ID_FORMAT = "%Y%m%dT%H%M%SZ"
+INCREMENT_MANIFEST = "run_manifest.json"
 
 
 def rolling_manifest_path(manifest_path: Path) -> Path:
@@ -55,15 +57,36 @@ def load_watermark(manifest_path: Path) -> date:
     return max(found)
 
 
-def rolling_config(cfg: Config, since: date, today: date) -> Config:
-    """Same pipeline, narrowed to [since, today] with outputs kept apart from the full run."""
+def new_run_id(cfg: Config, now: datetime | None = None) -> str:
+    """A sortable UTC timestamp naming one increment; suffixed if that name is taken."""
+    stamp = (now or datetime.now(timezone.utc)).strftime(RUN_ID_FORMAT)
+    root = cfg.paths.curated_dir / ROLLING_DIR
+    run_id, n = stamp, 1
+    while (root / run_id).exists() or (cfg.paths.quarantine_dir / ROLLING_DIR / run_id).exists():
+        n += 1
+        run_id = f"{stamp}-{n}"
+    return run_id
+
+
+def rolling_config(cfg: Config, since: date, today: date, run_id: str | None = None) -> Config:
+    """Same pipeline, narrowed to [since, today], writing into its own increment folder.
+
+    Every increment gets curated/rolling/<run_id>/ and quarantine/rolling/<run_id>/,
+    with its own manifest inside the curated folder. Earlier increments are never
+    overwritten: a shared curated/rolling/ used to keep only the latest increment,
+    so rows from the one before were in neither the full outputs nor the rolling
+    ones. The latest increment's manifest is also copied to
+    run_manifest.rolling.json, which is where the next run reads its watermark.
+    """
     if since > today:
         raise ConfigError("Last-run watermark is after today")
+    run_id = run_id or new_run_id(cfg)
+    curated = cfg.paths.curated_dir / ROLLING_DIR / run_id
     paths = replace(
         cfg.paths,
-        curated_dir=cfg.paths.curated_dir / ROLLING_DIR,
-        quarantine_dir=cfg.paths.quarantine_dir / ROLLING_DIR,
-        manifest_path=rolling_manifest_path(cfg.paths.manifest_path),
+        curated_dir=curated,
+        quarantine_dir=cfg.paths.quarantine_dir / ROLLING_DIR / run_id,
+        manifest_path=curated / INCREMENT_MANIFEST,
     )
     return replace(cfg, source=replace(cfg.source, start_date=since, end_date=today), paths=paths)
 

@@ -29,9 +29,27 @@ class RollingConfigTests(unittest.TestCase):
                 (rolled.source.start_date, rolled.source.end_date),
                 (date(2025, 3, 1), date(2025, 3, 20)),
             )
-            self.assertEqual(rolled.paths.curated_dir.name, "rolling")
-            self.assertEqual(rolled.paths.quarantine_dir.name, "rolling")
-            self.assertEqual(rolled.paths.manifest_path.name, "manifest.rolling.json")
+            run_id = rolled.paths.curated_dir.name
+            self.assertEqual(rolled.paths.curated_dir.parent, cfg.paths.curated_dir / "rolling")
+            self.assertEqual(
+                rolled.paths.quarantine_dir, cfg.paths.quarantine_dir / "rolling" / run_id
+            )
+            self.assertEqual(
+                rolled.paths.manifest_path, rolled.paths.curated_dir / "run_manifest.json"
+            )
+
+    def test_each_increment_gets_its_own_folder(self):
+        from datetime import datetime, timezone
+
+        from data_factory.rolling import new_run_id
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(Path(tmp))
+            now = datetime(2025, 3, 20, 12, 0, 0, tzinfo=timezone.utc)
+            first = new_run_id(cfg, now)
+            self.assertEqual(first, "20250320T120000Z")
+            (cfg.paths.curated_dir / "rolling" / first).mkdir(parents=True)
+            self.assertEqual(new_run_id(cfg, now), "20250320T120000Z-2")
 
     def test_rolling_window_never_reuses_the_full_runs_raw_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
