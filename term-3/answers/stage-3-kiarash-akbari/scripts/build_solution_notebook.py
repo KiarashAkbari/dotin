@@ -127,15 +127,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path.cwd() / "src"))
 import pandas as pd
 
-from credit import columns, cost, db, evaluate, features, measure, missingness, models, prep, read, report, split, tables
+from credit import columns, cost, db, evaluate, features, measure, missingness, models, paths, prep, read, report, split, tables
 from credit.config import load_credit_config
 from credit.predict import score_file
 from data_factory.manifest import code_version
 
 SEED = {SEED}
 RUN_LIGHT = False
-engine = db.engine_for(Path("../stage-1/config/default.toml"))
-credit_cfg = load_credit_config(Path("config/credit.toml"))
+# stage 1 is the sibling folder stage-1-kiarash-akbari, found from the package itself
+engine = db.engine_for(paths.stage1_config())
+credit_cfg = load_credit_config(paths.credit_config())
 print(f"seed={{SEED}} light={{RUN_LIGHT}} schema={{credit_cfg.schema}} code={{code_version()}}")""",
     ),
     (

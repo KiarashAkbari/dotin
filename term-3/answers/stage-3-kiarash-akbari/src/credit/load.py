@@ -49,6 +49,7 @@ from .config import (
     read_toml,
 )
 from .db import engine_for
+from .paths import stage1_config
 from .source import CsvFileSource, file_fingerprint, file_sha256
 from .validate import CreditReasonCode, parse_stream
 
@@ -492,7 +493,11 @@ def resolve_credit_config(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m credit.load")
-    parser.add_argument("--config", default="../stage-1/config/default.toml")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="stage 1 config; default: $CREDIT_STAGE1_CONFIG or the sibling stage-1 folder",
+    )
     parser.add_argument("--credit-config", default=None)
     parser.add_argument(
         "--reset", action="store_true", help="drop the credit schema first"
@@ -507,8 +512,9 @@ def main(argv: list[str] | None = None) -> int:
 
     credit_cfg: CreditConfig | None = None
     try:
+        config_path = Path(args.config) if args.config else stage1_config()
         credit_cfg = resolve_credit_config(
-            Path(args.config), Path(args.credit_config) if args.credit_config else None
+            config_path, Path(args.credit_config) if args.credit_config else None
         )
         if args.dry_run:
             records, report, _fetch = collect_records(credit_cfg)
@@ -519,7 +525,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"reasons={counts or '{}'}"
             )
             return int(ExitCode.OK)
-        engine = engine_for(Path(args.config))
+        engine = engine_for(config_path)
         try:
             result = ingest(
                 credit_cfg,

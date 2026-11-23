@@ -22,7 +22,7 @@ ROOT = HERE.parents[0]
 for candidate in (
     HERE,
     ROOT / "src",
-    ROOT.parents[1] / "stage-1" / "src",
+    ROOT.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))

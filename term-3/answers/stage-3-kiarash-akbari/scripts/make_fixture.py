@@ -35,7 +35,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-for candidate in (ROOT / "src", ROOT / "tests", ROOT.parents[1] / "stage-1" / "src"):
+for candidate in (ROOT / "src", ROOT / "tests", ROOT.parents[1] / "stage-1-kiarash-akbari" / "src"):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 

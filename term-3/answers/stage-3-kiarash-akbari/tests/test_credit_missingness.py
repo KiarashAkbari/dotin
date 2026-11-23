@@ -11,7 +11,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1" / "src",
+    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
