@@ -4,8 +4,8 @@
 Checklist 5.3 asks for two things the offline suite cannot give: a repeatable duration for the
 query that builds the frame, and its ``EXPLAIN (ANALYZE)`` plan. ``capstone features`` already owns
 the first one -- :func:`capstone.features.build` runs the timed statement ``repeat`` times and
-judges the mean against ``features.feature_query_ms`` -- but it prints a single number and then
-forgets the
+judges the fastest repeat against ``features.feature_query_ms`` (:data:`capstone.features.TIMING_BASIS`),
+reporting the mean beside it -- but it prints a single number and then forgets the
 plan, so a reader told "412 ms" cannot see *why*, and a reader told "over the ceiling" cannot see
 where to cut. This script writes both down.
 
@@ -60,6 +60,7 @@ from capstone.features import (  # noqa: E402  (the point of the import is the s
     FRAME_READ_SQL,
     FRAME_TIMING_SQL,
     FRAME_VIEW,
+    TIMING_BASIS,
     MINIMUM_FEATURES,
     TECHNICAL_COLUMNS,
     connect,
@@ -333,6 +334,28 @@ def show_spill(plan: dict) -> None:
     )
 
 
+def ceiling_verdict(timing: dict, read: dict, ceiling: float) -> dict:
+    """Judge the frame the way ``capstone.features`` does, and keep the other statistic in sight.
+
+    The step refuses on the fastest repeat, because on a shared machine the slow runs measure the
+    neighbours; a probe that judged the *mean* instead would print a verdict its own subject does
+    not reach, and that is what this file used to do. So the basis comes from the module, not from
+    a copy of its wording. The mean is still reported -- and ``mean_over_ms`` is what makes a
+    "passes on the best, fails on the mean" machine visible in the log instead of a footnote.
+    """
+    judged = timing["min_ms"]
+    return {
+        "basis": TIMING_BASIS,
+        "judged_ms": judged,
+        "over_ms": round(judged - ceiling, 1) if judged > ceiling else None,
+        "mean_ms": timing["mean_ms"],
+        "mean_over_ms": (
+            round(timing["mean_ms"] - ceiling, 1) if timing["mean_ms"] > ceiling else None
+        ),
+        "read_mean_ms": read["mean_ms"],
+    }
+
+
 def advice(hot: list[dict], over_ms: float | None) -> list[str]:
     """What the plan says to do, or the one line that says the plan is fine.
 
@@ -342,7 +365,10 @@ def advice(hot: list[dict], over_ms: float | None) -> list[str]:
     """
     if over_ms is None:
         return []
-    lines = [f"the mean is {over_ms:.1f} ms over the ceiling; the plan names where that goes:"]
+    lines = [
+        f"the feature query is {over_ms:.1f} ms over the ceiling ({TIMING_BASIS});"
+        " the plan names where that goes:"
+    ]
     for item in hot:
         key = item["node"]
         text = ADVICE.get(key)
@@ -430,15 +456,24 @@ def main(argv: list[str]) -> int:
         for item in hotspots(plans["read"]):
             relation = f" on {item['relation']}" if item["relation"] else ""
             print(f"      {item['node']}{relation}: {item['self_ms']} ms self time, {item['rows']} rows")
-        over = timing["mean_ms"] - ceiling if timing["mean_ms"] > ceiling else None
+        verdict = ceiling_verdict(timing, read, ceiling)
+        over = verdict["over_ms"]
         print("\n------------------------------------------------------------------------")
         print("verdict")
         print("------------------------------------------------------------------------")
         if over is None:
+            mean_note = (
+                f" The mean ({verdict['mean_ms']} ms) is {verdict['mean_over_ms']} ms over it, so a"
+                " slower machine can fail where this one passes -- the basis is the rule, not a"
+                " courtesy."
+                if verdict["mean_over_ms"] is not None
+                else f" The mean, {verdict['mean_ms']} ms, clears it too."
+            )
             print(
-                f"within the ceiling: the timed mean is {timing['mean_ms']} ms against {ceiling} ms."
-                f" The whole-frame read is {read['mean_ms']} ms, which the ceiling does not cover and"
-                " the brief does not ask about -- recorded so nobody has to guess it later."
+                f"within the ceiling on the {verdict['basis']}: {verdict['judged_ms']} ms against"
+                f" {ceiling} ms.{mean_note} The whole-frame read is {verdict['read_mean_ms']} ms,"
+                " which the ceiling does not cover and the brief does not ask about -- recorded so"
+                " nobody has to guess it later."
             )
         else:
             for line in advice(hotspots(plans["timing"]), over):
@@ -452,9 +487,13 @@ def main(argv: list[str]) -> int:
                     "frame_columns": shape["columns"],
                     "frame_features": shape["features"],
                     "ceiling_ms": ceiling,
+                    "judged_on": verdict["basis"],
+                    "timed_min_ms": verdict["judged_ms"],
                     "timed_mean_ms": timing["mean_ms"],
+                    "timed_max_ms": timing["max_ms"],
                     "read_mean_ms": read["mean_ms"],
                     "over_ceiling_ms": over,
+                    "mean_over_ceiling_ms": verdict["mean_over_ms"],
                 },
                 sort_keys=True,
             )

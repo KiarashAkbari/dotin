@@ -553,7 +553,20 @@
   جداگانهٔ لاگ: میانگین ۴۳۳٫۳ ms، و خواندن با انتقال میانگین ۱۱۲۷٫۱ ms.
 - **عوارض:** حاشیه تا ۵۰۰ کم است و بینِ اجراها حدود ۲۰ ms جابه‌جا می‌شود؛ «بهترینِ پنج» خوش‌بینانه‌تر از میانگین است،
   پس هر دو را گزارش می‌کنیم. خواندنِ کامل با انتقال بالای سقف است و این را پنهان نمی‌کنیم.
-- **شاهد:** `src/capstone/features.py` (`FRAME_TIMING_SQL`)؛ `docs/evidence/chain-run-log.jsonl`؛ `frame-performance-full-dataset.txt`.
+- **بازنگری (این دور):** همان جمله در سه جا نوشته شده بود و دو جا غلط بود — docstringِ ماژول و
+  docstringِ `check_query_cost` می‌گفتند «میانگین داوری می‌شود» در حالی که `build` مقدار `best_ms` را
+  می‌داد، و `docs/evidence/frame-performance-run.py` هم که ردیفش را «timed (what capstone features
+  judges)» برچسب زده بود، `mean_ms` را با سقف می‌ساخت. دو آماره می‌توانند دو طرفِ سقف باشند، پس این
+  یک ایرادِ نگارشی نبود: لاگِ آن اسکریپت می‌توانست حکمی را چاپ کند که گام اجراکننده هرگز به آن
+  نمی‌رسد. اصلاح: یک ثابتِ `TIMING_BASIS` که هم پیامِ refusal و هم فیلدِ `judged_on` از آن می‌آیند،
+  ثابتِ همان تابع در اسکریپت نشسته، و دو تستِ آفلاین در
+  `tests/test_frame_performance_probe.py` («میانگین بالای سقف، بهترینِ پایینِ سقف» و برعکسش) آن را
+  قرمز/سبز کرده‌اند. چون `frame-performance-real-run.txt` دانشجو `min 451.9 | max 523.2` را دارد،
+  حاشیۀ *داوری‌شده* ۴۸٫۱ ms است و حاشیۀ میانگین ۱۱٫۴ ms — سطرِ ۵.۳ چک‌لیست حالا هر دو را می‌گوید، و
+  گفتۀ «حاشیه از خطای اندازه‌گیری کوچک‌تر است» فقط به میانگین می‌چسبد.
+- **شاهد:** `src/capstone/features.py` (`FRAME_TIMING_SQL`، `TIMING_BASIS`)؛
+  `docs/evidence/frame-performance-run.py` (`ceiling_verdict`)؛ `docs/evidence/chain-run-log.jsonl`؛
+  `frame-performance-full-dataset.txt`؛ `frame-performance-real-run.txt`.
 - **وضعیت:** انجام‌شده.
 
 ## ۱۷. بستهٔ ورودیِ پیش‌بینی

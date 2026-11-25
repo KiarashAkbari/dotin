@@ -16,9 +16,10 @@ What ``build`` does, in order, because the order is the point:
    to the number a report would quote, not only in a test suite somebody has to remember to run;
 4. it counts what the frame holds (rows, features) and refuses a frame that is too small to be
    the one the brief asked for;
-5. it times the query that generates the frame and judges the mean against the ceiling in config,
-   through ``check_query_cost``, which is where ``02``'s house rule lives: one run is not a
-   measurement.
+5. it times the query that generates the frame and judges the fastest repeat against the ceiling
+   in config, through ``check_query_cost`` -- the statistic is ``TIMING_BASIS``, named once here
+   instead of re-described in a docstring and a manifest field, which is how this sentence managed
+   to disagree with the code it documents.
 
 What it does not do: reimplement any feature in pandas. The SQL is the definition; this module is
 the harness that refuses to let an unchecked version of it be called "the features". The connection
@@ -49,6 +50,11 @@ FRAME_VIEW = "capstone.v_feature_frame"
 #: ``count(*)`` wrapper let PostgreSQL skip projecting columns and drop provably unique LEFT JOINs;
 #: on the full dataset it measured ~0.9 s against ~5 s for the real query (review B9).
 FRAME_TIMING_SQL = "EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM {frame}"
+#: the statistic the ceiling verdict is taken on, in one place. ``run`` judges the fastest repeat
+#: (on a shared machine the slow runs measure the neighbours), reports the mean beside it, and the
+#: refusal prints the same string the manifest records -- so a change of rule is one edit, and a
+#: docstring that lags behind is a test failure rather than a sentence nobody re-reads.
+TIMING_BASIS = "best of the repeats"
 #: the same frame with the transfer included. Nothing in ``src/`` runs this -- it exists so the
 #: performance log can show how much of the wall time is the database and how much is the client,
 #: which is the one number a reader is entitled to ask for after "under 500 ms" is claimed.
@@ -132,15 +138,16 @@ def check_query_cost(measured_ms: float, config: CapstoneConfig) -> float:
     """Fail loudly when the feature query broke the ceiling the brief states.
 
     ``02`` settled the house rule for a number like this: one run and a read-off value
-    is not a measurement. The caller passes a mean over repeated runs -- warm and cold
-    -- and this function only judges it, so no duration is invented here.
+    is not a measurement. The caller passes the statistic named in ``TIMING_BASIS`` -- the
+    fastest of the repeats, with the mean and every run reported beside it for the reader to
+    weigh -- and this function only judges it, so no duration is invented here.
     """
     ceiling = config.features.feature_query_ms
     if measured_ms < 0:
         raise BudgetError(f"a duration cannot be negative: {measured_ms} ms")
     if measured_ms > ceiling:
         raise BudgetError(
-            f"the feature query took {measured_ms:.1f} ms (best of the repeats), over the {ceiling} ms the "
+            f"the feature query took {measured_ms:.1f} ms ({TIMING_BASIS}), over the {ceiling} ms the "
             "brief allows (checklist 5.3). Store the EXPLAIN (ANALYZE) output with the number "
             "and fix the query; raising the ceiling in config is a report finding, not a fix.",
             context={"measured_ms": measured_ms, "ceiling_ms": ceiling},
@@ -505,9 +512,9 @@ def build(
         connection.close()
 
     mean_ms = sum(durations_ms) / len(durations_ms)
-    # judged on the best of the repeats: on a shared machine the slow runs measure the neighbours,
-    # the fastest one is the closest reading of the query itself. Every run is still returned, so a
-    # reader can see the spread the verdict was taken from (decisions.md section 16).
+    # ``TIMING_BASIS``: on a shared machine the slow runs measure the neighbours, and the fastest
+    # one is the closest reading of the query itself. Every run is still returned, so a reader can
+    # see the spread the verdict was taken from (decisions.md section 16).
     best_ms = min(durations_ms)
     check_query_cost(best_ms, config)
     return {
@@ -519,7 +526,7 @@ def build(
         "migrations_applied": [path.name for path in migrations],
         "query_ms_mean": round(mean_ms, 3),
         "query_ms_best": round(best_ms, 3),
-        "judged_on": "best of the repeats",
+        "judged_on": TIMING_BASIS,
         "query_ms_runs": [round(value, 3) for value in durations_ms],
         "ceiling_ms": config.features.feature_query_ms,
         "cold_ms": round(durations_ms[0], 3),

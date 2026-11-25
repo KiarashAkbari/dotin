@@ -134,6 +134,28 @@ class FeatureCeilingTest(unittest.TestCase):
         with self.assertRaises(CapstoneError):
             check_query_cost(-1.0, self.config)
 
+    def test_the_verdict_names_the_statistic_the_caller_judges(self) -> None:
+        """One constant for the basis, or the docstrings and the manifest drift apart.
+
+        They had: the module and this function both said the mean was judged while the caller
+        handed over the fastest repeat, and the manifest field said "best". The refusal now prints
+        the same string ``run`` records, so a future change of rule is a one-line edit that this
+        test follows, and a docstring that lags behind is the failure mode it refuses to hide.
+        """
+        from capstone import features
+
+        self.assertEqual(features.TIMING_BASIS, "best of the repeats")
+        with self.assertRaises(CapstoneError) as caught:
+            check_query_cost(780.0, self.config)
+        self.assertIn(features.TIMING_BASIS, str(caught.exception))
+        source = (Path(__file__).resolve().parents[1] / "src" / "capstone" / "features.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"judged_on": TIMING_BASIS,', source)
+        self.assertNotIn(
+            '"judged_on": "', source, "a second basis string, one edit away from lying"
+        )
+
     def test_the_ceiling_comes_from_the_config_not_from_this_file(self) -> None:
         """Raise the measured number, lower the ceiling: the refusal has to follow the file."""
         self.assertEqual(self.config.features.feature_query_ms, 500)
