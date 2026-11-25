@@ -1,0 +1,1690 @@
+{
+ "q1_monthly_category_sales.sql": {
+  "before": {
+   "elapsed_ms": [
+    318.859,
+    317.597,
+    319.115,
+    321.972,
+    322.285,
+    318.179,
+    318.566,
+    325.264,
+    320.03,
+    321.188,
+    319.316,
+    320.525,
+    318.674,
+    318.867,
+    324.123
+   ],
+   "median_ms": 319.316,
+   "p95_ms": 325.264,
+   "max_ms": 325.264,
+   "under_budget_median": false,
+   "all_runs_under_budget": false,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "993e52e2012ffe919e0d2239aeb11bb3430ff2c7107a9dec5b163c0625161239",
+   "server_execution_ms": 363.289,
+   "planning_ms": 0.403,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "orders",
+     "products"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 23526.7,
+     "actual_total_ms": 361.718
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 19632.32,
+     "actual_total_ms": 330.087
+    },
+    {
+     "depth": 2,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 10027.84,
+     "actual_total_ms": 160.772
+    },
+    {
+     "depth": 3,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 8000.99,
+     "actual_total_ms": 97.638
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 112650,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 9.29
+    },
+    {
+     "depth": 4,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 30.491
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 16.124
+    },
+    {
+     "depth": 3,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 7.193
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "products",
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 3.061
+    }
+   ]
+  },
+  "after": {
+   "elapsed_ms": [
+    7.635,
+    7.66,
+    7.779,
+    9.074,
+    7.699,
+    7.69,
+    7.912,
+    8.945,
+    7.567,
+    7.539,
+    7.448,
+    7.659,
+    7.61,
+    7.737,
+    7.625
+   ],
+   "median_ms": 7.66,
+   "p95_ms": 9.074,
+   "max_ms": 9.074,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "d7ece02221fecaf2bd1e08ca52ffb5af0a0658f286ec011fca4146d7713068f1",
+   "server_execution_ms": 7.773,
+   "planning_ms": 0.423,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Merge Append",
+     "relation": null,
+     "index": null,
+     "est_rows": 38371,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 13272.55,
+     "actual_total_ms": 7.661
+    },
+    {
+     "depth": 1,
+     "node": "Index Scan",
+     "relation": "monthly_category_snapshot",
+     "index": "uq_monthly_category_snapshot_grain",
+     "est_rows": 1282,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 91.88,
+     "actual_total_ms": 0.227
+    },
+    {
+     "depth": 1,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 12796.95,
+     "actual_total_ms": 7.29
+    },
+    {
+     "depth": 2,
+     "node": "Result",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 0.34,
+     "actual_total_ms": 0.019
+    },
+    {
+     "depth": 3,
+     "node": "Limit",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 0.32,
+     "actual_total_ms": 0.014
+    },
+    {
+     "depth": 4,
+     "node": "Index Only Scan",
+     "relation": "monthly_category_snapshot",
+     "index": "uq_monthly_category_snapshot_grain",
+     "est_rows": 1282,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 58.71,
+     "actual_total_ms": 0.012
+    },
+    {
+     "depth": 2,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 11498.5,
+     "actual_total_ms": 7.288
+    },
+    {
+     "depth": 3,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 8590.96,
+     "actual_total_ms": 7.284
+    },
+    {
+     "depth": 4,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 7129.75,
+     "actual_total_ms": 0.067
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 0.009
+    },
+    {
+     "depth": 5,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32740,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 2999.28,
+     "actual_total_ms": 0.044
+    },
+    {
+     "depth": 6,
+     "node": "Bitmap Heap Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 32740,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 2999.28,
+     "actual_total_ms": 0.043
+    },
+    {
+     "depth": 7,
+     "node": "Bitmap Index Scan",
+     "relation": null,
+     "index": "ix_orders_purchase_ts",
+     "est_rows": 33147,
+     "actual_rows": 4,
+     "loops": 1,
+     "total_cost": 684.89,
+     "actual_total_ms": 0.03
+    },
+    {
+     "depth": 4,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 7.2
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "products",
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 3.095
+    }
+   ]
+  },
+  "same_result": true,
+  "speedup": 41.69
+ },
+ "q2_delivery_by_state_month.sql": {
+  "before": {
+   "elapsed_ms": [
+    149.258,
+    151.766,
+    148.78,
+    147.881,
+    147.587,
+    148.673,
+    148.608,
+    148.222,
+    149.052,
+    147.737,
+    149.198,
+    148.679,
+    148.501,
+    147.275,
+    152.966
+   ],
+   "median_ms": 148.673,
+   "p95_ms": 152.966,
+   "max_ms": 152.966,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 556,
+   "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da",
+   "sql_sha256": "01bcc480f50845cf839242041afec5d81aaa26d8abbaea04e9b008a3a801aa2e",
+   "server_execution_ms": 179.931,
+   "planning_ms": 0.212,
+   "scans": {
+    "seq_scan": [
+     "orders",
+     "customers"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 556,
+     "loops": 1,
+     "total_cost": 20338.03,
+     "actual_total_ms": 178.716
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 15421.2,
+     "actual_total_ms": 151.348
+    },
+    {
+     "depth": 2,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 7453.56,
+     "actual_total_ms": 101.624
+    },
+    {
+     "depth": 3,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 16.247
+    },
+    {
+     "depth": 3,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 99441,
+     "actual_rows": 99441,
+     "loops": 1,
+     "total_cost": 2444.41,
+     "actual_total_ms": 28.25
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "customers",
+     "index": null,
+     "est_rows": 99441,
+     "actual_rows": 99441,
+     "loops": 1,
+     "total_cost": 2444.41,
+     "actual_total_ms": 11.363
+    }
+   ]
+  },
+  "after": {
+   "elapsed_ms": [
+    114.372,
+    115.006,
+    114.581,
+    113.698,
+    112.526,
+    113.114,
+    112.888,
+    112.789,
+    111.996,
+    113.896,
+    112.044,
+    113.144,
+    114.003,
+    114.127,
+    111.856
+   ],
+   "median_ms": 113.144,
+   "p95_ms": 115.006,
+   "max_ms": 115.006,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 556,
+   "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da",
+   "sql_sha256": "e65faf804615d360d19b7515de93092037f636b3f90b311f68a20e831f2e758d",
+   "server_execution_ms": 135.106,
+   "planning_ms": 0.219,
+   "scans": {
+    "seq_scan": [
+     "orders",
+     "customers"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 556,
+     "loops": 1,
+     "total_cost": 22211.11,
+     "actual_total_ms": 134.977
+    },
+    {
+     "depth": 1,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 556,
+     "loops": 1,
+     "total_cost": 12370.39,
+     "actual_total_ms": 134.635
+    },
+    {
+     "depth": 2,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 7453.56,
+     "actual_total_ms": 101.945
+    },
+    {
+     "depth": 3,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 16.941
+    },
+    {
+     "depth": 3,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 99441,
+     "actual_rows": 99441,
+     "loops": 1,
+     "total_cost": 2444.41,
+     "actual_total_ms": 27.466
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "customers",
+     "index": null,
+     "est_rows": 99441,
+     "actual_rows": 99441,
+     "loops": 1,
+     "total_cost": 2444.41,
+     "actual_total_ms": 11.315
+    },
+    {
+     "depth": 1,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 556,
+     "loops": 1,
+     "total_cost": 1873.08,
+     "actual_total_ms": 134.753
+    }
+   ]
+  },
+  "same_result": true,
+  "speedup": 1.31
+ },
+ "q3_delay_and_satisfaction.sql": {
+  "before": {
+   "elapsed_ms": [
+    200.324,
+    199.141,
+    199.732,
+    202.409,
+    199.37,
+    200.942,
+    201.542,
+    200.71,
+    199.97,
+    208.907,
+    206.893,
+    224.874,
+    222.649,
+    229.714,
+    220.948
+   ],
+   "median_ms": 201.542,
+   "p95_ms": 229.714,
+   "max_ms": 229.714,
+   "under_budget_median": false,
+   "all_runs_under_budget": false,
+   "rows": 4,
+   "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847",
+   "sql_sha256": "12b3ac9c2a6e679fd12f0a11935b203a0e945844ec8d39f5785f52781e830c7c",
+   "server_execution_ms": 256.808,
+   "planning_ms": 0.297,
+   "scans": {
+    "seq_scan": [
+     "orders",
+     "order_reviews"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 90317,
+     "actual_rows": 4,
+     "loops": 1,
+     "total_cost": 29763.91,
+     "actual_total_ms": 256.593
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 92616,
+     "actual_rows": 95824,
+     "loops": 1,
+     "total_cost": 20923.52,
+     "actual_total_ms": 240.199
+    },
+    {
+     "depth": 2,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 92616,
+     "actual_rows": 95824,
+     "loops": 1,
+     "total_cost": 13051.63,
+     "actual_total_ms": 220.727
+    },
+    {
+     "depth": 3,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 16.282
+    },
+    {
+     "depth": 3,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 5746.05,
+     "actual_total_ms": 146.458
+    },
+    {
+     "depth": 4,
+     "node": "Subquery Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 5746.05,
+     "actual_total_ms": 121.216
+    },
+    {
+     "depth": 5,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 4762.66,
+     "actual_total_ms": 111.757
+    },
+    {
+     "depth": 6,
+     "node": "Seq Scan",
+     "relation": "order_reviews",
+     "index": null,
+     "est_rows": 99224,
+     "actual_rows": 99224,
+     "loops": 1,
+     "total_cost": 2789.24,
+     "actual_total_ms": 8.891
+    }
+   ]
+  },
+  "after": {
+   "elapsed_ms": [
+    183.387,
+    209.5,
+    185.913,
+    188.819,
+    186.955,
+    203.961,
+    165.964,
+    165.942,
+    168.59,
+    167.678,
+    169.0,
+    167.772,
+    167.04,
+    166.604,
+    167.875
+   ],
+   "median_ms": 168.59,
+   "p95_ms": 209.5,
+   "max_ms": 209.5,
+   "under_budget_median": true,
+   "all_runs_under_budget": false,
+   "rows": 4,
+   "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847",
+   "sql_sha256": "447abe9f45354ba1efef61200e6905015243e293d2d00072bfd61f47113ebaf3",
+   "server_execution_ms": 203.295,
+   "planning_ms": 0.272,
+   "scans": {
+    "seq_scan": [
+     "orders"
+    ],
+    "index_scan": [
+     "ix_order_reviews_order_score"
+    ]
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 90317,
+     "actual_rows": 4,
+     "loops": 1,
+     "total_cost": 32333.18,
+     "actual_total_ms": 203.224
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 92616,
+     "actual_rows": 95824,
+     "loops": 1,
+     "total_cost": 23492.79,
+     "actual_total_ms": 186.718
+    },
+    {
+     "depth": 2,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 92616,
+     "actual_rows": 95824,
+     "loops": 1,
+     "total_cost": 15620.9,
+     "actual_total_ms": 165.951
+    },
+    {
+     "depth": 3,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 7378.19,
+     "actual_total_ms": 71.542
+    },
+    {
+     "depth": 4,
+     "node": "Index Only Scan",
+     "relation": "order_reviews",
+     "index": "ix_order_reviews_order_score",
+     "est_rows": 99224,
+     "actual_rows": 99224,
+     "loops": 1,
+     "total_cost": 5404.78,
+     "actual_total_ms": 12.311
+    },
+    {
+     "depth": 3,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 33.571
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 93654,
+     "actual_rows": 96470,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 16.356
+    }
+   ]
+  },
+  "same_result": true,
+  "speedup": 1.2
+ },
+ "q4_top_sellers.sql": {
+  "before": {
+   "elapsed_ms": [
+    469.975,
+    467.479,
+    470.958,
+    472.255,
+    458.818,
+    454.341,
+    458.047,
+    457.216,
+    461.721,
+    455.672,
+    455.251,
+    462.706,
+    464.641,
+    450.729,
+    451.177
+   ],
+   "median_ms": 458.818,
+   "p95_ms": 472.255,
+   "max_ms": 472.255,
+   "under_budget_median": false,
+   "all_runs_under_budget": false,
+   "rows": 20,
+   "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967",
+   "sql_sha256": "909d99892cf1223f3ae050c76029de4fa978faced95509fed00b50036c9eef81",
+   "server_execution_ms": 528.051,
+   "planning_ms": 0.389,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "orders",
+     "products",
+     "order_reviews"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Limit",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 1662224.04,
+     "actual_total_ms": 527.634
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 200,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 1662224.49,
+     "actual_total_ms": 527.629
+    },
+    {
+     "depth": 2,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 200,
+     "actual_rows": 3053,
+     "loops": 1,
+     "total_cost": 1662218.67,
+     "actual_total_ms": 527.079
+    },
+    {
+     "depth": 3,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 54709919,
+     "actual_rows": 99542,
+     "loops": 1,
+     "total_cost": 20917.6,
+     "actual_total_ms": 464.864
+    },
+    {
+     "depth": 4,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 99542,
+     "loops": 1,
+     "total_cost": 12531.37,
+     "actual_total_ms": 274.919
+    },
+    {
+     "depth": 5,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 9471.5,
+     "actual_total_ms": 160.455
+    },
+    {
+     "depth": 6,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 8000.99,
+     "actual_total_ms": 107.398
+    },
+    {
+     "depth": 7,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 112650,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 9.374
+    },
+    {
+     "depth": 7,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 34.821
+    },
+    {
+     "depth": 8,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 17.296
+    },
+    {
+     "depth": 6,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 7.294
+    },
+    {
+     "depth": 7,
+     "node": "Seq Scan",
+     "relation": "products",
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 3.185
+    },
+    {
+     "depth": 4,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 5746.05,
+     "actual_total_ms": 136.644
+    },
+    {
+     "depth": 5,
+     "node": "Subquery Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 5746.05,
+     "actual_total_ms": 112.808
+    },
+    {
+     "depth": 6,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 98339,
+     "actual_rows": 98673,
+     "loops": 1,
+     "total_cost": 4762.66,
+     "actual_total_ms": 103.47
+    },
+    {
+     "depth": 7,
+     "node": "Seq Scan",
+     "relation": "order_reviews",
+     "index": null,
+     "est_rows": 99224,
+     "actual_rows": 99224,
+     "loops": 1,
+     "total_cost": 2789.24,
+     "actual_total_ms": 8.169
+    }
+   ]
+  },
+  "after": {
+   "elapsed_ms": [
+    191.302,
+    192.559,
+    191.732,
+    190.242,
+    191.331,
+    190.17,
+    191.167,
+    190.508,
+    191.999,
+    192.26,
+    192.211,
+    194.357,
+    193.835,
+    193.942,
+    194.05
+   ],
+   "median_ms": 191.999,
+   "p95_ms": 194.357,
+   "max_ms": 194.357,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 20,
+   "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967",
+   "sql_sha256": "d545936afc64b644dbe4c5ed7aacad989ac53c9a54e6b88c20ff67fe38fc3a2e",
+   "server_execution_ms": 235.886,
+   "planning_ms": 0.472,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "order_items"
+    ],
+    "index_scan": [
+     "ix_orders_inactive",
+     "ix_orders_dispatch_cover",
+     "ix_order_reviews_order_score"
+    ]
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 10615.82,
+     "actual_total_ms": 235.782
+    },
+    {
+     "depth": 1,
+     "node": "Limit",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 5845.1,
+     "actual_total_ms": 64.41
+    },
+    {
+     "depth": 2,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 2385,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 5851.02,
+     "actual_total_ms": 64.405
+    },
+    {
+     "depth": 3,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 2385,
+     "actual_rows": 3053,
+     "loops": 1,
+     "total_cost": 5781.59,
+     "actual_total_ms": 63.974
+    },
+    {
+     "depth": 4,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 4917.27,
+     "actual_total_ms": 31.696
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 112650,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 8.97
+    },
+    {
+     "depth": 5,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 1220,
+     "actual_rows": 1234,
+     "loops": 1,
+     "total_cost": 66.58,
+     "actual_total_ms": 0.28
+    },
+    {
+     "depth": 6,
+     "node": "Index Only Scan",
+     "relation": "orders",
+     "index": "ix_orders_inactive",
+     "est_rows": 1220,
+     "actual_rows": 1234,
+     "loops": 1,
+     "total_cost": 66.58,
+     "actual_total_ms": 0.129
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 93,
+     "actual_rows": 18908,
+     "loops": 1,
+     "total_cost": 4767.63,
+     "actual_total_ms": 226.926
+    },
+    {
+     "depth": 2,
+     "node": "Nested Loop",
+     "relation": null,
+     "index": null,
+     "est_rows": 93,
+     "actual_rows": 18908,
+     "loops": 1,
+     "total_cost": 4764.35,
+     "actual_total_ms": 218.629
+    },
+    {
+     "depth": 3,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 93,
+     "actual_rows": 18908,
+     "loops": 1,
+     "total_cost": 4349.34,
+     "actual_total_ms": 149.995
+    },
+    {
+     "depth": 4,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 933,
+     "actual_rows": 18908,
+     "loops": 1,
+     "total_cost": 4334.93,
+     "actual_total_ms": 80.721
+    },
+    {
+     "depth": 5,
+     "node": "Nested Loop",
+     "relation": null,
+     "index": null,
+     "est_rows": 933,
+     "actual_rows": 21539,
+     "loops": 1,
+     "total_cost": 4316.27,
+     "actual_total_ms": 67.428
+    },
+    {
+     "depth": 6,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 945,
+     "actual_rows": 21587,
+     "loops": 1,
+     "total_cost": 3858.04,
+     "actual_total_ms": 25.506
+    },
+    {
+     "depth": 7,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 112650,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 9.231
+    },
+    {
+     "depth": 7,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 0.4,
+     "actual_total_ms": 0.008
+    },
+    {
+     "depth": 8,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 0.4,
+     "actual_total_ms": 0.003
+    },
+    {
+     "depth": 6,
+     "node": "Index Only Scan",
+     "relation": "orders",
+     "index": "ix_orders_dispatch_cover",
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 21587,
+     "total_cost": 0.48,
+     "actual_total_ms": 0.002
+    },
+    {
+     "depth": 4,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 0.4,
+     "actual_total_ms": 64.421
+    },
+    {
+     "depth": 5,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 20,
+     "actual_rows": 20,
+     "loops": 1,
+     "total_cost": 0.4,
+     "actual_total_ms": 64.41
+    },
+    {
+     "depth": 3,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 18908,
+     "total_cost": 4.45,
+     "actual_total_ms": 0.003
+    },
+    {
+     "depth": 4,
+     "node": "Index Only Scan",
+     "relation": "order_reviews",
+     "index": "ix_order_reviews_order_score",
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 18908,
+     "total_cost": 4.44,
+     "actual_total_ms": 0.003
+    }
+   ]
+  },
+  "same_result": true,
+  "speedup": 2.39
+ },
+ "q5_payment_distribution.sql": {
+  "before": {
+   "elapsed_ms": [
+    475.193,
+    473.928,
+    476.689,
+    470.334,
+    475.821,
+    469.461,
+    463.022,
+    469.093,
+    471.61,
+    467.459,
+    468.269,
+    465.283,
+    460.605,
+    468.77,
+    468.972
+   ],
+   "median_ms": 469.093,
+   "p95_ms": 476.689,
+   "max_ms": 476.689,
+   "under_budget_median": false,
+   "all_runs_under_budget": false,
+   "rows": 27,
+   "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984",
+   "sql_sha256": "8431a89292fa31a0b1fd7ef4cde8b3940048adc7bd9281be289d555a35fe7551",
+   "server_execution_ms": 552.68,
+   "planning_ms": 0.314,
+   "scans": {
+    "seq_scan": [
+     "payments",
+     "orders"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "WindowAgg",
+     "relation": null,
+     "index": null,
+     "est_rows": 10261,
+     "actual_rows": 27,
+     "loops": 1,
+     "total_cost": 26333.12,
+     "actual_total_ms": 551.389
+    },
+    {
+     "depth": 1,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 6772.35,
+     "actual_total_ms": 96.685
+    },
+    {
+     "depth": 2,
+     "node": "Seq Scan",
+     "relation": "payments",
+     "index": null,
+     "est_rows": 103886,
+     "actual_rows": 103886,
+     "loops": 1,
+     "total_cost": 2219.86,
+     "actual_total_ms": 8.158
+    },
+    {
+     "depth": 2,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 32.487
+    },
+    {
+     "depth": 3,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 15.762
+    },
+    {
+     "depth": 1,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 200,
+     "actual_rows": 98206,
+     "loops": 1,
+     "total_cost": 2824.3,
+     "actual_total_ms": 168.106
+    },
+    {
+     "depth": 2,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 2052.22,
+     "actual_total_ms": 86.665
+    },
+    {
+     "depth": 1,
+     "node": "Nested Loop",
+     "relation": null,
+     "index": null,
+     "est_rows": 10261,
+     "actual_rows": 27,
+     "loops": 1,
+     "total_cost": 16556.91,
+     "actual_total_ms": 551.337
+    },
+    {
+     "depth": 2,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 10261,
+     "actual_rows": 27,
+     "loops": 1,
+     "total_cost": 16422.63,
+     "actual_total_ms": 524.7
+    },
+    {
+     "depth": 3,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 14703.9,
+     "actual_total_ms": 499.063
+    },
+    {
+     "depth": 4,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 5906.63,
+     "actual_total_ms": 297.967
+    },
+    {
+     "depth": 5,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 2052.22,
+     "actual_total_ms": 40.0
+    },
+    {
+     "depth": 5,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 200,
+     "actual_rows": 98206,
+     "loops": 1,
+     "total_cost": 4.0,
+     "actual_total_ms": 201.897
+    },
+    {
+     "depth": 6,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 200,
+     "actual_rows": 98206,
+     "loops": 1,
+     "total_cost": 4.0,
+     "actual_total_ms": 188.538
+    },
+    {
+     "depth": 2,
+     "node": "Materialize",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 27,
+     "total_cost": 6.02,
+     "actual_total_ms": 0.986
+    },
+    {
+     "depth": 3,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 6.01,
+     "actual_total_ms": 26.604
+    },
+    {
+     "depth": 4,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 200,
+     "actual_rows": 98206,
+     "loops": 1,
+     "total_cost": 4.0,
+     "actual_total_ms": 6.133
+    }
+   ]
+  },
+  "after": {
+   "elapsed_ms": [
+    157.399,
+    157.435,
+    156.579,
+    157.98,
+    158.144,
+    158.789,
+    157.717,
+    157.591,
+    155.098,
+    154.794,
+    154.543,
+    156.081,
+    155.302,
+    156.727,
+    158.533
+   ],
+   "median_ms": 157.399,
+   "p95_ms": 158.789,
+   "max_ms": 158.789,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 27,
+   "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984",
+   "sql_sha256": "7c02cb64c4b7b8eeb45f9d6953ca3d6f97d0b44cfa323478968ca59de0a184c0",
+   "server_execution_ms": 180.251,
+   "planning_ms": 0.316,
+   "scans": {
+    "seq_scan": [],
+    "index_scan": [
+     "ix_payments_order_type_inst",
+     "ix_orders_inactive"
+    ]
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 27,
+     "loops": 1,
+     "total_cost": 17776.75,
+     "actual_total_ms": 180.192
+    },
+    {
+     "depth": 1,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 101,
+     "actual_rows": 28,
+     "loops": 1,
+     "total_cost": 17772.17,
+     "actual_total_ms": 180.093
+    },
+    {
+     "depth": 2,
+     "node": "WindowAgg",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 11100.19,
+     "actual_total_ms": 124.813
+    },
+    {
+     "depth": 3,
+     "node": "Merge Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 102611,
+     "actual_rows": 102573,
+     "loops": 1,
+     "total_cost": 7508.8,
+     "actual_total_ms": 31.262
+    },
+    {
+     "depth": 4,
+     "node": "Index Only Scan",
+     "relation": "payments",
+     "index": "ix_payments_order_type_inst",
+     "est_rows": 103886,
+     "actual_rows": 103886,
+     "loops": 1,
+     "total_cost": 7166.71,
+     "actual_total_ms": 14.603
+    },
+    {
+     "depth": 4,
+     "node": "Index Only Scan",
+     "relation": "orders",
+     "index": "ix_orders_inactive",
+     "est_rows": 1220,
+     "actual_rows": 1234,
+     "loops": 1,
+     "total_cost": 66.58,
+     "actual_total_ms": 0.164
+    },
+    {
+     "depth": 1,
+     "node": "Nested Loop",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 27,
+     "loops": 1,
+     "total_cost": 4.56,
+     "actual_total_ms": 180.17
+    },
+    {
+     "depth": 2,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 27,
+     "loops": 1,
+     "total_cost": 2.27,
+     "actual_total_ms": 180.081
+    },
+    {
+     "depth": 2,
+     "node": "CTE Scan",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 27,
+     "total_cost": 2.27,
+     "actual_total_ms": 0.003
+    }
+   ]
+  },
+  "same_result": true,
+  "speedup": 2.98
+ }
+}

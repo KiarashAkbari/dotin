@@ -1,0 +1,219 @@
+{
+ "captured_at": "2026-11-25T09:42:15+00:00",
+ "query_dir": "queries",
+ "protocol": [
+  "Protocol (same for every query and every variant):",
+  "  * one session with ``db.SESSION_SETTINGS``;",
+  "  * ``warmups`` unmeasured runs, then ``repeats`` measured runs;",
+  "  * a run is timed on the client from execute to the last fetched row, so the",
+  "    number includes planning, execution, transfer and Python decoding;",
+  "  * the result rows are hashed; every run of a query must return the same hash;",
+  "  * the plan is captured once with EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) and"
+ ],
+ "repeats": 15,
+ "warmups": 3,
+ "budget_ms": 200.0,
+ "environment": {
+  "postgresql_version": "PostgreSQL 16.4 on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu/Linaro 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit",
+  "settings": {
+   "effective_cache_size": "524288",
+   "jit": "off",
+   "max_parallel_workers_per_gather": "0",
+   "random_page_cost": "4",
+   "shared_buffers": "32768",
+   "statement_timeout": "120000",
+   "work_mem": "32768"
+  }
+ },
+ "queries": {
+  "q1_monthly_category_sales.sql": {
+   "elapsed_ms": [
+    20.815,
+    20.123,
+    20.153,
+    19.395,
+    19.395,
+    19.558,
+    19.35,
+    20.051,
+    20.379,
+    19.508,
+    19.418,
+    19.482,
+    19.572,
+    19.393,
+    19.306
+   ],
+   "median_ms": 19.508,
+   "p95_ms": 20.815,
+   "max_ms": 20.815,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "d7ece02221fecaf2bd1e08ca52ffb5af0a0658f286ec011fca4146d7713068f1",
+   "server_execution_ms": 20.348,
+   "planning_ms": 0.397,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "orders",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain"
+    ]
+   }
+  },
+  "q2_delivery_by_state_month.sql": {
+   "elapsed_ms": [
+    396.67,
+    395.107,
+    390.037,
+    384.632,
+    386.688,
+    389.898,
+    390.736,
+    381.067,
+    381.037,
+    383.562,
+    386.335,
+    391.21,
+    383.54,
+    381.332,
+    383.84
+   ],
+   "median_ms": 386.335,
+   "p95_ms": 396.67,
+   "max_ms": 396.67,
+   "under_budget_median": false,
+   "all_runs_under_budget": false,
+   "rows": 556,
+   "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da",
+   "sql_sha256": "e65faf804615d360d19b7515de93092037f636b3f90b311f68a20e831f2e758d",
+   "server_execution_ms": 133.826,
+   "planning_ms": 0.48,
+   "scans": {
+    "seq_scan": [
+     "orders",
+     "customers"
+    ],
+    "index_scan": []
+   }
+  },
+  "q3_delay_and_satisfaction.sql": {
+   "elapsed_ms": [
+    152.241,
+    153.028,
+    154.048,
+    154.098,
+    153.698,
+    154.432,
+    154.7,
+    155.478,
+    156.747,
+    154.206,
+    154.378,
+    154.354,
+    156.379,
+    154.683,
+    152.514
+   ],
+   "median_ms": 154.354,
+   "p95_ms": 156.747,
+   "max_ms": 156.747,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 4,
+   "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847",
+   "sql_sha256": "447abe9f45354ba1efef61200e6905015243e293d2d00072bfd61f47113ebaf3",
+   "server_execution_ms": 189.058,
+   "planning_ms": 0.298,
+   "scans": {
+    "seq_scan": [
+     "orders"
+    ],
+    "index_scan": [
+     "ix_order_reviews_order_score"
+    ]
+   }
+  },
+  "q4_top_sellers.sql": {
+   "elapsed_ms": [
+    186.209,
+    185.96,
+    186.904,
+    185.967,
+    185.919,
+    186.921,
+    184.7,
+    185.066,
+    184.853,
+    185.161,
+    185.766,
+    185.524,
+    184.369,
+    184.844,
+    184.948
+   ],
+   "median_ms": 185.524,
+   "p95_ms": 186.921,
+   "max_ms": 186.921,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 20,
+   "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967",
+   "sql_sha256": "d545936afc64b644dbe4c5ed7aacad989ac53c9a54e6b88c20ff67fe38fc3a2e",
+   "server_execution_ms": 227.687,
+   "planning_ms": 0.472,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "order_items"
+    ],
+    "index_scan": [
+     "ix_orders_inactive",
+     "ix_orders_dispatch_cover",
+     "ix_order_reviews_order_score"
+    ]
+   }
+  },
+  "q5_payment_distribution.sql": {
+   "elapsed_ms": [
+    154.024,
+    154.523,
+    157.924,
+    154.28,
+    154.497,
+    154.961,
+    153.809,
+    154.734,
+    153.913,
+    153.541,
+    154.667,
+    154.381,
+    153.527,
+    153.91,
+    153.979
+   ],
+   "median_ms": 154.28,
+   "p95_ms": 157.924,
+   "max_ms": 157.924,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 27,
+   "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984",
+   "sql_sha256": "7c02cb64c4b7b8eeb45f9d6953ca3d6f97d0b44cfa323478968ca59de0a184c0",
+   "server_execution_ms": 175.78,
+   "planning_ms": 0.323,
+   "scans": {
+    "seq_scan": [],
+    "index_scan": [
+     "ix_payments_order_type_inst",
+     "ix_orders_inactive"
+    ]
+   }
+  }
+ }
+}

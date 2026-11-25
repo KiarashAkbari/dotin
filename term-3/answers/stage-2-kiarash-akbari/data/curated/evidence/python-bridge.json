@@ -1,0 +1,132 @@
+{
+ "chunked_read": {
+  "chunksize": 20000,
+  "chunks": 6,
+  "rows": 111753,
+  "largest_chunk_rows": 20000
+ },
+ "chunked_monthly_revenue": [
+  {
+   "month": "2017-01",
+   "revenue": 136943.46
+  },
+  {
+   "month": "2017-02",
+   "revenue": 283561.69
+  },
+  {
+   "month": "2017-03",
+   "revenue": 425617.96
+  },
+  {
+   "month": "2017-04",
+   "revenue": 405848.61
+  },
+  {
+   "month": "2017-05",
+   "revenue": 582710.83
+  },
+  {
+   "month": "2017-06",
+   "revenue": 499652.24
+  },
+  {
+   "month": "2017-07",
+   "revenue": 578753.73
+  },
+  {
+   "month": "2017-08",
+   "revenue": 661903.52
+  },
+  {
+   "month": "2017-09",
+   "revenue": 717102.72
+  },
+  {
+   "month": "2017-10",
+   "revenue": 764756.03
+  },
+  {
+   "month": "2017-11",
+   "revenue": 1172191.6800000002
+  },
+  {
+   "month": "2017-12",
+   "revenue": 861526.77
+  },
+  {
+   "month": "2018-01",
+   "revenue": 1101920.01
+  },
+  {
+   "month": "2018-02",
+   "revenue": 979486.16
+  },
+  {
+   "month": "2018-03",
+   "revenue": 1152656.99
+  },
+  {
+   "month": "2018-04",
+   "revenue": 1156248.8900000001
+  },
+  {
+   "month": "2018-05",
+   "revenue": 1145686.46
+  },
+  {
+   "month": "2018-06",
+   "revenue": 1020381.9
+  },
+  {
+   "month": "2018-07",
+   "revenue": 1039783.5800000001
+  },
+  {
+   "month": "2018-08",
+   "revenue": 996973.51
+  },
+  {
+   "month": "2018-09",
+   "revenue": 166.46
+  }
+ ],
+ "to_sql_types": [
+  {
+   "column_name": "purchase_month",
+   "data_type": "date",
+   "character_maximum_length": NaN,
+   "numeric_precision": NaN,
+   "numeric_scale": NaN
+  },
+  {
+   "column_name": "customer_state",
+   "data_type": "character",
+   "character_maximum_length": 2.0,
+   "numeric_precision": NaN,
+   "numeric_scale": NaN
+  },
+  {
+   "column_name": "delivered_orders",
+   "data_type": "integer",
+   "character_maximum_length": NaN,
+   "numeric_precision": 32.0,
+   "numeric_scale": 0.0
+  },
+  {
+   "column_name": "late_orders",
+   "data_type": "integer",
+   "character_maximum_length": NaN,
+   "numeric_precision": 32.0,
+   "numeric_scale": 0.0
+  },
+  {
+   "column_name": "late_ratio",
+   "data_type": "numeric",
+   "character_maximum_length": NaN,
+   "numeric_precision": 6.0,
+   "numeric_scale": 4.0
+  }
+ ],
+ "to_sql_rows": 556
+}

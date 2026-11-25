@@ -1,0 +1,632 @@
+{
+ "timings": {
+  "live_view (sql/baseline/q1 over v_order_item_sales)": {
+   "elapsed_ms": [
+    304.657,
+    306.577,
+    307.038,
+    306.727,
+    309.082,
+    307.156,
+    316.257,
+    307.108,
+    316.965,
+    310.006,
+    307.973,
+    307.077,
+    310.469,
+    307.068,
+    306.189
+   ],
+   "median_ms": 307.108,
+   "p95_ms": 316.965,
+   "max_ms": 316.965,
+   "under_budget_median": false,
+   "all_runs_under_budget": false,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "993e52e2012ffe919e0d2239aeb11bb3430ff2c7107a9dec5b163c0625161239",
+   "server_execution_ms": 351.252,
+   "planning_ms": 0.34,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "orders",
+     "products"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 23526.7,
+     "actual_total_ms": 351.109
+    },
+    {
+     "depth": 1,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 19632.32,
+     "actual_total_ms": 319.253
+    },
+    {
+     "depth": 2,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 10027.84,
+     "actual_total_ms": 157.088
+    },
+    {
+     "depth": 3,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 111268,
+     "actual_rows": 112101,
+     "loops": 1,
+     "total_cost": 8000.99,
+     "actual_total_ms": 96.284
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 112650,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 9.512
+    },
+    {
+     "depth": 4,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 31.947
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 98221,
+     "actual_rows": 98207,
+     "loops": 1,
+     "total_cost": 3052.01,
+     "actual_total_ms": 16.065
+    },
+    {
+     "depth": 3,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 7.094
+    },
+    {
+     "depth": 4,
+     "node": "Seq Scan",
+     "relation": "products",
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 3.102
+    }
+   ]
+  },
+  "snapshot_table_only": {
+   "elapsed_ms": [
+    1.873,
+    1.925,
+    1.859,
+    1.915,
+    1.955,
+    1.839,
+    1.815,
+    1.803,
+    1.818,
+    1.95,
+    2.002,
+    1.987,
+    1.826,
+    1.972,
+    1.959
+   ],
+   "median_ms": 1.915,
+   "p95_ms": 2.002,
+   "max_ms": 2.002,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "cf3c0932b935ee43673c8457e5740010ead5e3a0f7443bd5a2143e0838797daf",
+   "server_execution_ms": 0.314,
+   "planning_ms": 0.057,
+   "scans": {
+    "seq_scan": [],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain"
+    ]
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Index Scan",
+     "relation": "monthly_category_snapshot",
+     "index": "uq_monthly_category_snapshot_grain",
+     "est_rows": 1282,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 91.88,
+     "actual_total_ms": 0.245
+    }
+   ]
+  },
+  "materialized_view mv_q1 (007)": {
+   "elapsed_ms": [
+    2.036,
+    2.357,
+    2.082,
+    2.008,
+    1.809,
+    1.841,
+    1.813,
+    1.777,
+    1.969,
+    2.002,
+    1.978,
+    1.837,
+    2.018,
+    1.979,
+    1.984
+   ],
+   "median_ms": 1.979,
+   "p95_ms": 2.357,
+   "max_ms": 2.357,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "7a58c6b7c2839dbe9c1d5ffe9cf6d26f73277807988f48ec967f792849b56020",
+   "server_execution_ms": 0.348,
+   "planning_ms": 0.035,
+   "scans": {
+    "seq_scan": [
+     "mv_q1_monthly_category_sales"
+    ],
+    "index_scan": []
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 1282,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 95.2,
+     "actual_total_ms": 0.279
+    },
+    {
+     "depth": 1,
+     "node": "Seq Scan",
+     "relation": "mv_q1_monthly_category_sales",
+     "index": null,
+     "est_rows": 1282,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 25.82,
+     "actual_total_ms": 0.09
+    }
+   ]
+  },
+  "hybrid (sql/queries/q1, chosen)": {
+   "elapsed_ms": [
+    7.524,
+    7.486,
+    7.463,
+    7.568,
+    7.542,
+    8.611,
+    7.396,
+    7.508,
+    7.653,
+    7.486,
+    7.649,
+    7.519,
+    7.445,
+    8.361,
+    7.559
+   ],
+   "median_ms": 7.524,
+   "p95_ms": 8.611,
+   "max_ms": 8.611,
+   "under_budget_median": true,
+   "all_runs_under_budget": true,
+   "rows": 1282,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "sql_sha256": "d7ece02221fecaf2bd1e08ca52ffb5af0a0658f286ec011fca4146d7713068f1",
+   "server_execution_ms": 8.1,
+   "planning_ms": 0.435,
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   },
+   "plan_nodes": [
+    {
+     "depth": 0,
+     "node": "Merge Append",
+     "relation": null,
+     "index": null,
+     "est_rows": 38371,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 13272.55,
+     "actual_total_ms": 7.987
+    },
+    {
+     "depth": 1,
+     "node": "Index Scan",
+     "relation": "monthly_category_snapshot",
+     "index": "uq_monthly_category_snapshot_grain",
+     "est_rows": 1282,
+     "actual_rows": 1282,
+     "loops": 1,
+     "total_cost": 91.88,
+     "actual_total_ms": 0.227
+    },
+    {
+     "depth": 1,
+     "node": "Aggregate",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 12796.95,
+     "actual_total_ms": 7.655
+    },
+    {
+     "depth": 2,
+     "node": "Result",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 0.34,
+     "actual_total_ms": 0.027
+    },
+    {
+     "depth": 3,
+     "node": "Limit",
+     "relation": null,
+     "index": null,
+     "est_rows": 1,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 0.32,
+     "actual_total_ms": 0.022
+    },
+    {
+     "depth": 4,
+     "node": "Index Only Scan",
+     "relation": "monthly_category_snapshot",
+     "index": "uq_monthly_category_snapshot_grain",
+     "est_rows": 1282,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 58.71,
+     "actual_total_ms": 0.02
+    },
+    {
+     "depth": 2,
+     "node": "Sort",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 11498.5,
+     "actual_total_ms": 7.653
+    },
+    {
+     "depth": 3,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 8590.96,
+     "actual_total_ms": 7.649
+    },
+    {
+     "depth": 4,
+     "node": "Hash Join",
+     "relation": null,
+     "index": null,
+     "est_rows": 37089,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 7129.75,
+     "actual_total_ms": 0.084
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "order_items",
+     "index": null,
+     "est_rows": 112650,
+     "actual_rows": 1,
+     "loops": 1,
+     "total_cost": 3425.5,
+     "actual_total_ms": 0.015
+    },
+    {
+     "depth": 5,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32740,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 2999.28,
+     "actual_total_ms": 0.053
+    },
+    {
+     "depth": 6,
+     "node": "Bitmap Heap Scan",
+     "relation": "orders",
+     "index": null,
+     "est_rows": 32740,
+     "actual_rows": 0,
+     "loops": 1,
+     "total_cost": 2999.28,
+     "actual_total_ms": 0.052
+    },
+    {
+     "depth": 7,
+     "node": "Bitmap Index Scan",
+     "relation": null,
+     "index": "ix_orders_purchase_ts",
+     "est_rows": 33147,
+     "actual_rows": 4,
+     "loops": 1,
+     "total_cost": 684.89,
+     "actual_total_ms": 0.038
+    },
+    {
+     "depth": 4,
+     "node": "Hash",
+     "relation": null,
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 7.55
+    },
+    {
+     "depth": 5,
+     "node": "Seq Scan",
+     "relation": "products",
+     "index": null,
+     "est_rows": 32951,
+     "actual_rows": 32951,
+     "loops": 1,
+     "total_cost": 766.51,
+     "actual_total_ms": 3.148
+    }
+   ]
+  }
+ },
+ "space": [
+  {
+   "relation": "olist.monthly_category_snapshot",
+   "total_bytes": 237568
+  },
+  {
+   "relation": "olist.mv_q1_monthly_category_sales",
+   "total_bytes": 221184
+  }
+ ],
+ "snapshot_refresh_all_closed_months_ms": [
+  809.7,
+  800.0,
+  805.6
+ ],
+ "refresh_bounds": {
+  "first_month": "2016-09-01",
+  "last_closed_month": "2018-09-01"
+ },
+ "freshness": {
+  "order_in_a_closed_month": {
+   "month": "2018-09-01",
+   "added_item_value": "100.00",
+   "sees_new_order": {
+    "live_view (sql/baseline/q1 over v_order_item_sales)": true,
+    "snapshot_table_only": false,
+    "materialized_view mv_q1 (007)": false,
+    "hybrid (sql/queries/q1, chosen)": false
+   }
+  },
+  "order_in_the_live_tail_month": {
+   "month": "2018-10-01",
+   "added_item_value": "100.00",
+   "sees_new_order": {
+    "live_view (sql/baseline/q1 over v_order_item_sales)": true,
+    "snapshot_table_only": false,
+    "materialized_view mv_q1 (007)": false,
+    "hybrid (sql/queries/q1, chosen)": true
+   }
+  }
+ },
+ "q1_tail_series": [
+  {
+   "snapshot_through": "2018-09-01",
+   "median_ms": 7.645,
+   "max_ms": 8.468,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   }
+  },
+  {
+   "snapshot_through": "2018-08-01",
+   "median_ms": 18.174,
+   "max_ms": 75.655,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   }
+  },
+  {
+   "snapshot_through": "2018-06-01",
+   "median_ms": 57.662,
+   "max_ms": 59.147,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   }
+  },
+  {
+   "snapshot_through": "2018-03-01",
+   "median_ms": 122.458,
+   "max_ms": 128.429,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   }
+  },
+  {
+   "snapshot_through": "2017-12-01",
+   "median_ms": 187.326,
+   "max_ms": 189.452,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   }
+  },
+  {
+   "snapshot_through": "empty snapshot",
+   "median_ms": 311.335,
+   "max_ms": 320.445,
+   "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+   "scans": {
+    "seq_scan": [
+     "order_items",
+     "products"
+    ],
+    "index_scan": [
+     "uq_monthly_category_snapshot_grain",
+     "uq_monthly_category_snapshot_grain",
+     "ix_orders_purchase_ts"
+    ]
+   }
+  }
+ ],
+ "baseline_q1_with_indexes": {
+  "elapsed_ms": [
+   304.675,
+   304.598,
+   302.953,
+   303.764,
+   306.04,
+   301.516,
+   303.698,
+   302.32,
+   304.871
+  ],
+  "median_ms": 303.764,
+  "p95_ms": 306.04,
+  "max_ms": 306.04,
+  "under_budget_median": false,
+  "all_runs_under_budget": false,
+  "rows": 1282,
+  "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
+  "sql_sha256": "993e52e2012ffe919e0d2239aeb11bb3430ff2c7107a9dec5b163c0625161239",
+  "server_execution_ms": 349.133,
+  "planning_ms": 0.328,
+  "scans": {
+   "seq_scan": [
+    "order_items",
+    "orders",
+    "products"
+   ],
+   "index_scan": []
+  }
+ }
+}

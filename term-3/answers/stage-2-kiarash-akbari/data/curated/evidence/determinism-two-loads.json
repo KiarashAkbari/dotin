@@ -1,11 +1,11 @@
 {
-  "captured_at": "2026-11-25T09:29:07+00:00",
+  "captured_at": "2026-11-25T09:40:34+00:00",
   "command": "python -m data_factory load-database --config <config> --reset --skip-factory-sink (cwd: stage-1), twice",
   "identical_tables": true,
   "identical_query_results": true,
   "runs": [
     {
-      "load_seconds_wall": 54.6,
+      "load_seconds_wall": 55.8,
       "load_stdout": [
         "schema=reset",
         "sql_migrations=4 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql,004_performance_indexes.sql",
@@ -24,10 +24,10 @@
       "snapshot_refresh": {
         "first_month": "2016-09-01",
         "last_closed_month": "2018-09-01",
-        "refresh_ms": 865.4,
+        "refresh_ms": 885.4,
         "snapshot_rows": 1282,
         "last_month": "2018-09-01",
-        "refreshed_at": "2026-11-25 09:28:01.467634+00:00"
+        "refreshed_at": "2026-11-25 09:39:27.527180+00:00"
       },
       "tables": {
         "customers": {
@@ -95,7 +95,7 @@
       }
     },
     {
-      "load_seconds_wall": 54.4,
+      "load_seconds_wall": 56.0,
       "load_stdout": [
         "schema=reset",
         "sql_migrations=4 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql,004_performance_indexes.sql",
@@ -114,10 +114,10 @@
       "snapshot_refresh": {
         "first_month": "2016-09-01",
         "last_closed_month": "2018-09-01",
-        "refresh_ms": 839.6,
+        "refresh_ms": 873.1,
         "snapshot_rows": 1282,
         "last_month": "2018-09-01",
-        "refreshed_at": "2026-11-25 09:29:01.530738+00:00"
+        "refreshed_at": "2026-11-25 09:40:29.280434+00:00"
       },
       "tables": {
         "customers": {

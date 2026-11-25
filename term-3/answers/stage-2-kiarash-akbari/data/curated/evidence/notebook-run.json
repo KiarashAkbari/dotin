@@ -1,0 +1,15 @@
+{
+ "elapsed_seconds": 136.1,
+ "leftover_sessions": [],
+ "seed": 42,
+ "repeats": 15,
+ "warmups": 3,
+ "snapshot": {
+  "first_month": "2016-09-01",
+  "last_closed_month": "2018-09-01",
+  "refresh_ms": 832.4,
+  "snapshot_rows": 1282,
+  "last_month": "2018-09-01",
+  "refreshed_at": "2026-11-25 09:45:34.369194+00:00"
+ }
+}

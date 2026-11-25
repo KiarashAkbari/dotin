@@ -1,0 +1,132 @@
+{
+ "references": [
+  {
+   "reference": "orders.customer_id -> customers.customer_id",
+   "fk_declared": true,
+   "child_rows": 99441,
+   "empty_key_rows": 0,
+   "orphan_rows": 0,
+   "distinct_orphan_keys": 0
+  },
+  {
+   "reference": "order_items.order_id -> orders.order_id",
+   "fk_declared": true,
+   "child_rows": 112650,
+   "empty_key_rows": 0,
+   "orphan_rows": 0,
+   "distinct_orphan_keys": 0
+  },
+  {
+   "reference": "order_items.product_id -> products.product_id",
+   "fk_declared": true,
+   "child_rows": 112650,
+   "empty_key_rows": 0,
+   "orphan_rows": 0,
+   "distinct_orphan_keys": 0
+  },
+  {
+   "reference": "order_items.seller_id -> sellers.seller_id",
+   "fk_declared": true,
+   "child_rows": 112650,
+   "empty_key_rows": 0,
+   "orphan_rows": 0,
+   "distinct_orphan_keys": 0
+  },
+  {
+   "reference": "payments.order_id -> orders.order_id",
+   "fk_declared": true,
+   "child_rows": 103886,
+   "empty_key_rows": 0,
+   "orphan_rows": 0,
+   "distinct_orphan_keys": 0
+  },
+  {
+   "reference": "order_reviews.order_id -> orders.order_id",
+   "fk_declared": true,
+   "child_rows": 99224,
+   "empty_key_rows": 0,
+   "orphan_rows": 0,
+   "distinct_orphan_keys": 0
+  },
+  {
+   "reference": "products.product_category_name -> product_category_name_translation.product_category_name",
+   "fk_declared": false,
+   "child_rows": 32951,
+   "empty_key_rows": 610,
+   "orphan_rows": 13,
+   "distinct_orphan_keys": 2
+  },
+  {
+   "reference": "customers.customer_zip_code_prefix -> geolocation.geolocation_zip_code_prefix",
+   "fk_declared": false,
+   "child_rows": 99441,
+   "empty_key_rows": 0,
+   "orphan_rows": 278,
+   "distinct_orphan_keys": 157
+  },
+  {
+   "reference": "sellers.seller_zip_code_prefix -> geolocation.geolocation_zip_code_prefix",
+   "fk_declared": false,
+   "child_rows": 3095,
+   "empty_key_rows": 0,
+   "orphan_rows": 7,
+   "distinct_orphan_keys": 7
+  }
+ ],
+ "row_counts": [
+  {
+   "table": "customers",
+   "raw_csv_records": 99441,
+   "loaded_rows": 99441,
+   "not_loaded": 0
+  },
+  {
+   "table": "sellers",
+   "raw_csv_records": 3095,
+   "loaded_rows": 3095,
+   "not_loaded": 0
+  },
+  {
+   "table": "products",
+   "raw_csv_records": 32951,
+   "loaded_rows": 32951,
+   "not_loaded": 0
+  },
+  {
+   "table": "orders",
+   "raw_csv_records": 99441,
+   "loaded_rows": 99441,
+   "not_loaded": 0
+  },
+  {
+   "table": "order_items",
+   "raw_csv_records": 112650,
+   "loaded_rows": 112650,
+   "not_loaded": 0
+  },
+  {
+   "table": "payments",
+   "raw_csv_records": 103886,
+   "loaded_rows": 103886,
+   "not_loaded": 0
+  },
+  {
+   "table": "order_reviews",
+   "raw_csv_records": 99224,
+   "loaded_rows": 99224,
+   "not_loaded": 0
+  },
+  {
+   "table": "geolocation",
+   "raw_csv_records": 1000163,
+   "loaded_rows": 738332,
+   "not_loaded": 261831
+  },
+  {
+   "table": "product_category_name_translation",
+   "raw_csv_records": 71,
+   "loaded_rows": 71,
+   "not_loaded": 0
+  }
+ ]
+}
