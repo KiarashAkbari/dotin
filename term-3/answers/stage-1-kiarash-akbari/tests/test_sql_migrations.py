@@ -293,6 +293,47 @@ class ApplySqlMigrationsTests(unittest.TestCase):
 
 
 
+class MigrationGroupTests(unittest.TestCase):
+    """Every numbered stage-2/3 migration belongs to at most one stage-1 group."""
+
+    def groups(self, name):
+        from data_factory.cli import (
+            _is_base_migration,
+            _is_sink_migration,
+            _is_snapshot_migration,
+        )
+
+        path = Path("sql") / name
+        return [
+            group
+            for group, member in (
+                ("base", _is_base_migration),
+                ("snapshot", _is_snapshot_migration),
+                ("sink", _is_sink_migration),
+            )
+            if member(path)
+        ]
+
+    def test_stage2_index_migration_004_is_applied_with_the_base_group(self):
+        self.assertEqual(self.groups("004_performance_indexes.sql"), ["base"])
+
+    def test_each_number_has_one_group(self):
+        expected = {
+            "001_create_olist_schema.sql": ["base"],
+            "002_analytical_views.sql": ["base"],
+            "003_functions_and_snapshots.sql": ["base"],
+            "004_performance_indexes.sql": ["base"],
+            "005_q4_seller_snapshot.sql": ["snapshot"],
+            "008_q3_delay_satisfaction_snapshot.sql": ["snapshot"],
+            "009_factory_sink_schema.sql": ["sink"],
+            # stage 3 applies its own 010/011 through its loader, never here
+            "010_credit_schema.sql": [],
+            "011_credit_staging.sql": [],
+        }
+        self.assertEqual({name: self.groups(name) for name in expected}, expected)
+
+
+
 class CliMigrationOrderTests(unittest.TestCase):
     """The groups, and the order they run in, are part of the contract."""
 
