@@ -184,5 +184,60 @@ class AdviceContradictionTest(unittest.TestCase):
         self.assertEqual(self.probe.advice([], None, {"temp_read": 0, "temp_written": 0}), [])
 
 
+class AblationReadingTest(unittest.TestCase):
+    """The summary line has to be read *from* the table, not written beside it.
+
+    The witness this replaces explained what an interval covering 0 would mean, under a table where
+    three families covered it and one did not -- so the file's own conclusion contradicted its own
+    numbers, and a mixed result read as "no effect".
+    """
+
+    def setUp(self) -> None:
+        path = STAGE / "docs" / "evidence" / "model-ablation-run.py"
+        spec = importlib.util.spec_from_file_location("model_ablation_run", path)
+        self.script = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(self.script)
+
+    def test_a_mixed_table_names_the_family_that_excludes_zero(self) -> None:
+        rows = [
+            {"name": "logreg.c0_1", "delta": 0.0044, "ci": {"low": -0.0014, "high": 0.0121}},
+            {"name": "hgb.d6", "delta": 0.0088, "ci": {"low": 0.0010, "high": 0.0186}},
+        ]
+        text = self.script.reading(rows)
+        self.assertIn("1 of 2", text)
+        self.assertIn("hgb.d6", text)
+        self.assertIn("logreg.c0_1", text, "the family left out is named, not counted silently")
+        self.assertEqual(text.count("logreg.c0_1"), 1)
+        self.assertIn("raises", text)
+        self.assertIn("inconclusive", text)
+
+    def test_an_all_inconclusive_table_says_nothing_moved(self) -> None:
+        rows = [{"name": n, "delta": d, "ci": {"low": -0.002, "high": 0.01}} for n, d in (("a", 0.004), ("b", -0.001))]
+        text = self.script.reading(rows)
+        self.assertIn("no family moved measurably", text)
+        self.assertNotIn("1 of 2", text)
+
+    def test_a_missing_interval_is_treated_as_inconclusive_not_as_zero(self) -> None:
+        rows = [{"name": "hgb.d3", "delta": 0.01, "ci": None}]
+        text = self.script.reading(rows)
+        self.assertIn("no family moved measurably", text, "a bootstrap that did not run is not evidence")
+
+    def test_the_script_uses_the_function_it_does_not_keep_a_second_sentence(self) -> None:
+        """The function alone is not the fix; the call site is what the witness prints.
+
+        A test that only exercises ``reading()`` stays green while the file prints last round's
+        boilerplate, which is the failure mode this whole patch is about.
+        """
+        source = (STAGE / "docs" / "evidence" / "model-ablation-run.py").read_text(encoding="utf-8")
+        self.assertIn("print(reading(measured))", source)
+        self.assertIn("measured.append(", source)
+        self.assertNotIn("an interval that contains 0 means the external signal", source)
+
+    def test_coverage_is_not_allowed_to_sound_like_a_result(self) -> None:
+        text = self.script.reading([{"name": "x", "delta": 0.01, "ci": {"low": 0.001, "high": 0.02}}])
+        self.assertIn("only the right to ask the question", text)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -38,6 +38,40 @@ def load_runner():
     return module
 
 
+class SkipCoherenceTests(unittest.TestCase):
+    """``--skip load-database`` means "already loaded", and the verify half belongs to the load.
+
+    The runbook's already-loaded path died on a machine whose corpus was in PostgreSQL but not in
+    ``data/raw/olist``: ``ingest`` refused before ``model`` ever ran, and the manifest wrote a failure
+    that no step had caused. The pair now travels together -- and the note is printed, because a step
+    vanishing from a plan in silence is how a run record starts to lie.
+    """
+
+    def setUp(self) -> None:
+        self.runner = load_runner()
+
+    def test_the_load_pair_skips_together_and_says_so(self) -> None:
+        skipped, note = self.runner.effective_skip(["load-database"])
+        self.assertEqual(skipped, ["load-database", "ingest"])
+        self.assertIsNotNone(note)
+        self.assertIn("ingest", note)
+        self.assertIn("CAPSTONE_OLIST_DIR", note, "the note must carry the way out, not just the reason")
+        self.assertIn("data/raw/olist", note)
+
+    def test_an_explicit_ingest_skip_is_not_alone_and_not_double(self) -> None:
+        skipped, note = self.runner.effective_skip(["load-database", "ingest"])
+        self.assertEqual(skipped.count("ingest"), 1)
+        self.assertIsNone(note, "nothing implied, nothing to announce")
+
+    def test_no_skip_changes_the_plan_at_all(self) -> None:
+        for asked in ([], None, ["external"]):
+            with self.subTest(skip=asked):
+                skipped, note = self.runner.effective_skip(asked)
+                self.assertEqual(skipped, list(asked or []))
+                self.assertIsNone(note)
+
+
+
 class ChainShapeTests(unittest.TestCase):
     def test_the_order_is_receive_load_audit_features_external_model_list(self) -> None:
         self.assertEqual(

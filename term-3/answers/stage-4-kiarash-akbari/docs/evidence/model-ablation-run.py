@@ -34,6 +34,44 @@ STAGE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(STAGE / "src"))
 
 
+def reading(rows: list[dict]) -> str:
+    """What the table says, composed from the intervals in it -- not one sentence about intervals.
+
+    The old line explained what an interval covering 0 would mean, under a table where three families
+    covered it and one did not. A reader who wanted the result had to do the comparison by eye, which is
+    how a mixed witness gets quoted as "no effect": the honest summary of these numbers is *which*
+    families are inconclusive and which one is not, and in which direction.
+
+    Pure on purpose: the caller feeds it the rows it just printed, so the sentence and the table cannot
+    come from different runs -- and so the test can hand it a table without fitting a model.
+    """
+    inside = [r for r in rows if r["ci"] is None or (r["ci"]["low"] <= 0.0 <= r["ci"]["high"])]
+    outside = [r for r in rows if r not in inside]
+    if not outside:
+        return (
+            f"reading: no family moved measurably -- all {len(rows)} 95% intervals cover 0, so at this "
+            "quota the external signal changes neither how many negative reviews the 10% list catches "
+            "nor, within noise, how the list is ranked"
+        )
+    named = ", ".join(
+        f"{r['name']} ({r['delta']:+.4f}, {r['ci']['low']:+.4f} .. {r['ci']['high']:+.4f})" for r in outside
+    )
+    signs = {1 if r["delta"] > 0 else -1 for r in outside}
+    direction = "raises" if signs == {1} else ("lowers" if signs == {-1} else "moves")
+    tail = (
+        "; the other {} stay inside their own intervals and are inconclusive: {}".format(
+            len(inside), ", ".join(r["name"] for r in inside)
+        )
+        if inside
+        else "; every family in the table excludes 0"
+    )
+    return (
+        f"reading: {len(outside)} of {len(rows)} families have an interval that excludes 0 -- {named} "
+        f"-- and it {direction} recall@10% on the evaluation months{tail}. A lift is measured here, on "
+        "the model's own split and quota; the coverage line above it is only the right to ask the question."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     from capstone import system
     from capstone.cli import default_config_path
@@ -70,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("| family | recall@10% without | recall@10% with | delta | 95% bootstrap of delta | AUC without | AUC with |")
         print("|---|---:|---:|---:|---|---:|---:|")
+        measured: list[dict] = []
         for name in config.model.families:
             _, without = system.fit_score(name, train_rows, eval_rows, numeric, categorical, seed)
             _, with_ext = system.fit_score(name, train_rows, eval_rows, ext_numeric, categorical, seed)
@@ -79,9 +118,15 @@ def main(argv: list[str] | None = None) -> int:
             ra, rb = a["operating_point"]["recall"], b["operating_point"]["recall"]
             interval = f"{ci['low']:+.4f} .. {ci['high']:+.4f}" if ci else "n/a"
             print(f"| {name} | {ra:.4f} | {rb:.4f} | {rb - ra:+.4f} | {interval} | {a['auc']:.4f} | {b['auc']:.4f} |")
+            measured.append(
+                {
+                    "name": name,
+                    "delta": rb - ra,
+                    "ci": {"low": ci["low"], "high": ci["high"]} if ci else None,
+                }
+            )
         print()
-        print("reading: an interval that contains 0 means the external signal did not measurably change "
-              "how many negative reviews the 10% list catches on the evaluation months.")
+        print(reading(measured))
     text = out.getvalue()
     print(text, end="")
     args.evidence.write_text(text, encoding="utf-8")

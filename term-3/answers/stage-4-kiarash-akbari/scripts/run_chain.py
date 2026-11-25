@@ -52,6 +52,34 @@ def plan() -> list[dict]:
     return rows
 
 
+INGEST_STEP = "ingest"
+LOAD_STEP = "load-database"
+
+
+def effective_skip(skip: list[str] | None) -> tuple[list[str], str | None]:
+    """Which steps not to run, plus the note saying why that list is longer than what was asked.
+
+    ``--skip load-database`` is how "the corpus is already in the database" is expressed, and it is
+    the shape the runbook tells a reader to use. ``ingest`` is the *verify* half of that same load: it
+    refuses when the CSV folder is missing, which is correct just before a load and wrong when the
+    whole point is that the loading happened elsewhere. Measured on a machine holding 99,441 orders in
+    PostgreSQL, with the CSVs one directory over inside another stage's tree: the documented skip died
+    at the verify step and never reached ``model``, so the manifest recorded a failure nobody had made.
+    The pair now travels together, and the note is printed because a step that disappears from a run
+    plan silently is how a delivery starts lying about what it executed.
+    """
+    chosen = list(skip or [])
+    if LOAD_STEP in chosen and INGEST_STEP not in chosen:
+        chosen.append(INGEST_STEP)
+        return chosen, (
+            f"note: {INGEST_STEP} skipped with {LOAD_STEP} -- verifying a CSV folder is the load's "
+            "first half, not a property of the database. If the corpus is elsewhere, point "
+            f"CAPSTONE_OLIST_DIR at it (data/raw/olist is the default) and pass --skip {LOAD_STEP} "
+            "alone to run the verify anyway"
+        )
+    return chosen, None
+
+
 def execute(args: argparse.Namespace, timer) -> int:
     """Run each step in its own timed layer, and stop at the first failure.
 
@@ -59,20 +87,25 @@ def execute(args: argparse.Namespace, timer) -> int:
     steps are capstone functions that run stage 1's CLI from stage 1's folder
     (:mod:`capstone.ingest`). A step's own exit code is kept: a stage-1 failure leaves with stage
     1's code, a missing source with 69, not a flattened 1 (review B20). ``--skip`` exists for the
-    smoke run on a database that is already loaded; the manifest records the skip.
+    smoke run on a database that is already loaded; the manifest records the skip, including the one
+    :func:`effective_skip` adds on the reader's behalf.
     """
     from capstone import chain as capstone_chain
     from capstone.chain import CHAIN
     from capstone.exit_codes import ExitCode
 
     results: dict[str, object] = {}
+    skipped, note = effective_skip(args.skip)
+    if note is not None:
+        print(note)
     for step in CHAIN:
-        if step.name in (args.skip or []):
+        if step.name in skipped:
             results[step.name] = "skipped"
             continue
         with timer.layer(step.name):
             results[step.name] = capstone_chain.run_step(step, args.loaded_config)
         print(json.dumps({"step": step.name, "result": results[step.name]}, default=str))
+    args.skip = skipped
     args.results = results
     return int(ExitCode.OK)
 
