@@ -96,9 +96,10 @@ def hour_weekday_counts(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.groupby(["weekday", "hour"]).size().unstack(fill_value=0)
 
 
-def spearman(frame: pd.DataFrame) -> pd.DataFrame:
+def spearman(frame: pd.DataFrame, seed: int = SEED) -> pd.DataFrame:
+    """Rank correlation on a fixed-size sample; `seed` decides which rows are sampled."""
     size = min(len(frame), CORRELATION_SAMPLE)
-    sample = frame.sample(size, random_state=SEED)
+    sample = frame.sample(size, random_state=seed)
     return sample[list(CORRELATION_COLUMNS)].corr(method="spearman")
 
 
