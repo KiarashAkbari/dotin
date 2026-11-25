@@ -211,3 +211,18 @@ class FeatureHypothesisTableTest(unittest.TestCase):
         run = json.loads((stage / "docs" / "evidence" / "model-run.json").read_text(encoding="utf-8"))
         used = set(run["features"]["numeric"]) | set(run["features"]["categorical"])
         self.assertEqual(set(named), used | {"external_density_2010"})
+
+
+class SecondMetricTest(unittest.TestCase):
+    """The brief's second metric is the last evaluation month; a one-order tail month is not one."""
+
+    def test_a_thin_tail_month_is_listed_but_not_judged(self) -> None:
+        months = [
+            {"month": "2018-07", "labelled": 6000, "negatives": 600, "recall": 0.20, "auc": 0.6},
+            {"month": "2018-08", "labelled": 6500, "negatives": 700, "recall": 0.21, "auc": 0.57},
+            {"month": "2018-09", "labelled": 1, "negatives": 1, "recall": 1.0, "auc": None},
+        ]
+        out = system.drift_explains(months, [])
+        self.assertEqual(out["months_not_judged"], ["2018-09"])
+        self.assertEqual(out["last_full_month"]["month"], "2018-08")
+        self.assertAlmostEqual(out["recall_range"], 0.01)

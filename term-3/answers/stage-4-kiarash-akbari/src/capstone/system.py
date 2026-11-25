@@ -714,12 +714,33 @@ def density_quartiles(rows) -> list[dict[str, Any]]:
     ]
 
 
+#: a month with fewer labelled orders than this is reported but not judged: the evaluation window's
+#: tail (2018-09) holds one labelled order, and a recall of 1.0 on one order is not a month
+MIN_MONTH_LABELLED = 500
+
+
 def drift_explains(months: list[dict[str, Any]], drift_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """The two facts the drift paragraph needs side by side: the monthly recall and the top shifts."""
-    recalls = [row["recall"] for row in months if row["recall"] is not None]
+    """The facts the drift paragraph needs side by side: monthly recall, the second metric, top shifts.
+
+    The recall range and the brief's second metric (the same number on the last evaluation month)
+    use only months with at least ``MIN_MONTH_LABELLED`` labelled orders; thinner months are listed
+    under ``months_not_judged`` instead of silently dropped.
+    """
+    judged = [
+        row for row in months if row["recall"] is not None and row["labelled"] >= MIN_MONTH_LABELLED
+    ]
+    recalls = [row["recall"] for row in judged]
+    last = judged[-1] if judged else None
     return {
         "monthly_recall": {row["month"]: row["recall"] for row in months},
+        "min_month_labelled": MIN_MONTH_LABELLED,
+        "months_not_judged": [row["month"] for row in months if row not in judged],
         "recall_range": (max(recalls) - min(recalls)) if recalls else None,
+        "last_full_month": (
+            {key: last[key] for key in ("month", "labelled", "negatives", "recall", "auc")}
+            if last
+            else None
+        ),
         "top_shifted_features": [
             {"feature": row["feature"], "psi": row["psi"]} for row in drift_rows[:5]
         ],
