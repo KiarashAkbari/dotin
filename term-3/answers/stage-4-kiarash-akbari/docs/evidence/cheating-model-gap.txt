@@ -1,0 +1,12 @@
+# cheating-model gap (scripts/cheating_model_gap.py)
+model family: hgb.d3; split boundary 2018-05-31; evaluation window ['2018-06', '2018-07', '2018-08', '2018-09']; quota 10%
+tempting columns added: order_status, order_delivered_customer_date (as delivery_days and late_days), order_delivered_carrier_date (as carrier_days)
+
+| model | recall@5% | recall@10% | recall@20% | precision@10% | AUC |
+|---|---:|---:|---:|---:|---:|
+| real model | 0.1487 | 0.2229 | 0.3348 | 0.2406 | 0.6030 |
+| cheating model, leaked values | 0.2926 | 0.4094 | 0.5209 | 0.4420 | 0.7255 |
+| cheating model, values as at approval | 0.0967 | 0.1610 | 0.2857 | 0.1738 | 0.5874 |
+
+gap at the 10% quota, leaked notebook number minus real: +0.1865 (0.4094 vs 0.2229)
+what the cheating model actually delivers at approval time: 0.1610 (-0.0619 vs the real model)

@@ -1,0 +1,92 @@
+{
+  "run_id": "run-20261125T091701Z",
+  "model": "hgb.d3",
+  "window": {
+    "last": "2018-09-03 17:40:06",
+    "rows": 18961,
+    "first": "2018-06-01 00:10:44",
+    "months": [
+      "2018-06",
+      "2018-07",
+      "2018-08",
+      "2018-09"
+    ],
+    "labelled": 18864,
+    "negatives": 2037
+  },
+  "share": 0.1,
+  "list_rows": 1897,
+  "window_rows": 18961,
+  "capacity_labelled": [
+    {
+      "extra": 641,
+      "share": 0.05,
+      "caught": 303,
+      "reviewed": 944,
+      "caught_share": 0.1487481590574374
+    },
+    {
+      "extra": 1433,
+      "share": 0.1,
+      "caught": 454,
+      "reviewed": 1887,
+      "caught_share": 0.22287677957781052
+    },
+    {
+      "extra": 3091,
+      "share": 0.2,
+      "caught": 682,
+      "reviewed": 3773,
+      "caught_share": 0.33480608738340695
+    }
+  ],
+  "capacity_all_approved": [
+    {
+      "extra": 648,
+      "share": 0.05,
+      "caught": 301,
+      "reviewed": 949,
+      "caught_share": 0.14776632302405499
+    },
+    {
+      "extra": 1444,
+      "share": 0.1,
+      "caught": 453,
+      "reviewed": 1897,
+      "caught_share": 0.22238586156111928
+    },
+    {
+      "extra": 3111,
+      "share": 0.2,
+      "caught": 682,
+      "reviewed": 3793,
+      "caught_share": 0.33480608738340695
+    }
+  ],
+  "rule_baseline": {
+    "rule": "the most items in one order",
+    "capacity_labelled": [
+      {
+        "extra": 713,
+        "share": 0.05,
+        "caught": 231,
+        "reviewed": 944,
+        "caught_share": 0.1134020618556701
+      },
+      {
+        "extra": 1449,
+        "share": 0.1,
+        "caught": 438,
+        "reviewed": 1887,
+        "caught_share": 0.21502209131075112
+      },
+      {
+        "extra": 3176,
+        "share": 0.2,
+        "caught": 597,
+        "reviewed": 3773,
+        "caught_share": 0.2930780559646539
+      }
+    ]
+  }
+}

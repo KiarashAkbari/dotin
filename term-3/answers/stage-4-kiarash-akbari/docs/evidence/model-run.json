@@ -1,0 +1,1233 @@
+{
+  "label": "is_negative = worst review score of the order <= 2 (v_order_label)",
+  "decision_moment": "order_approved_at",
+  "share": 0.1,
+  "split": {
+    "boundary": "2018-05-31",
+    "validation_start": "2018-03-01",
+    "train": {
+      "rows": 80320,
+      "labelled": 79654,
+      "negatives": 12417,
+      "first": "2016-09-15 12:16:38",
+      "last": "2018-05-31 23:55:13",
+      "months": [
+        "2016-09",
+        "2016-10",
+        "2016-12",
+        "2017-01",
+        "2017-02",
+        "2017-03",
+        "2017-04",
+        "2017-05",
+        "2017-06",
+        "2017-07",
+        "2017-08",
+        "2017-09",
+        "2017-10",
+        "2017-11",
+        "2017-12",
+        "2018-01",
+        "2018-02",
+        "2018-03",
+        "2018-04",
+        "2018-05"
+      ]
+    },
+    "fit": {
+      "rows": 59188,
+      "labelled": 58675,
+      "negatives": 9042,
+      "first": "2016-09-15 12:16:38",
+      "last": "2018-02-28 23:48:19",
+      "months": [
+        "2016-09",
+        "2016-10",
+        "2016-12",
+        "2017-01",
+        "2017-02",
+        "2017-03",
+        "2017-04",
+        "2017-05",
+        "2017-06",
+        "2017-07",
+        "2017-08",
+        "2017-09",
+        "2017-10",
+        "2017-11",
+        "2017-12",
+        "2018-01",
+        "2018-02"
+      ]
+    },
+    "validation": {
+      "rows": 21132,
+      "labelled": 20979,
+      "negatives": 3375,
+      "first": "2018-03-01 00:08:30",
+      "last": "2018-05-31 23:55:13",
+      "months": [
+        "2018-03",
+        "2018-04",
+        "2018-05"
+      ]
+    },
+    "evaluation": {
+      "rows": 18961,
+      "labelled": 18864,
+      "negatives": 2037,
+      "first": "2018-06-01 00:10:44",
+      "last": "2018-09-03 17:40:06",
+      "months": [
+        "2018-06",
+        "2018-07",
+        "2018-08",
+        "2018-09"
+      ]
+    }
+  },
+  "features": {
+    "numeric": [
+      "prior_orders_by_customer",
+      "days_since_prior_order",
+      "n_items",
+      "price_sum",
+      "price_spread",
+      "freight_sum",
+      "freight_share",
+      "shipping_limit_days",
+      "n_sellers",
+      "n_products",
+      "promise_days",
+      "approval_day_of_month",
+      "approval_hour",
+      "n_payments",
+      "payment_sum",
+      "installments_max",
+      "payment_parts",
+      "pays_credit_card",
+      "pays_voucher",
+      "customer_zip_region",
+      "customer_seller_span_sq",
+      "product_weight_g",
+      "product_photos_qty",
+      "payments_unavailable",
+      "geography_unavailable",
+      "category_unavailable"
+    ],
+    "categorical": [
+      "customer_state",
+      "seller_state",
+      "product_category_name_english"
+    ]
+  },
+  "rule_baseline": {
+    "chosen": {
+      "column": "n_items",
+      "direction": 1,
+      "rule": "the most items in one order",
+      "validation_recall": 0.1842962962962963
+    },
+    "tried": [
+      {
+        "column": "promise_days",
+        "direction": 1,
+        "rule": "the longest promised delivery window",
+        "validation_recall": 0.10696296296296297
+      },
+      {
+        "column": "freight_share",
+        "direction": 1,
+        "rule": "the highest share of freight in the bill",
+        "validation_recall": 0.11466666666666667
+      },
+      {
+        "column": "n_items",
+        "direction": 1,
+        "rule": "the most items in one order",
+        "validation_recall": 0.1842962962962963
+      },
+      {
+        "column": "n_sellers",
+        "direction": 1,
+        "rule": "the most sellers in one order",
+        "validation_recall": 0.13837037037037037
+      },
+      {
+        "column": "customer_seller_span_sq",
+        "direction": 1,
+        "rule": "the longest distance between customer and seller",
+        "validation_recall": 0.15022222222222223
+      },
+      {
+        "column": "price_sum",
+        "direction": 1,
+        "rule": "the most expensive orders",
+        "validation_recall": 0.12562962962962962
+      },
+      {
+        "column": "shipping_limit_days",
+        "direction": 1,
+        "rule": "the latest seller hand-over deadline",
+        "validation_recall": 0.11614814814814815
+      }
+    ],
+    "evaluation": {
+      "rows": 18961,
+      "labelled": 18864,
+      "negatives": 2037,
+      "negative_rate": 0.10798346055979643,
+      "auc": 0.5587882566762239,
+      "average_precision": 0.13783956261321184,
+      "capacity": [
+        {
+          "share": 0.05,
+          "reviewed": 944,
+          "caught": 231,
+          "caught_share": 0.1134020618556701,
+          "extra": 713
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1887,
+          "caught": 438,
+          "caught_share": 0.21502209131075112,
+          "extra": 1449
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3773,
+          "caught": 597,
+          "caught_share": 0.2930780559646539,
+          "extra": 3176
+        }
+      ],
+      "operating_point": {
+        "share": 0.1,
+        "reviewed": 1887,
+        "tp": 438,
+        "fp": 1449,
+        "fn": 1599,
+        "tn": 15378,
+        "precision": 0.23211446740858505,
+        "recall": 0.21502209131075112,
+        "f1": 0.22324159021406728
+      },
+      "capacity_all_approved": [
+        {
+          "share": 0.05,
+          "reviewed": 949,
+          "caught": 229,
+          "caught_share": 0.11242022582228768,
+          "extra": 720
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1897,
+          "caught": 438,
+          "caught_share": 0.21502209131075112,
+          "extra": 1459
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3793,
+          "caught": 596,
+          "caught_share": 0.2925871379479627,
+          "extra": 3197
+        }
+      ],
+      "months": [
+        {
+          "month": "2018-06",
+          "labelled": 6139,
+          "negatives": 660,
+          "reviewed": 614,
+          "caught": 173,
+          "recall": 0.26212121212121214,
+          "auc": 0.5887363321110355
+        },
+        {
+          "month": "2018-07",
+          "labelled": 6130,
+          "negatives": 672,
+          "reviewed": 613,
+          "caught": 117,
+          "recall": 0.17410714285714285,
+          "auc": 0.5344845214102498
+        },
+        {
+          "month": "2018-08",
+          "labelled": 6594,
+          "negatives": 704,
+          "reviewed": 660,
+          "caught": 145,
+          "recall": 0.2059659090909091,
+          "auc": 0.5540051271415343
+        },
+        {
+          "month": "2018-09",
+          "labelled": 1,
+          "negatives": 1,
+          "reviewed": 1,
+          "caught": 1,
+          "recall": 1.0,
+          "auc": null
+        }
+      ]
+    }
+  },
+  "selection": [
+    {
+      "model": "logreg.c0_1",
+      "family": "logreg",
+      "validation_recall": 0.18755555555555556,
+      "validation_auc": 0.6227468336320869
+    },
+    {
+      "model": "logreg.c1",
+      "family": "logreg",
+      "validation_recall": 0.18518518518518517,
+      "validation_auc": 0.6214467419020929
+    },
+    {
+      "model": "hgb.d3",
+      "family": "hgb",
+      "validation_recall": 0.19822222222222222,
+      "validation_auc": 0.634046613985037
+    },
+    {
+      "model": "hgb.d6",
+      "family": "hgb",
+      "validation_recall": 0.19614814814814815,
+      "validation_auc": 0.6363453339729186
+    }
+  ],
+  "chosen_model": "hgb.d3",
+  "evaluation": {
+    "logreg.c0_1": {
+      "rows": 18961,
+      "labelled": 18864,
+      "negatives": 2037,
+      "negative_rate": 0.10798346055979643,
+      "auc": 0.5972461561895333,
+      "average_precision": 0.19368769692522653,
+      "capacity": [
+        {
+          "share": 0.05,
+          "reviewed": 944,
+          "caught": 286,
+          "caught_share": 0.1404025527736868,
+          "extra": 658
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1887,
+          "caught": 424,
+          "caught_share": 0.20814923907707414,
+          "extra": 1463
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3773,
+          "caught": 641,
+          "caught_share": 0.31467844869906725,
+          "extra": 3132
+        }
+      ],
+      "operating_point": {
+        "share": 0.1,
+        "reviewed": 1887,
+        "tp": 424,
+        "fp": 1463,
+        "fn": 1613,
+        "tn": 15364,
+        "precision": 0.22469528351881293,
+        "recall": 0.20814923907707414,
+        "f1": 0.2161060142711519
+      },
+      "capacity_all_approved": [
+        {
+          "share": 0.05,
+          "reviewed": 949,
+          "caught": 285,
+          "caught_share": 0.13991163475699558,
+          "extra": 664
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1897,
+          "caught": 423,
+          "caught_share": 0.20765832106038293,
+          "extra": 1474
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3793,
+          "caught": 640,
+          "caught_share": 0.31418753068237604,
+          "extra": 3153
+        }
+      ],
+      "months": [
+        {
+          "month": "2018-06",
+          "labelled": 6139,
+          "negatives": 660,
+          "reviewed": 614,
+          "caught": 150,
+          "recall": 0.22727272727272727,
+          "auc": 0.6131585060312931
+        },
+        {
+          "month": "2018-07",
+          "labelled": 6130,
+          "negatives": 672,
+          "reviewed": 613,
+          "caught": 124,
+          "recall": 0.18452380952380953,
+          "auc": 0.6051580031059693
+        },
+        {
+          "month": "2018-08",
+          "labelled": 6594,
+          "negatives": 704,
+          "reviewed": 660,
+          "caught": 146,
+          "recall": 0.20738636363636365,
+          "auc": 0.5744173483562278
+        },
+        {
+          "month": "2018-09",
+          "labelled": 1,
+          "negatives": 1,
+          "reviewed": 1,
+          "caught": 1,
+          "recall": 1.0,
+          "auc": null
+        }
+      ]
+    },
+    "logreg.c1": {
+      "rows": 18961,
+      "labelled": 18864,
+      "negatives": 2037,
+      "negative_rate": 0.10798346055979643,
+      "auc": 0.5970816707923677,
+      "average_precision": 0.19340052984270814,
+      "capacity": [
+        {
+          "share": 0.05,
+          "reviewed": 944,
+          "caught": 284,
+          "caught_share": 0.13942071674030437,
+          "extra": 660
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1887,
+          "caught": 420,
+          "caught_share": 0.20618556701030927,
+          "extra": 1467
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3773,
+          "caught": 647,
+          "caught_share": 0.3176239567992145,
+          "extra": 3126
+        }
+      ],
+      "operating_point": {
+        "share": 0.1,
+        "reviewed": 1887,
+        "tp": 420,
+        "fp": 1467,
+        "fn": 1617,
+        "tn": 15360,
+        "precision": 0.22257551669316375,
+        "recall": 0.20618556701030927,
+        "f1": 0.2140672782874618
+      },
+      "capacity_all_approved": [
+        {
+          "share": 0.05,
+          "reviewed": 949,
+          "caught": 282,
+          "caught_share": 0.13843888070692195,
+          "extra": 667
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1897,
+          "caught": 419,
+          "caught_share": 0.20569464899361806,
+          "extra": 1478
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3793,
+          "caught": 646,
+          "caught_share": 0.3171330387825233,
+          "extra": 3147
+        }
+      ],
+      "months": [
+        {
+          "month": "2018-06",
+          "labelled": 6139,
+          "negatives": 660,
+          "reviewed": 614,
+          "caught": 148,
+          "recall": 0.22424242424242424,
+          "auc": 0.6129049207165652
+        },
+        {
+          "month": "2018-07",
+          "labelled": 6130,
+          "negatives": 672,
+          "reviewed": 613,
+          "caught": 125,
+          "recall": 0.18601190476190477,
+          "auc": 0.6056727564605908
+        },
+        {
+          "month": "2018-08",
+          "labelled": 6594,
+          "negatives": 704,
+          "reviewed": 660,
+          "caught": 144,
+          "recall": 0.20454545454545456,
+          "auc": 0.5736256077326747
+        },
+        {
+          "month": "2018-09",
+          "labelled": 1,
+          "negatives": 1,
+          "reviewed": 1,
+          "caught": 1,
+          "recall": 1.0,
+          "auc": null
+        }
+      ]
+    },
+    "hgb.d3": {
+      "rows": 18961,
+      "labelled": 18864,
+      "negatives": 2037,
+      "negative_rate": 0.10798346055979643,
+      "auc": 0.6030119703533015,
+      "average_precision": 0.20574584325579515,
+      "capacity": [
+        {
+          "share": 0.05,
+          "reviewed": 944,
+          "caught": 303,
+          "caught_share": 0.1487481590574374,
+          "extra": 641
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1887,
+          "caught": 454,
+          "caught_share": 0.22287677957781052,
+          "extra": 1433
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3773,
+          "caught": 682,
+          "caught_share": 0.33480608738340695,
+          "extra": 3091
+        }
+      ],
+      "operating_point": {
+        "share": 0.1,
+        "reviewed": 1887,
+        "tp": 454,
+        "fp": 1433,
+        "fn": 1583,
+        "tn": 15394,
+        "precision": 0.24059353471118178,
+        "recall": 0.22287677957781052,
+        "f1": 0.23139653414882774
+      },
+      "capacity_all_approved": [
+        {
+          "share": 0.05,
+          "reviewed": 949,
+          "caught": 301,
+          "caught_share": 0.14776632302405499,
+          "extra": 648
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1897,
+          "caught": 453,
+          "caught_share": 0.22238586156111928,
+          "extra": 1444
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3793,
+          "caught": 682,
+          "caught_share": 0.33480608738340695,
+          "extra": 3111
+        }
+      ],
+      "months": [
+        {
+          "month": "2018-06",
+          "labelled": 6139,
+          "negatives": 660,
+          "reviewed": 614,
+          "caught": 173,
+          "recall": 0.26212121212121214,
+          "auc": 0.6298775766424972
+        },
+        {
+          "month": "2018-07",
+          "labelled": 6130,
+          "negatives": 672,
+          "reviewed": 613,
+          "caught": 136,
+          "recall": 0.20238095238095238,
+          "auc": 0.6079628363346071
+        },
+        {
+          "month": "2018-08",
+          "labelled": 6594,
+          "negatives": 704,
+          "reviewed": 660,
+          "caught": 145,
+          "recall": 0.2059659090909091,
+          "auc": 0.5730395797962649
+        },
+        {
+          "month": "2018-09",
+          "labelled": 1,
+          "negatives": 1,
+          "reviewed": 1,
+          "caught": 1,
+          "recall": 1.0,
+          "auc": null
+        }
+      ]
+    },
+    "hgb.d6": {
+      "rows": 18961,
+      "labelled": 18864,
+      "negatives": 2037,
+      "negative_rate": 0.10798346055979643,
+      "auc": 0.6053242184266882,
+      "average_precision": 0.202484527033878,
+      "capacity": [
+        {
+          "share": 0.05,
+          "reviewed": 944,
+          "caught": 294,
+          "caught_share": 0.14432989690721648,
+          "extra": 650
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1887,
+          "caught": 433,
+          "caught_share": 0.21256750122729504,
+          "extra": 1454
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3773,
+          "caught": 682,
+          "caught_share": 0.33480608738340695,
+          "extra": 3091
+        }
+      ],
+      "operating_point": {
+        "share": 0.1,
+        "reviewed": 1887,
+        "tp": 433,
+        "fp": 1454,
+        "fn": 1604,
+        "tn": 15373,
+        "precision": 0.2294647588765236,
+        "recall": 0.21256750122729504,
+        "f1": 0.22069317023445464
+      },
+      "capacity_all_approved": [
+        {
+          "share": 0.05,
+          "reviewed": 949,
+          "caught": 293,
+          "caught_share": 0.14383897889052527,
+          "extra": 656
+        },
+        {
+          "share": 0.1,
+          "reviewed": 1897,
+          "caught": 431,
+          "caught_share": 0.21158566519391261,
+          "extra": 1466
+        },
+        {
+          "share": 0.2,
+          "reviewed": 3793,
+          "caught": 682,
+          "caught_share": 0.33480608738340695,
+          "extra": 3111
+        }
+      ],
+      "months": [
+        {
+          "month": "2018-06",
+          "labelled": 6139,
+          "negatives": 660,
+          "reviewed": 614,
+          "caught": 164,
+          "recall": 0.24848484848484848,
+          "auc": 0.6333589130951788
+        },
+        {
+          "month": "2018-07",
+          "labelled": 6130,
+          "negatives": 672,
+          "reviewed": 613,
+          "caught": 129,
+          "recall": 0.19196428571428573,
+          "auc": 0.6056171369243923
+        },
+        {
+          "month": "2018-08",
+          "labelled": 6594,
+          "negatives": 704,
+          "reviewed": 660,
+          "caught": 138,
+          "recall": 0.19602272727272727,
+          "auc": 0.5788381212378453
+        },
+        {
+          "month": "2018-09",
+          "labelled": 1,
+          "negatives": 1,
+          "reviewed": 1,
+          "caught": 1,
+          "recall": 1.0,
+          "auc": null
+        }
+      ]
+    }
+  },
+  "model_vs_rule_recall_delta_ci95": {
+    "rounds": 200,
+    "low": -0.005002853473077497,
+    "high": 0.021134712347522778,
+    "mean": 0.007892276780881146
+  },
+  "external": {
+    "available": true,
+    "column": "external_density_2010",
+    "model": "hgb.d3",
+    "coverage": 0.9926068432026269,
+    "validation_recall_without": 0.19822222222222222,
+    "validation_recall_with": 0.19585185185185186,
+    "eval_recall_without": 0.22287677957781052,
+    "eval_recall_with": 0.22778595974472263,
+    "eval_auc_without": 0.6030119703533015,
+    "eval_auc_with": 0.6063330553886049,
+    "eval_recall_delta_ci95": {
+      "rounds": 200,
+      "low": -0.0019831153476686713,
+      "high": 0.011930849528208698,
+      "mean": 0.00486120765644655
+    },
+    "negative_rate_by_density_quartile": [
+      {
+        "quartile": "q1 (sparse)",
+        "orders": 19841,
+        "density_median": 47.0,
+        "negative_rate": 0.13991230280731817
+      },
+      {
+        "quartile": "q2",
+        "orders": 19764,
+        "density_median": 398.32,
+        "negative_rate": 0.14986844768265534
+      },
+      {
+        "quartile": "q3",
+        "orders": 21886,
+        "density_median": 3639.94,
+        "negative_rate": 0.18495842090834325
+      },
+      {
+        "quartile": "q4 (dense)",
+        "orders": 17561,
+        "density_median": 7387.69,
+        "negative_rate": 0.14492340982859747
+      }
+    ]
+  },
+  "negative_rate_by_month": [
+    {
+      "month": "2016-09",
+      "labelled": 1,
+      "negative_rate": 1.0
+    },
+    {
+      "month": "2016-10",
+      "labelled": 315,
+      "negative_rate": 0.28253968253968254
+    },
+    {
+      "month": "2016-12",
+      "labelled": 1,
+      "negative_rate": 0.0
+    },
+    {
+      "month": "2017-01",
+      "labelled": 752,
+      "negative_rate": 0.15425531914893617
+    },
+    {
+      "month": "2017-02",
+      "labelled": 1752,
+      "negative_rate": 0.1603881278538813
+    },
+    {
+      "month": "2017-03",
+      "labelled": 2667,
+      "negative_rate": 0.14360704911886013
+    },
+    {
+      "month": "2017-04",
+      "labelled": 2357,
+      "negative_rate": 0.15528213831141283
+    },
+    {
+      "month": "2017-05",
+      "labelled": 3659,
+      "negative_rate": 0.12845039628313748
+    },
+    {
+      "month": "2017-06",
+      "labelled": 3225,
+      "negative_rate": 0.12868217054263567
+    },
+    {
+      "month": "2017-07",
+      "labelled": 3939,
+      "negative_rate": 0.12312769738512312
+    },
+    {
+      "month": "2017-08",
+      "labelled": 4315,
+      "negative_rate": 0.11332560834298958
+    },
+    {
+      "month": "2017-09",
+      "labelled": 4267,
+      "negative_rate": 0.12444340285915163
+    },
+    {
+      "month": "2017-10",
+      "labelled": 4553,
+      "negative_rate": 0.1328794201625302
+    },
+    {
+      "month": "2017-11",
+      "labelled": 7331,
+      "negative_rate": 0.18783249215659528
+    },
+    {
+      "month": "2017-12",
+      "labelled": 5772,
+      "negative_rate": 0.16424116424116425
+    },
+    {
+      "month": "2018-01",
+      "labelled": 7119,
+      "negative_rate": 0.1550779603876949
+    },
+    {
+      "month": "2018-02",
+      "labelled": 6650,
+      "negative_rate": 0.20781954887218046
+    },
+    {
+      "month": "2018-03",
+      "labelled": 7225,
+      "negative_rate": 0.2290657439446367
+    },
+    {
+      "month": "2018-04",
+      "labelled": 6726,
+      "negative_rate": 0.13068688670829617
+    },
+    {
+      "month": "2018-05",
+      "labelled": 7028,
+      "negative_rate": 0.11966420034149118
+    },
+    {
+      "month": "2018-06",
+      "labelled": 6139,
+      "negative_rate": 0.10750936634631048
+    },
+    {
+      "month": "2018-07",
+      "labelled": 6130,
+      "negative_rate": 0.10962479608482871
+    },
+    {
+      "month": "2018-08",
+      "labelled": 6594,
+      "negative_rate": 0.1067637245981195
+    },
+    {
+      "month": "2018-09",
+      "labelled": 1,
+      "negative_rate": 1.0
+    }
+  ],
+  "drift": [
+    {
+      "feature": "shipping_limit_days",
+      "kind": "number",
+      "psi": 0.8504710226007481,
+      "ks_statistic": 0.33309683993676115,
+      "ks_pvalue": 0.0,
+      "train_median": 6.0,
+      "eval_median": 4.0,
+      "train_missing": 0.007432768924302789,
+      "eval_missing": 0.0016876747007014397
+    },
+    {
+      "feature": "promise_days",
+      "kind": "number",
+      "psi": 0.3918354253139592,
+      "ks_statistic": 0.24647931991773422,
+      "ks_pvalue": 0.0,
+      "train_median": 23.541817129629628,
+      "eval_median": 19.984328703703703,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "freight_sum",
+      "kind": "number",
+      "psi": 0.2751383978007913,
+      "ks_statistic": 0.17122098205984143,
+      "ks_pvalue": 0.0,
+      "train_median": 16.79,
+      "eval_median": 18.59,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "product_category_name_english",
+      "kind": "category",
+      "psi": 0.1758784963484476,
+      "train_top": "bed_bath_table 0.095",
+      "eval_top": "health_beauty 0.120"
+    },
+    {
+      "feature": "seller_state",
+      "kind": "category",
+      "psi": 0.03527747564664984,
+      "train_top": "SP 0.706",
+      "eval_top": "SP 0.696"
+    },
+    {
+      "feature": "product_weight_g",
+      "kind": "number",
+      "psi": 0.03156760086900101,
+      "ks_statistic": 0.05804359462357389,
+      "ks_pvalue": 3.091596339246142e-45,
+      "train_median": 700.0,
+      "eval_median": 600.0,
+      "train_missing": 0.007631972111553785,
+      "eval_missing": 0.0016876747007014397
+    },
+    {
+      "feature": "product_photos_qty",
+      "kind": "number",
+      "psi": 0.025864566213267805,
+      "ks_statistic": 0.010984434668487086,
+      "ks_pvalue": 0.05082644305542294,
+      "train_median": 2.0,
+      "eval_median": 1.0,
+      "train_missing": 0.023941733067729083,
+      "eval_missing": 0.0064869996308211594
+    },
+    {
+      "feature": "approval_hour",
+      "kind": "number",
+      "psi": 0.023885717203622463,
+      "ks_statistic": 0.0426444031374108,
+      "ks_pvalue": 1.1185343402907597e-24,
+      "train_median": 13.0,
+      "eval_median": 14.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "customer_seller_span_sq",
+      "kind": "number",
+      "psi": 0.023383334535157587,
+      "ks_statistic": 0.054897333246289454,
+      "ks_pvalue": 2.4641724498628907e-40,
+      "train_median": 17.3120379517905,
+      "eval_median": 14.212830867221498,
+      "train_missing": 0.01254980079681275,
+      "eval_missing": 0.005854121618058119
+    },
+    {
+      "feature": "approval_day_of_month",
+      "kind": "number",
+      "psi": 0.02009262972259423,
+      "ks_statistic": 0.04895659700736099,
+      "ks_pvalue": 2.1658640242140002e-32,
+      "train_median": 16.0,
+      "eval_median": 15.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "days_since_prior_order",
+      "kind": "number",
+      "psi": 0.01868238027270294,
+      "ks_statistic": 0.24960262144639828,
+      "ks_pvalue": 3.890494565371958e-29,
+      "train_median": 21.708587962962962,
+      "eval_median": 91.63675347222222,
+      "train_missing": 0.9682644422310757,
+      "eval_missing": 0.9652971889668266
+    },
+    {
+      "feature": "freight_share",
+      "kind": "number",
+      "psi": 0.018297092275049463,
+      "ks_statistic": 0.04308778832904714,
+      "ks_pvalue": 4.0832008837489906e-25,
+      "train_median": 0.18181818181818182,
+      "eval_median": 0.19296430419037766,
+      "train_missing": 0.007432768924302789,
+      "eval_missing": 0.0016876747007014397
+    },
+    {
+      "feature": "customer_state",
+      "kind": "category",
+      "psi": 0.016453717099887046,
+      "train_top": "SP 0.409",
+      "eval_top": "SP 0.463"
+    },
+    {
+      "feature": "customer_zip_region",
+      "kind": "number",
+      "psi": 0.01460991055630778,
+      "ks_statistic": 0.05541189758134274,
+      "ks_pvalue": 2.2185772874069366e-41,
+      "train_median": 25.0,
+      "eval_median": 22.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "price_sum",
+      "kind": "number",
+      "psi": 0.0131414587542132,
+      "ks_statistic": 0.011825218950257677,
+      "ks_pvalue": 0.027517130287168623,
+      "train_median": 86.9,
+      "eval_median": 85.9,
+      "train_missing": 0.007432768924302789,
+      "eval_missing": 0.0016876747007014397
+    },
+    {
+      "feature": "n_items",
+      "kind": "number",
+      "psi": 0.008550528419342698,
+      "ks_statistic": 0.005745094223601349,
+      "ks_pvalue": 0.6896711229586661,
+      "train_median": 1.0,
+      "eval_median": 1.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "price_spread",
+      "kind": "number",
+      "psi": 0.008550528419342698,
+      "ks_statistic": 0.003360017493398759,
+      "ks_pvalue": 0.9950287256741969,
+      "train_median": 0.0,
+      "eval_median": 0.0,
+      "train_missing": 0.007432768924302789,
+      "eval_missing": 0.0016876747007014397
+    },
+    {
+      "feature": "n_sellers",
+      "kind": "number",
+      "psi": 0.008550528419342698,
+      "ks_statistic": 0.005745094223601349,
+      "ks_pvalue": 0.6896711229586661,
+      "train_median": 1.0,
+      "eval_median": 1.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "n_products",
+      "kind": "number",
+      "psi": 0.008550528419342698,
+      "ks_statistic": 0.005745094223601349,
+      "ks_pvalue": 0.6896711229586661,
+      "train_median": 1.0,
+      "eval_median": 1.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "installments_max",
+      "kind": "number",
+      "psi": 0.0027032105823598116,
+      "ks_statistic": 0.023277134564524182,
+      "ks_pvalue": 1.1862180433772611e-07,
+      "train_median": 2.0,
+      "eval_median": 1.0,
+      "train_missing": 1.2450199203187251e-05,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "payment_sum",
+      "kind": "number",
+      "psi": 0.0019189904288223038,
+      "ks_statistic": 0.018000990813384576,
+      "ks_pvalue": 9.507533846074518e-05,
+      "train_median": 104.87,
+      "eval_median": 107.72,
+      "train_missing": 1.2450199203187251e-05,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "n_payments",
+      "kind": "number",
+      "psi": 1.5500842514239372e-10,
+      "ks_statistic": 0.005340903014176002,
+      "ks_pvalue": 0.7718694746997432,
+      "train_median": 1.0,
+      "eval_median": 1.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "payment_parts",
+      "kind": "number",
+      "psi": 1.5500842514239372e-10,
+      "ks_statistic": 0.005008610518807632,
+      "ks_pvalue": 0.8343426216664387,
+      "train_median": 1.0,
+      "eval_median": 1.0,
+      "train_missing": 1.2450199203187251e-05,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "prior_orders_by_customer",
+      "kind": "number",
+      "psi": 0.0,
+      "ks_statistic": 0.002967253264249181,
+      "ks_pvalue": 0.9992167307333044,
+      "train_median": 0.0,
+      "eval_median": 0.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "pays_credit_card",
+      "kind": "number",
+      "psi": 0.0,
+      "ks_statistic": 0.005767511279705789,
+      "ks_pvalue": 0.6850090006045535,
+      "train_median": 1.0,
+      "eval_median": 1.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "pays_voucher",
+      "kind": "number",
+      "psi": 0.0,
+      "ks_statistic": 0.0064146445440219635,
+      "ks_pvalue": 0.550948755489586,
+      "train_median": 0.0,
+      "eval_median": 0.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "payments_unavailable",
+      "kind": "number",
+      "psi": 0.0,
+      "ks_statistic": 1.2450199203151158e-05,
+      "ks_pvalue": 1.0,
+      "train_median": 0.0,
+      "eval_median": 0.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "geography_unavailable",
+      "kind": "number",
+      "psi": 0.0,
+      "ks_statistic": 0.006695679178754466,
+      "ks_pvalue": 0.4951984067196441,
+      "train_median": 0.0,
+      "eval_median": 0.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    },
+    {
+      "feature": "category_unavailable",
+      "kind": "number",
+      "psi": 0.0,
+      "ks_statistic": 0.01675078731537638,
+      "ks_pvalue": 0.00036090356917683786,
+      "train_median": 0.0,
+      "eval_median": 0.0,
+      "train_missing": 0.0,
+      "eval_missing": 0.0
+    }
+  ],
+  "drift_vs_model": {
+    "monthly_recall": {
+      "2018-06": 0.26212121212121214,
+      "2018-07": 0.20238095238095238,
+      "2018-08": 0.2059659090909091,
+      "2018-09": 1.0
+    },
+    "recall_range": 0.7976190476190477,
+    "top_shifted_features": [
+      {
+        "feature": "shipping_limit_days",
+        "psi": 0.8504710226007481
+      },
+      {
+        "feature": "promise_days",
+        "psi": 0.3918354253139592
+      },
+      {
+        "feature": "freight_sum",
+        "psi": 0.2751383978007913
+      },
+      {
+        "feature": "product_category_name_english",
+        "psi": 0.1758784963484476
+      },
+      {
+        "feature": "seller_state",
+        "psi": 0.03527747564664984
+      }
+    ]
+  },
+  "run_id": "run-20261125T091701Z"
+}

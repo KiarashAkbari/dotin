@@ -1,0 +1,14 @@
+# sealed-cut rehearsal, month 2018-08 (scripts/sealed_cut_rehearsal.py)
+bundle: data/raw/sealed_cut_2018-08/ (orders, customers, items, payments, products, sellers; no reviews)
+orders in the cut: 6620; scored: 6620; follow-up list: 662; not scored (no order_approved_at): 0
+model: hgb.d3 run run-20261125T091701Z
+
+## 1. same preparation: predict vs the model step's stored score for the same order
+orders compared: 6620 of 6620; max |difference|: 4.999903863989186e-07
+
+## 2. same metric: recall of negative reviews at each capacity, labelled orders of the cut
+labelled orders: 6594; negatives: 704
+  5%: reviewed 330, caught 109, recall 0.1548
+  10%: reviewed 660, caught 145, recall 0.2060
+  20%: reviewed 1319, caught 206, recall 0.2926
+model step, same month, 10%: recall 0.2060 (145 of 704)

@@ -1,0 +1,197 @@
+{
+  "real model": {
+    "rows": 18961,
+    "labelled": 18864,
+    "negatives": 2037,
+    "negative_rate": 0.10798346055979643,
+    "auc": 0.6030119703533015,
+    "average_precision": 0.20574584325579515,
+    "capacity": [
+      {
+        "share": 0.05,
+        "reviewed": 944,
+        "caught": 303,
+        "caught_share": 0.1487481590574374,
+        "extra": 641
+      },
+      {
+        "share": 0.1,
+        "reviewed": 1887,
+        "caught": 454,
+        "caught_share": 0.22287677957781052,
+        "extra": 1433
+      },
+      {
+        "share": 0.2,
+        "reviewed": 3773,
+        "caught": 682,
+        "caught_share": 0.33480608738340695,
+        "extra": 3091
+      }
+    ],
+    "operating_point": {
+      "share": 0.1,
+      "reviewed": 1887,
+      "tp": 454,
+      "fp": 1433,
+      "fn": 1583,
+      "tn": 15394,
+      "precision": 0.24059353471118178,
+      "recall": 0.22287677957781052,
+      "f1": 0.23139653414882774
+    },
+    "capacity_all_approved": [
+      {
+        "share": 0.05,
+        "reviewed": 949,
+        "caught": 301,
+        "caught_share": 0.14776632302405499,
+        "extra": 648
+      },
+      {
+        "share": 0.1,
+        "reviewed": 1897,
+        "caught": 453,
+        "caught_share": 0.22238586156111928,
+        "extra": 1444
+      },
+      {
+        "share": 0.2,
+        "reviewed": 3793,
+        "caught": 682,
+        "caught_share": 0.33480608738340695,
+        "extra": 3111
+      }
+    ]
+  },
+  "cheating model, leaked values": {
+    "rows": 18961,
+    "labelled": 18864,
+    "negatives": 2037,
+    "negative_rate": 0.10798346055979643,
+    "auc": 0.7255330816222462,
+    "average_precision": 0.404465495771526,
+    "capacity": [
+      {
+        "share": 0.05,
+        "reviewed": 944,
+        "caught": 596,
+        "caught_share": 0.2925871379479627,
+        "extra": 348
+      },
+      {
+        "share": 0.1,
+        "reviewed": 1887,
+        "caught": 834,
+        "caught_share": 0.40942562592047127,
+        "extra": 1053
+      },
+      {
+        "share": 0.2,
+        "reviewed": 3773,
+        "caught": 1061,
+        "caught_share": 0.5208640157093766,
+        "extra": 2712
+      }
+    ],
+    "operating_point": {
+      "share": 0.1,
+      "reviewed": 1887,
+      "tp": 834,
+      "fp": 1053,
+      "fn": 1203,
+      "tn": 15774,
+      "precision": 0.4419713831478537,
+      "recall": 0.40942562592047127,
+      "f1": 0.42507645259938837
+    },
+    "capacity_all_approved": [
+      {
+        "share": 0.05,
+        "reviewed": 949,
+        "caught": 582,
+        "caught_share": 0.2857142857142857,
+        "extra": 367
+      },
+      {
+        "share": 0.1,
+        "reviewed": 1897,
+        "caught": 830,
+        "caught_share": 0.4074619538537064,
+        "extra": 1067
+      },
+      {
+        "share": 0.2,
+        "reviewed": 3793,
+        "caught": 1057,
+        "caught_share": 0.5189003436426117,
+        "extra": 2736
+      }
+    ]
+  },
+  "cheating model, values as at approval": {
+    "rows": 18961,
+    "labelled": 18864,
+    "negatives": 2037,
+    "negative_rate": 0.10798346055979643,
+    "auc": 0.5873529926350045,
+    "average_precision": 0.1483427126314617,
+    "capacity": [
+      {
+        "share": 0.05,
+        "reviewed": 944,
+        "caught": 197,
+        "caught_share": 0.09671084928816888,
+        "extra": 747
+      },
+      {
+        "share": 0.1,
+        "reviewed": 1887,
+        "caught": 328,
+        "caught_share": 0.16102110947471773,
+        "extra": 1559
+      },
+      {
+        "share": 0.2,
+        "reviewed": 3773,
+        "caught": 582,
+        "caught_share": 0.2857142857142857,
+        "extra": 3191
+      }
+    ],
+    "operating_point": {
+      "share": 0.1,
+      "reviewed": 1887,
+      "tp": 328,
+      "fp": 1559,
+      "fn": 1709,
+      "tn": 15268,
+      "precision": 0.17382087970323265,
+      "recall": 0.16102110947471773,
+      "f1": 0.1671763506625892
+    },
+    "capacity_all_approved": [
+      {
+        "share": 0.05,
+        "reviewed": 949,
+        "caught": 197,
+        "caught_share": 0.09671084928816888,
+        "extra": 752
+      },
+      {
+        "share": 0.1,
+        "reviewed": 1897,
+        "caught": 326,
+        "caught_share": 0.16003927344133528,
+        "extra": 1571
+      },
+      {
+        "share": 0.2,
+        "reviewed": 3793,
+        "caught": 581,
+        "caught_share": 0.2852233676975945,
+        "extra": 3212
+      }
+    ]
+  }
+}
