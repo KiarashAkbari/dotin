@@ -1,0 +1,20 @@
+-- REJECTED INDEX - built, measured and dropped. Not part of 004.
+--
+-- Candidate for Q2 (late-delivery ratio by state and month): a partial
+-- covering index holding exactly the rows of olist.v_delivered_orders, so Q2
+-- could read the delivered orders through an Index Only Scan.
+--
+-- CREATE INDEX ix_orders_delivered_partial ON olist.orders (customer_id)
+--     INCLUDE (order_purchase_timestamp, order_delivered_customer_date,
+--              order_estimated_delivery_date)
+--     WHERE order_status = 'delivered'
+--       AND order_delivered_customer_date IS NOT NULL;
+--
+-- Why dropped: Q2 needs about 97% of all orders (every delivered order).
+-- With the index in place the planner still chose Seq Scan on orders and
+-- customers, so the index was never read; its size and its build/write cost
+-- would be paid for nothing. Q2 was already under the budget without it.
+--
+-- Evidence (built inside a transaction that is rolled back, by
+-- olist_perf.evidence.rejected_index): data/curated/evidence/index-evidence.json,
+-- key "rejected_index": used_in_plan, size, median with and without.
