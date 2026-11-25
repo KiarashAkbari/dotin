@@ -8,14 +8,18 @@ materialised view has no rows in `pg_statistic`, so the frame is planned against
 live measurements, one day apart and on the same definition: 477 ms with a mixed external table, 663.4 ms
 after it was narrowed to the registered census.
 
-Four rules, all testable without a database:
+Five rules, all testable without a database:
 
 * the script judges the same statistic the feature step judges (`features.TIMING_BASIS`), not the mean;
 * `ANALYZE` goes on the three relations the bridge owns, and the materialised view is skipped when the
   bridge has not been applied -- a fresh database must not be stopped by its own probe;
 * the plan is read *after* the ANALYZE, because that is the state a reader has to reproduce;
-* the witness refuses to overwrite a file that measured a different ceiling or a different row count,
-  which is the rule `scripts/cheating_model_gap.py` already applies to a split boundary.
+* the witness refuses to overwrite a file that measured a different ceiling, row count or tuning, which
+  is the rule `scripts/cheating_model_gap.py` already applies to a split boundary;
+* and a refusal has to end in something to type, so the state picks the filename (`--set` writes a
+  `.tuned-<digest>` witness beside the untuned one) and the refusal names the dimension that moved.
+  Measured on his machine, 2026-11-25: a `--set` run against the 0036 witness refused with `--force` as
+  its only remedy -- which is an instruction to delete the evidence that refuted the ANALYZE theory.
 """
 
 from __future__ import annotations
@@ -113,6 +117,60 @@ class SettingsTests(unittest.TestCase):
         self.assertLess(body.index("after_runs = measure"), body.index("setting_lines(settings)"))
 
 
+class WitnessStateTests(unittest.TestCase):
+    """A refusal has to end in something to type, so the measurement state picks the filename."""
+
+    def setUp(self) -> None:
+        self.script = load_script()
+        self.stored = {"ceiling_ms": "500", "frame_rows": "99281", "tuning": ""}
+        self.claims = {
+            "ceiling_ms": "500",
+            "frame_rows": "99281",
+            "tuning": "max_parallel_workers_per_gather=4",
+        }
+
+    def test_the_tag_is_a_digest_of_the_sorted_settings(self) -> None:
+        import hashlib
+
+        settings = {"work_mem": "64MB", "max_parallel_workers_per_gather": "4"}
+        want = hashlib.sha256(b"max_parallel_workers_per_gather=4;work_mem=64MB").hexdigest()[:6]
+        self.assertEqual(self.script.tuning_tag(settings), want)
+        self.assertEqual(self.script.tuning_tag(dict(reversed(list(settings.items())))), want)
+        self.assertEqual(self.script.tuning_tag({}), "", msg="no setting, no suffix")
+
+    def test_the_refusal_names_every_dimension_that_moved(self) -> None:
+        self.assertEqual(
+            self.script.state_difference(self.stored, self.claims),
+            ["tuning: nothing there, max_parallel_workers_per_gather=4 here"],
+        )
+        self.assertEqual(self.script.state_difference(self.claims, self.claims), [])
+        moved = self.script.state_difference(
+            self.stored, {**self.claims, "ceiling_ms": "400", "frame_rows": "98000"}
+        )
+        self.assertEqual([line.split(":")[0] for line in moved], ["ceiling", "frame rows", "tuning"])
+
+    def test_a_refusal_with_one_remedy_only_invites_deleting_the_first_witness(self) -> None:
+        """What his `--set` run actually hit: `--force` as the only line of the refusal."""
+        base = self.script.DEFAULT_EVIDENCE
+        settings = self.script.parse_settings(["max_parallel_workers_per_gather=4"])
+        tuned = self.script.witness_path(base, settings)
+        self.assertNotEqual(tuned, base)
+        text = self.script.refusal(base, self.stored, self.claims, tuned)
+        self.assertIn("what differs: tuning: nothing there", text)
+        self.assertIn("belongs at docs/evidence/ceiling-feature-analysis.tuned-411fdc.txt", text)
+        self.assertNotIn("--force", text, msg="another file exists, so overwriting is not the advice")
+
+    def test_a_refusal_with_nowhere_else_to_write_says_so(self) -> None:
+        settings = self.script.parse_settings(["max_parallel_workers_per_gather=4"])
+        tuned = self.script.witness_path(self.script.DEFAULT_EVIDENCE, settings)
+        text = self.script.refusal(
+            tuned, {**self.claims, "tuning": "max_parallel_workers_per_gather=2"}, self.claims, tuned
+        )
+        self.assertIn("--force", text)
+        self.assertIn("what differs: tuning", text)
+        self.assertNotIn("belongs at", text, msg="it would name the file it is already writing")
+
+
 class ScriptShapeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.source = (STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
@@ -148,10 +206,31 @@ class ScriptShapeTests(unittest.TestCase):
         self.assertIn("--force", self.source)
 
     def test_a_witness_from_another_measurement_is_not_overwritten_in_silence(self) -> None:
-        body = self.source[self.source.index("if args.evidence.exists()") :]
+        body = self.source[self.source.index("if witness.exists()") :]
         self.assertIn("ceiling (\\d+) ms; frame rows (\\d+)(?:; tuned by ([^\\n]*))?", body)
         self.assertIn("return 2", body)
         self.assertIn("not args.force", body[: body.index("print(") + 400])
+        # the guard reads the file the run is about to write, not the base name it was handed
+        head = self.source[self.source.index("def main(") :]
+        self.assertLess(
+            head.index("witness = witness_path(args.evidence, settings)"),
+            head.index("if witness.exists()"),
+            msg="the state decides the name before the stored witness is read",
+        )
+        self.assertIn("witness.write_text(", head)
+
+    def test_a_tuned_witness_lands_beside_the_untuned_one(self) -> None:
+        """`--set` may not be a reason to overwrite the number the report cites."""
+        script = self.script
+        base = script.DEFAULT_EVIDENCE
+        settings = script.parse_settings(["max_parallel_workers_per_gather=4"])
+        tuned = script.witness_path(base, settings)
+        self.assertNotEqual(tuned, base)
+        self.assertEqual(tuned.suffix, base.suffix)
+        self.assertTrue(tuned.stem.startswith(base.stem))
+        self.assertEqual(tuned.name, "ceiling-feature-analysis.tuned-411fdc.txt")
+        self.assertEqual(script.witness_path(tuned, settings), tuned, msg="rewriting its own file is fine")
+        self.assertEqual(script.witness_path(base, {}), base, msg="an untuned run keeps the old name")
 
 
 if __name__ == "__main__":

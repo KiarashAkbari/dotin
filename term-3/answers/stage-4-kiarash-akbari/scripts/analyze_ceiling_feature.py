@@ -31,11 +31,18 @@ setting it already claims is refused -- so a pass nobody can reproduce cannot be
 Writes ``docs/evidence/ceiling-feature-analysis.txt`` (+ ``.json``) and refuses to overwrite a witness
 whose header names a different ceiling, frame row count or tuning, for the same reason
 `scripts/cheating_model_gap.py` refuses a witness from another split.
+
+A measurement that changes the *state* does not fight the stored one for the same filename: a `--set`
+run writes ``ceiling-feature-analysis.tuned-<tag>.txt`` beside it, where `<tag>` is a digest of the
+sorted settings. Both files are evidence -- one says the frame misses the ceiling, the other says what
+it costs to move it -- and a refusal whose only remedy is `--force` would teach people to destroy the
+first one to produce the second.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -53,9 +60,17 @@ ANALYZE_TARGETS = ("capstone.external_municipio", "capstone.mv_external_density"
 PLAN_SQL = "EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) SELECT * FROM {frame}"
 TIMING_SQL = "EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM {frame}"
 
+#: the witness a plain run writes; a tuned run derives its own name from this one so the two states
+#: never fight over one file
+DEFAULT_EVIDENCE = STAGE / "docs/evidence/ceiling-feature-analysis.txt"
+
 #: a `SET` name is one identifier, and that is the whole allowlist: the value is quoted separately, so
 #: a semicolon inside `--set` cannot smuggle a second statement into the session
 SETTING_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+#: a name that already carries a state is left alone, so pointing `--evidence` at a tuned witness and
+#: re-running the same settings rewrites that file instead of nesting `.tuned-xxxx.tuned-yyyy`
+TUNED_NAME = re.compile(r"\.tuned-[0-9a-f]{6}$")
 
 
 def parse_settings(pairs: list[str] | None) -> dict[str, str]:
@@ -78,6 +93,76 @@ def parse_settings(pairs: list[str] | None) -> dict[str, str]:
 def setting_lines(settings: dict[str, str]) -> list[str]:
     """The statements, one per setting, with the value quoted in exactly one place."""
     return [f"SET {key} = '{value.replace(chr(39), chr(39) * 2)}'" for key, value in settings.items()]
+
+
+def tuning_tag(settings: dict[str, str]) -> str:
+    """A short, order-independent name for a set of session settings; `""` when there are none.
+
+    The digest is taken over the *sorted* pairs, so `--set a=1 --set b=2` and the reverse land on the
+    same witness, and it is a digest of a fixed string rather than `hash()`, so the name a reader sees
+    today is the name their re-run picks tomorrow.
+    """
+    if not settings:
+        return ""
+    joined = ";".join(f"{key}={settings[key]}" for key in sorted(settings))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:6]
+
+
+def witness_path(evidence: Path, settings: dict[str, str]) -> Path:
+    """Where a measurement belongs: a tuned run writes beside the untuned witness, not over it."""
+    tag = tuning_tag(settings)
+    if not tag or TUNED_NAME.search(evidence.stem):
+        return evidence
+    return evidence.with_name(f"{evidence.stem}.tuned-{tag}{evidence.suffix}")
+
+
+def state_difference(stored: dict[str, str], current: dict[str, str]) -> list[str]:
+    """Which of the three claims a witness makes have moved, as sentences a reader can act on.
+
+    Empty means the run on disk and the run being asked for measure the same state, and overwriting is
+    then just a refresh. Non-empty is what turns "refusing to overwrite" into something to do.
+    """
+    labels = (("ceiling_ms", "ceiling"), ("frame_rows", "frame rows"), ("tuning", "tuning"))
+    moved: list[str] = []
+    for key, label in labels:
+        was = (stored.get(key) or "").strip()
+        now = (current.get(key) or "").strip()
+        if was != now:
+            moved.append(f"{label}: {was or 'nothing'} there, {now or 'nothing'} here")
+    return moved
+
+
+def shown(path: Path) -> str:
+    """The path as a reader standing in the stage directory would type it."""
+    try:
+        return str(path.relative_to(STAGE))
+    except ValueError:
+        return str(path)
+
+
+def refusal(path: Path, stored: dict[str, str], claims: dict[str, str], belongs: Path) -> str:
+    """The text a refused overwrite has to carry: what differs, and where the new run should go.
+
+    Naming only `--force` turned a second measurement into a choice between destroying the first one and
+    not taking it. A refusal is a tool working correctly only if the reader can act on it.
+    """
+    advice = (
+        f"this measurement belongs at {shown(belongs)}, beside the state it compares against rather "
+        "than on top of it"
+        if belongs != path
+        else "the file you pointed at already holds a different measurement, so --force only if this "
+        "run supersedes it"
+    )
+    return (
+        f"refusing to overwrite {path.name}: it records ceiling {stored['ceiling_ms']} ms on "
+        f"{stored['frame_rows']} rows"
+        + (f" tuned by {stored['tuning']}" if stored["tuning"] else "")
+        + "\nwhat differs: "
+        + "; ".join(state_difference(stored, claims))
+        + "\n"
+        + advice
+    )
+
 
 
 def measure(cursor, frame: str, *, repeat: int, clock) -> list[float]:
@@ -153,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--evidence",
         type=Path,
-        default=STAGE / "docs/evidence/ceiling-feature-analysis.txt",
+        default=DEFAULT_EVIDENCE,
+        help="base witness; a run with --set writes <base>.tuned-<tag>.txt instead of over it",
     )
     parser.add_argument(
         "--force",
@@ -181,11 +267,12 @@ def main(argv: list[str] | None = None) -> int:
     frame = features.FRAME_VIEW
     tuning = ", ".join(f"{key}={value}" for key, value in settings.items())
 
+    witness = witness_path(args.evidence, settings)
     previous = None
-    if args.evidence.exists():
+    if witness.exists():
         # the guard is about *what the file claims*; `--force` is consulted inside it, so it stays the
         # only way past
-        head = args.evidence.read_text(encoding="utf-8")[:2000]
+        head = witness.read_text(encoding="utf-8")[:2000]
         previous = re.search(r"ceiling (\d+) ms; frame rows (\d+)(?:; tuned by ([^\n]*))?", head)
 
     connection = connect(database_uri(config), purpose="measure the frame across an ANALYZE")
@@ -193,20 +280,15 @@ def main(argv: list[str] | None = None) -> int:
         cursor = connection.cursor()
         cursor.execute(f"SELECT count(*) FROM {frame}")
         rows = int(cursor.fetchone()[0])
-        if previous and not args.force and (
-            int(previous.group(1)) != int(ceiling)
-            or int(previous.group(2)) != rows
-            or (previous.group(3) or "").strip() != tuning
-        ):
-            print(
-                f"refusing to overwrite {args.evidence.name}: it records ceiling {previous.group(1)} ms "
-                f"on {previous.group(2)} rows"
-                + (f" tuned by {previous.group(3)}" if previous.group(3) else "")
-                + f", and this run uses {int(ceiling)} ms on {rows} rows"
-                + (f" tuned by {tuning}" if tuning else "")
-                + "\nthese are different measurements of a different state -- pass --force if the new "
-                "state is the decision"
-            )
+        stored = {
+            "ceiling_ms": previous.group(1) if previous else "",
+            "frame_rows": previous.group(2) if previous else "",
+            "tuning": (previous.group(3) or "").strip() if previous else "",
+        }
+        claims = {"ceiling_ms": str(int(ceiling)), "frame_rows": str(rows), "tuning": tuning}
+        difference = state_difference(stored, claims) if previous else []
+        if difference and not args.force:
+            print(refusal(witness, stored, claims, witness_path(DEFAULT_EVIDENCE, settings)))
             return 2
 
         before_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
@@ -237,6 +319,11 @@ def main(argv: list[str] | None = None) -> int:
         f"config {args.config.name}; frame {frame}; ceiling {int(ceiling)} ms; frame rows {rows}"
         + (f"; tuned by {tuning}" if tuning else ""),
         f"basis: {features.TIMING_BASIS}, the same statistic the feature step judges on",
+        *(
+            [f"companion: the same measurement without the setting is in {shown(args.evidence)}"]
+            if witness != args.evidence
+            else []
+        ),
         "",
         f"before ANALYZE: best {before['best_ms']:.1f} ms, mean {before['mean_ms']:.1f} ms, "
         f"worst {before['worst_ms']:.1f} ms, runs {before['runs_ms']}",
@@ -257,8 +344,8 @@ def main(argv: list[str] | None = None) -> int:
         "## the plan the error line asked for, read after the last measurement",
         plan,
     ]
-    args.evidence.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    args.evidence.with_suffix(".json").write_text(
+    witness.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    witness.with_suffix(".json").write_text(
         json.dumps(
             {
                 "config": str(args.config),
@@ -278,6 +365,7 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     print("\n".join(lines))
+    print(f"\nwrote {shown(witness)} and {shown(witness.with_suffix('.json'))}")
     states = [before, after] + ([tuned] if tuned else [])
     return 0 if any(state["passes"] for state in states) else 1
 
