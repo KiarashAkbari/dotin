@@ -140,35 +140,35 @@
     "ix_orders_dispatch_cover"
    ],
    "with_004_indexes_ms": [
-    1210.4,
-    1136.1,
-    1142.5
+    1184.3,
+    1140.6,
+    1133.8
    ],
    "without_004_indexes_ms": [
-    633.7,
-    629.1,
-    634.5
+    631.4,
+    610.8,
+    629.1
    ],
-   "median_with_ms": 1142.5,
-   "median_without_ms": 633.7,
-   "slowdown_ratio": 1.803
+   "median_with_ms": 1140.6,
+   "median_without_ms": 629.1,
+   "slowdown_ratio": 1.813
   },
   "order_items": {
    "rows_inserted": 112650,
    "indexes_004": [],
    "with_004_indexes_ms": [
-    1213.7,
-    1208.1,
-    1164.6
+    1190.7,
+    1173.1,
+    1164.5
    ],
    "without_004_indexes_ms": [
-    1222.2,
-    1166.5,
-    1154.7
+    1208.0,
+    1186.1,
+    1167.4
    ],
-   "median_with_ms": 1208.1,
-   "median_without_ms": 1166.5,
-   "slowdown_ratio": 1.036
+   "median_with_ms": 1173.1,
+   "median_without_ms": 1186.1,
+   "slowdown_ratio": 0.989
   },
   "order_reviews": {
    "rows_inserted": 99224,
@@ -176,18 +176,18 @@
     "ix_order_reviews_order_score"
    ],
    "with_004_indexes_ms": [
-    1235.7,
+    1215.6,
     1223.4,
-    1228.1
+    1248.2
    ],
    "without_004_indexes_ms": [
-    944.9,
-    960.4,
-    949.3
+    928.6,
+    947.5,
+    958.9
    ],
-   "median_with_ms": 1228.1,
-   "median_without_ms": 949.3,
-   "slowdown_ratio": 1.294
+   "median_with_ms": 1223.4,
+   "median_without_ms": 947.5,
+   "slowdown_ratio": 1.291
   },
   "payments": {
    "rows_inserted": 103886,
@@ -195,18 +195,50 @@
     "ix_payments_order_type_inst"
    ],
    "with_004_indexes_ms": [
-    1005.3,
-    988.4,
-    978.7
+    983.3,
+    984.4,
+    986.9
    ],
    "without_004_indexes_ms": [
-    659.9,
-    652.9,
-    662.0
+    652.4,
+    663.8,
+    657.8
    ],
-   "median_with_ms": 988.4,
-   "median_without_ms": 659.9,
-   "slowdown_ratio": 1.498
+   "median_with_ms": 984.4,
+   "median_without_ms": 657.8,
+   "slowdown_ratio": 1.496
   }
- }
+ },
+ "rebuilt_sizes": [
+  {
+   "index": "ix_orders_purchase_ts",
+   "bytes_as_loaded": 2662400,
+   "bytes_after_reindex": 2244608,
+   "ratio": 1.186
+  },
+  {
+   "index": "ix_orders_inactive",
+   "bytes_as_loaded": 98304,
+   "bytes_after_reindex": 90112,
+   "ratio": 1.091
+  },
+  {
+   "index": "ix_orders_dispatch_cover",
+   "bytes_as_loaded": 10936320,
+   "bytes_after_reindex": 8585216,
+   "ratio": 1.274
+  },
+  {
+   "index": "ix_order_reviews_order_score",
+   "bytes_as_loaded": 8019968,
+   "bytes_after_reindex": 5881856,
+   "ratio": 1.364
+  },
+  {
+   "index": "ix_payments_order_type_inst",
+   "bytes_as_loaded": 11485184,
+   "bytes_after_reindex": 8732672,
+   "ratio": 1.315
+  }
+ ]
 }

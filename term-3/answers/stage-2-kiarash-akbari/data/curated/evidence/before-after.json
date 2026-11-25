@@ -2,32 +2,32 @@
  "q1_monthly_category_sales.sql": {
   "before": {
    "elapsed_ms": [
-    318.859,
-    317.597,
-    319.115,
-    321.972,
-    322.285,
-    318.179,
-    318.566,
-    325.264,
-    320.03,
-    321.188,
-    319.316,
-    320.525,
-    318.674,
-    318.867,
-    324.123
+    319.449,
+    316.348,
+    317.117,
+    315.872,
+    321.777,
+    316.197,
+    318.312,
+    317.959,
+    315.849,
+    317.204,
+    322.137,
+    316.301,
+    317.658,
+    317.236,
+    318.38
    ],
-   "median_ms": 319.316,
-   "p95_ms": 325.264,
-   "max_ms": 325.264,
+   "median_ms": 317.236,
+   "p95_ms": 322.137,
+   "max_ms": 322.137,
    "under_budget_median": false,
    "all_runs_under_budget": false,
    "rows": 1282,
    "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
    "sql_sha256": "993e52e2012ffe919e0d2239aeb11bb3430ff2c7107a9dec5b163c0625161239",
-   "server_execution_ms": 363.289,
-   "planning_ms": 0.403,
+   "server_execution_ms": 362.95,
+   "planning_ms": 0.305,
    "scans": {
     "seq_scan": [
      "order_items",
@@ -42,44 +42,44 @@
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 1282,
      "loops": 1,
-     "total_cost": 23526.7,
-     "actual_total_ms": 361.718
+     "total_cost": 23519.49,
+     "actual_total_ms": 361.477
     },
     {
      "depth": 1,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 112101,
      "loops": 1,
-     "total_cost": 19632.32,
-     "actual_total_ms": 330.087
+     "total_cost": 19626.82,
+     "actual_total_ms": 330.709
     },
     {
      "depth": 2,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 112101,
      "loops": 1,
-     "total_cost": 10027.84,
-     "actual_total_ms": 160.772
+     "total_cost": 10026.93,
+     "actual_total_ms": 163.272
     },
     {
      "depth": 3,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 112101,
      "loops": 1,
-     "total_cost": 8000.99,
-     "actual_total_ms": 97.638
+     "total_cost": 8000.45,
+     "actual_total_ms": 101.598
     },
     {
      "depth": 4,
@@ -90,29 +90,29 @@
      "actual_rows": 112650,
      "loops": 1,
      "total_cost": 3425.5,
-     "actual_total_ms": 9.29
+     "actual_total_ms": 9.28
     },
     {
      "depth": 4,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 98221,
+     "est_rows": 98178,
      "actual_rows": 98207,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 30.491
+     "actual_total_ms": 35.165
     },
     {
      "depth": 5,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 98221,
+     "est_rows": 98178,
      "actual_rows": 98207,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 16.124
+     "actual_total_ms": 18.455
     },
     {
      "depth": 3,
@@ -123,7 +123,7 @@
      "actual_rows": 32951,
      "loops": 1,
      "total_cost": 766.51,
-     "actual_total_ms": 7.193
+     "actual_total_ms": 7.16
     },
     {
      "depth": 4,
@@ -134,38 +134,38 @@
      "actual_rows": 32951,
      "loops": 1,
      "total_cost": 766.51,
-     "actual_total_ms": 3.061
+     "actual_total_ms": 3.083
     }
    ]
   },
   "after": {
    "elapsed_ms": [
-    7.635,
-    7.66,
-    7.779,
-    9.074,
-    7.699,
-    7.69,
-    7.912,
-    8.945,
-    7.567,
-    7.539,
-    7.448,
-    7.659,
-    7.61,
-    7.737,
-    7.625
+    7.852,
+    7.657,
+    7.628,
+    8.198,
+    8.376,
+    7.81,
+    8.34,
+    7.471,
+    7.472,
+    7.426,
+    7.819,
+    8.283,
+    8.251,
+    7.526,
+    7.812
    ],
-   "median_ms": 7.66,
-   "p95_ms": 9.074,
-   "max_ms": 9.074,
+   "median_ms": 7.812,
+   "p95_ms": 8.376,
+   "max_ms": 8.376,
    "under_budget_median": true,
    "all_runs_under_budget": true,
    "rows": 1282,
    "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73",
    "sql_sha256": "d7ece02221fecaf2bd1e08ca52ffb5af0a0658f286ec011fca4146d7713068f1",
-   "server_execution_ms": 7.773,
-   "planning_ms": 0.423,
+   "server_execution_ms": 7.88,
+   "planning_ms": 0.397,
    "scans": {
     "seq_scan": [
      "order_items",
@@ -183,11 +183,11 @@
      "node": "Merge Append",
      "relation": null,
      "index": null,
-     "est_rows": 38371,
+     "est_rows": 38355,
      "actual_rows": 1282,
      "loops": 1,
-     "total_cost": 13272.55,
-     "actual_total_ms": 7.661
+     "total_cost": 13270.16,
+     "actual_total_ms": 7.77
     },
     {
      "depth": 1,
@@ -198,18 +198,18 @@
      "actual_rows": 1282,
      "loops": 1,
      "total_cost": 91.88,
-     "actual_total_ms": 0.227
+     "actual_total_ms": 0.282
     },
     {
      "depth": 1,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 37089,
+     "est_rows": 37073,
      "actual_rows": 0,
      "loops": 1,
-     "total_cost": 12796.95,
-     "actual_total_ms": 7.29
+     "total_cost": 12794.72,
+     "actual_total_ms": 7.381
     },
     {
      "depth": 2,
@@ -220,7 +220,7 @@
      "actual_rows": 1,
      "loops": 1,
      "total_cost": 0.34,
-     "actual_total_ms": 0.019
+     "actual_total_ms": 0.022
     },
     {
      "depth": 3,
@@ -231,7 +231,7 @@
      "actual_rows": 1,
      "loops": 1,
      "total_cost": 0.32,
-     "actual_total_ms": 0.014
+     "actual_total_ms": 0.018
     },
     {
      "depth": 4,
@@ -242,40 +242,40 @@
      "actual_rows": 1,
      "loops": 1,
      "total_cost": 58.71,
-     "actual_total_ms": 0.012
+     "actual_total_ms": 0.016
     },
     {
      "depth": 2,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 37089,
+     "est_rows": 37073,
      "actual_rows": 0,
      "loops": 1,
-     "total_cost": 11498.5,
-     "actual_total_ms": 7.288
+     "total_cost": 11496.83,
+     "actual_total_ms": 7.379
     },
     {
      "depth": 3,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 37089,
+     "est_rows": 37073,
      "actual_rows": 0,
      "loops": 1,
-     "total_cost": 8590.96,
-     "actual_total_ms": 7.284
+     "total_cost": 8590.66,
+     "actual_total_ms": 7.375
     },
     {
      "depth": 4,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 37089,
+     "est_rows": 37073,
      "actual_rows": 0,
      "loops": 1,
-     "total_cost": 7129.75,
-     "actual_total_ms": 0.067
+     "total_cost": 7129.57,
+     "actual_total_ms": 0.075
     },
     {
      "depth": 5,
@@ -286,29 +286,29 @@
      "actual_rows": 1,
      "loops": 1,
      "total_cost": 3425.5,
-     "actual_total_ms": 0.009
+     "actual_total_ms": 0.008
     },
     {
      "depth": 5,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 32740,
+     "est_rows": 32726,
      "actual_rows": 0,
      "loops": 1,
      "total_cost": 2999.28,
-     "actual_total_ms": 0.044
+     "actual_total_ms": 0.049
     },
     {
      "depth": 6,
      "node": "Bitmap Heap Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 32740,
+     "est_rows": 32726,
      "actual_rows": 0,
      "loops": 1,
      "total_cost": 2999.28,
-     "actual_total_ms": 0.043
+     "actual_total_ms": 0.048
     },
     {
      "depth": 7,
@@ -319,7 +319,7 @@
      "actual_rows": 4,
      "loops": 1,
      "total_cost": 684.89,
-     "actual_total_ms": 0.03
+     "actual_total_ms": 0.034
     },
     {
      "depth": 4,
@@ -330,7 +330,7 @@
      "actual_rows": 32951,
      "loops": 1,
      "total_cost": 766.51,
-     "actual_total_ms": 7.2
+     "actual_total_ms": 7.281
     },
     {
      "depth": 5,
@@ -341,42 +341,42 @@
      "actual_rows": 32951,
      "loops": 1,
      "total_cost": 766.51,
-     "actual_total_ms": 3.095
+     "actual_total_ms": 3.214
     }
    ]
   },
   "same_result": true,
-  "speedup": 41.69
+  "speedup": 40.61
  },
  "q2_delivery_by_state_month.sql": {
   "before": {
    "elapsed_ms": [
-    149.258,
-    151.766,
-    148.78,
-    147.881,
-    147.587,
-    148.673,
-    148.608,
-    148.222,
-    149.052,
-    147.737,
-    149.198,
-    148.679,
-    148.501,
-    147.275,
-    152.966
+    155.227,
+    150.435,
+    151.795,
+    150.766,
+    149.933,
+    152.201,
+    150.642,
+    150.222,
+    151.309,
+    151.142,
+    151.711,
+    151.152,
+    150.234,
+    151.433,
+    149.577
    ],
-   "median_ms": 148.673,
-   "p95_ms": 152.966,
-   "max_ms": 152.966,
+   "median_ms": 151.142,
+   "p95_ms": 155.227,
+   "max_ms": 155.227,
    "under_budget_median": true,
    "all_runs_under_budget": true,
    "rows": 556,
    "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da",
    "sql_sha256": "01bcc480f50845cf839242041afec5d81aaa26d8abbaea04e9b008a3a801aa2e",
-   "server_execution_ms": 179.931,
-   "planning_ms": 0.212,
+   "server_execution_ms": 181.667,
+   "planning_ms": 0.206,
    "scans": {
     "seq_scan": [
      "orders",
@@ -390,44 +390,44 @@
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 556,
      "loops": 1,
-     "total_cost": 20338.03,
-     "actual_total_ms": 178.716
+     "total_cost": 20360.59,
+     "actual_total_ms": 180.599
     },
     {
      "depth": 1,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
-     "total_cost": 15421.2,
-     "actual_total_ms": 151.348
+     "total_cost": 15435.98,
+     "actual_total_ms": 153.292
     },
     {
      "depth": 2,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
-     "total_cost": 7453.56,
-     "actual_total_ms": 101.624
+     "total_cost": 7454.69,
+     "actual_total_ms": 102.86
     },
     {
      "depth": 3,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 16.247
+     "actual_total_ms": 15.992
     },
     {
      "depth": 3,
@@ -438,7 +438,7 @@
      "actual_rows": 99441,
      "loops": 1,
      "total_cost": 2444.41,
-     "actual_total_ms": 28.25
+     "actual_total_ms": 28.383
     },
     {
      "depth": 4,
@@ -449,38 +449,38 @@
      "actual_rows": 99441,
      "loops": 1,
      "total_cost": 2444.41,
-     "actual_total_ms": 11.363
+     "actual_total_ms": 11.319
     }
    ]
   },
   "after": {
    "elapsed_ms": [
-    114.372,
-    115.006,
-    114.581,
-    113.698,
-    112.526,
-    113.114,
-    112.888,
-    112.789,
-    111.996,
-    113.896,
-    112.044,
-    113.144,
-    114.003,
-    114.127,
-    111.856
+    113.98,
+    115.256,
+    115.476,
+    114.202,
+    113.943,
+    112.85,
+    113.862,
+    113.891,
+    113.845,
+    113.414,
+    112.559,
+    111.66,
+    112.618,
+    111.348,
+    114.127
    ],
-   "median_ms": 113.144,
-   "p95_ms": 115.006,
-   "max_ms": 115.006,
+   "median_ms": 113.862,
+   "p95_ms": 115.476,
+   "max_ms": 115.476,
    "under_budget_median": true,
    "all_runs_under_budget": true,
    "rows": 556,
    "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da",
    "sql_sha256": "e65faf804615d360d19b7515de93092037f636b3f90b311f68a20e831f2e758d",
-   "server_execution_ms": 135.106,
-   "planning_ms": 0.219,
+   "server_execution_ms": 133.643,
+   "planning_ms": 0.226,
    "scans": {
     "seq_scan": [
      "orders",
@@ -494,44 +494,44 @@
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 556,
      "loops": 1,
-     "total_cost": 22211.11,
-     "actual_total_ms": 134.977
+     "total_cost": 22236.63,
+     "actual_total_ms": 133.51
     },
     {
      "depth": 1,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 556,
      "loops": 1,
-     "total_cost": 12370.39,
-     "actual_total_ms": 134.635
+     "total_cost": 12379.29,
+     "actual_total_ms": 133.164
     },
     {
      "depth": 2,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
-     "total_cost": 7453.56,
-     "actual_total_ms": 101.945
+     "total_cost": 7454.69,
+     "actual_total_ms": 100.441
     },
     {
      "depth": 3,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 16.941
+     "actual_total_ms": 16.411
     },
     {
      "depth": 3,
@@ -542,7 +542,7 @@
      "actual_rows": 99441,
      "loops": 1,
      "total_cost": 2444.41,
-     "actual_total_ms": 27.466
+     "actual_total_ms": 26.478
     },
     {
      "depth": 4,
@@ -553,53 +553,53 @@
      "actual_rows": 99441,
      "loops": 1,
      "total_cost": 2444.41,
-     "actual_total_ms": 11.315
+     "actual_total_ms": 10.975
     },
     {
      "depth": 1,
      "node": "CTE Scan",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 556,
      "loops": 1,
-     "total_cost": 1873.08,
-     "actual_total_ms": 134.753
+     "total_cost": 1876.04,
+     "actual_total_ms": 133.281
     }
    ]
   },
   "same_result": true,
-  "speedup": 1.31
+  "speedup": 1.33
  },
  "q3_delay_and_satisfaction.sql": {
   "before": {
    "elapsed_ms": [
-    200.324,
-    199.141,
-    199.732,
-    202.409,
-    199.37,
-    200.942,
-    201.542,
-    200.71,
-    199.97,
-    208.907,
-    206.893,
-    224.874,
-    222.649,
-    229.714,
-    220.948
+    201.215,
+    204.139,
+    202.006,
+    202.271,
+    201.74,
+    201.875,
+    201.513,
+    203.514,
+    203.377,
+    203.792,
+    197.386,
+    193.894,
+    195.59,
+    195.595,
+    196.041
    ],
-   "median_ms": 201.542,
-   "p95_ms": 229.714,
-   "max_ms": 229.714,
+   "median_ms": 201.74,
+   "p95_ms": 204.139,
+   "max_ms": 204.139,
    "under_budget_median": false,
    "all_runs_under_budget": false,
    "rows": 4,
    "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847",
    "sql_sha256": "12b3ac9c2a6e679fd12f0a11935b203a0e945844ec8d39f5785f52781e830c7c",
-   "server_execution_ms": 256.808,
-   "planning_ms": 0.297,
+   "server_execution_ms": 234.893,
+   "planning_ms": 0.254,
    "scans": {
     "seq_scan": [
      "orders",
@@ -613,77 +613,77 @@
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 90317,
+     "est_rows": 90669,
      "actual_rows": 4,
      "loops": 1,
-     "total_cost": 29763.91,
-     "actual_total_ms": 256.593
+     "total_cost": 29810.54,
+     "actual_total_ms": 234.697
     },
     {
      "depth": 1,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 92616,
+     "est_rows": 92746,
      "actual_rows": 95824,
      "loops": 1,
-     "total_cost": 20923.52,
-     "actual_total_ms": 240.199
+     "total_cost": 20939.16,
+     "actual_total_ms": 218.664
     },
     {
      "depth": 2,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 92616,
+     "est_rows": 92746,
      "actual_rows": 95824,
      "loops": 1,
-     "total_cost": 13051.63,
-     "actual_total_ms": 220.727
+     "total_cost": 13055.29,
+     "actual_total_ms": 200.857
     },
     {
      "depth": 3,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 16.282
+     "actual_total_ms": 15.634
     },
     {
      "depth": 3,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 5746.05,
-     "actual_total_ms": 146.458
+     "total_cost": 5745.64,
+     "actual_total_ms": 132.006
     },
     {
      "depth": 4,
      "node": "Subquery Scan",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 5746.05,
-     "actual_total_ms": 121.216
+     "total_cost": 5745.64,
+     "actual_total_ms": 109.657
     },
     {
      "depth": 5,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 4762.66,
-     "actual_total_ms": 111.757
+     "total_cost": 4762.43,
+     "actual_total_ms": 100.683
     },
     {
      "depth": 6,
@@ -694,38 +694,38 @@
      "actual_rows": 99224,
      "loops": 1,
      "total_cost": 2789.24,
-     "actual_total_ms": 8.891
+     "actual_total_ms": 8.233
     }
    ]
   },
   "after": {
    "elapsed_ms": [
-    183.387,
-    209.5,
-    185.913,
-    188.819,
-    186.955,
-    203.961,
-    165.964,
-    165.942,
-    168.59,
-    167.678,
-    169.0,
-    167.772,
-    167.04,
-    166.604,
-    167.875
+    161.544,
+    159.527,
+    160.395,
+    160.189,
+    159.613,
+    160.331,
+    160.746,
+    160.571,
+    159.039,
+    160.326,
+    160.485,
+    160.566,
+    161.288,
+    160.74,
+    159.798
    ],
-   "median_ms": 168.59,
-   "p95_ms": 209.5,
-   "max_ms": 209.5,
+   "median_ms": 160.395,
+   "p95_ms": 161.544,
+   "max_ms": 161.544,
    "under_budget_median": true,
-   "all_runs_under_budget": false,
+   "all_runs_under_budget": true,
    "rows": 4,
    "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847",
    "sql_sha256": "447abe9f45354ba1efef61200e6905015243e293d2d00072bfd61f47113ebaf3",
-   "server_execution_ms": 203.295,
-   "planning_ms": 0.272,
+   "server_execution_ms": 192.883,
+   "planning_ms": 0.27,
    "scans": {
     "seq_scan": [
      "orders"
@@ -740,44 +740,44 @@
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 90317,
+     "est_rows": 90669,
      "actual_rows": 4,
      "loops": 1,
-     "total_cost": 32333.18,
-     "actual_total_ms": 203.224
+     "total_cost": 32381.46,
+     "actual_total_ms": 192.812
     },
     {
      "depth": 1,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 92616,
+     "est_rows": 92746,
      "actual_rows": 95824,
      "loops": 1,
-     "total_cost": 23492.79,
-     "actual_total_ms": 186.718
+     "total_cost": 23510.07,
+     "actual_total_ms": 176.892
     },
     {
      "depth": 2,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 92616,
+     "est_rows": 92746,
      "actual_rows": 95824,
      "loops": 1,
-     "total_cost": 15620.9,
-     "actual_total_ms": 165.951
+     "total_cost": 15626.2,
+     "actual_total_ms": 157.698
     },
     {
      "depth": 3,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 7378.19,
-     "actual_total_ms": 71.542
+     "total_cost": 7377.97,
+     "actual_total_ms": 68.781
     },
     {
      "depth": 4,
@@ -788,64 +788,64 @@
      "actual_rows": 99224,
      "loops": 1,
      "total_cost": 5404.78,
-     "actual_total_ms": 12.311
+     "actual_total_ms": 11.924
     },
     {
      "depth": 3,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 33.571
+     "actual_total_ms": 32.959
     },
     {
      "depth": 4,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 93654,
+     "est_rows": 93802,
      "actual_rows": 96470,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 16.356
+     "actual_total_ms": 16.003
     }
    ]
   },
   "same_result": true,
-  "speedup": 1.2
+  "speedup": 1.26
  },
  "q4_top_sellers.sql": {
   "before": {
    "elapsed_ms": [
-    469.975,
-    467.479,
-    470.958,
-    472.255,
-    458.818,
-    454.341,
-    458.047,
-    457.216,
-    461.721,
-    455.672,
-    455.251,
-    462.706,
-    464.641,
-    450.729,
-    451.177
+    441.518,
+    443.238,
+    440.737,
+    437.716,
+    437.917,
+    440.062,
+    439.143,
+    460.511,
+    451.848,
+    466.021,
+    452.908,
+    450.441,
+    464.024,
+    463.069,
+    454.564
    ],
-   "median_ms": 458.818,
-   "p95_ms": 472.255,
-   "max_ms": 472.255,
+   "median_ms": 450.441,
+   "p95_ms": 466.021,
+   "max_ms": 466.021,
    "under_budget_median": false,
    "all_runs_under_budget": false,
    "rows": 20,
    "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967",
    "sql_sha256": "909d99892cf1223f3ae050c76029de4fa978faced95509fed00b50036c9eef81",
-   "server_execution_ms": 528.051,
-   "planning_ms": 0.389,
+   "server_execution_ms": 521.777,
+   "planning_ms": 0.41,
    "scans": {
     "seq_scan": [
      "order_items",
@@ -864,8 +864,8 @@
      "est_rows": 20,
      "actual_rows": 20,
      "loops": 1,
-     "total_cost": 1662224.04,
-     "actual_total_ms": 527.634
+     "total_cost": 1661197.69,
+     "actual_total_ms": 521.438
     },
     {
      "depth": 1,
@@ -875,8 +875,8 @@
      "est_rows": 200,
      "actual_rows": 20,
      "loops": 1,
-     "total_cost": 1662224.49,
-     "actual_total_ms": 527.629
+     "total_cost": 1661198.14,
+     "actual_total_ms": 521.433
     },
     {
      "depth": 2,
@@ -886,52 +886,52 @@
      "est_rows": 200,
      "actual_rows": 3053,
      "loops": 1,
-     "total_cost": 1662218.67,
-     "actual_total_ms": 527.079
+     "total_cost": 1661192.32,
+     "actual_total_ms": 520.882
     },
     {
      "depth": 3,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 54709919,
+     "est_rows": 54675816,
      "actual_rows": 99542,
      "loops": 1,
-     "total_cost": 20917.6,
-     "actual_total_ms": 464.864
+     "total_cost": 20914.34,
+     "actual_total_ms": 458.398
     },
     {
      "depth": 4,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 99542,
      "loops": 1,
-     "total_cost": 12531.37,
-     "actual_total_ms": 274.919
+     "total_cost": 12529.36,
+     "actual_total_ms": 266.799
     },
     {
      "depth": 5,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 112101,
      "loops": 1,
-     "total_cost": 9471.5,
-     "actual_total_ms": 160.455
+     "total_cost": 9470.84,
+     "actual_total_ms": 157.089
     },
     {
      "depth": 6,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 112101,
      "loops": 1,
-     "total_cost": 8000.99,
-     "actual_total_ms": 107.398
+     "total_cost": 8000.45,
+     "actual_total_ms": 105.454
     },
     {
      "depth": 7,
@@ -942,29 +942,29 @@
      "actual_rows": 112650,
      "loops": 1,
      "total_cost": 3425.5,
-     "actual_total_ms": 9.374
+     "actual_total_ms": 9.325
     },
     {
      "depth": 7,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 98221,
+     "est_rows": 98178,
      "actual_rows": 98207,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 34.821
+     "actual_total_ms": 35.756
     },
     {
      "depth": 8,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 98221,
+     "est_rows": 98178,
      "actual_rows": 98207,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 17.296
+     "actual_total_ms": 17.382
     },
     {
      "depth": 6,
@@ -975,7 +975,7 @@
      "actual_rows": 32951,
      "loops": 1,
      "total_cost": 766.51,
-     "actual_total_ms": 7.294
+     "actual_total_ms": 7.228
     },
     {
      "depth": 7,
@@ -986,40 +986,40 @@
      "actual_rows": 32951,
      "loops": 1,
      "total_cost": 766.51,
-     "actual_total_ms": 3.185
+     "actual_total_ms": 3.223
     },
     {
      "depth": 4,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 5746.05,
-     "actual_total_ms": 136.644
+     "total_cost": 5745.64,
+     "actual_total_ms": 138.671
     },
     {
      "depth": 5,
      "node": "Subquery Scan",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 5746.05,
-     "actual_total_ms": 112.808
+     "total_cost": 5745.64,
+     "actual_total_ms": 115.475
     },
     {
      "depth": 6,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 98339,
+     "est_rows": 98321,
      "actual_rows": 98673,
      "loops": 1,
-     "total_cost": 4762.66,
-     "actual_total_ms": 103.47
+     "total_cost": 4762.43,
+     "actual_total_ms": 106.145
     },
     {
      "depth": 7,
@@ -1030,38 +1030,38 @@
      "actual_rows": 99224,
      "loops": 1,
      "total_cost": 2789.24,
-     "actual_total_ms": 8.169
+     "actual_total_ms": 7.986
     }
    ]
   },
   "after": {
    "elapsed_ms": [
-    191.302,
-    192.559,
-    191.732,
-    190.242,
-    191.331,
-    190.17,
-    191.167,
-    190.508,
-    191.999,
-    192.26,
-    192.211,
-    194.357,
-    193.835,
-    193.942,
-    194.05
+    188.38,
+    187.972,
+    187.434,
+    188.602,
+    190.153,
+    188.359,
+    188.814,
+    187.383,
+    188.27,
+    187.75,
+    194.696,
+    188.534,
+    190.553,
+    189.36,
+    189.156
    ],
-   "median_ms": 191.999,
-   "p95_ms": 194.357,
-   "max_ms": 194.357,
+   "median_ms": 188.534,
+   "p95_ms": 194.696,
+   "max_ms": 194.696,
    "under_budget_median": true,
    "all_runs_under_budget": true,
    "rows": 20,
    "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967",
    "sql_sha256": "d545936afc64b644dbe4c5ed7aacad989ac53c9a54e6b88c20ff67fe38fc3a2e",
-   "server_execution_ms": 235.886,
-   "planning_ms": 0.472,
+   "server_execution_ms": 229.123,
+   "planning_ms": 0.467,
    "scans": {
     "seq_scan": [
      "order_items",
@@ -1082,8 +1082,8 @@
      "est_rows": 20,
      "actual_rows": 20,
      "loops": 1,
-     "total_cost": 10615.82,
-     "actual_total_ms": 235.782
+     "total_cost": 10623.33,
+     "actual_total_ms": 229.014
     },
     {
      "depth": 1,
@@ -1093,41 +1093,41 @@
      "est_rows": 20,
      "actual_rows": 20,
      "loops": 1,
-     "total_cost": 5845.1,
-     "actual_total_ms": 64.41
+     "total_cost": 5844.9,
+     "actual_total_ms": 63.089
     },
     {
      "depth": 2,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 2385,
+     "est_rows": 2370,
      "actual_rows": 20,
      "loops": 1,
-     "total_cost": 5851.02,
-     "actual_total_ms": 64.405
+     "total_cost": 5850.77,
+     "actual_total_ms": 63.084
     },
     {
      "depth": 3,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 2385,
+     "est_rows": 2370,
      "actual_rows": 3053,
      "loops": 1,
-     "total_cost": 5781.59,
-     "actual_total_ms": 63.974
+     "total_cost": 5781.78,
+     "actual_total_ms": 62.65
     },
     {
      "depth": 4,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 111268,
+     "est_rows": 111219,
      "actual_rows": 112101,
      "loops": 1,
-     "total_cost": 4917.27,
-     "actual_total_ms": 31.696
+     "total_cost": 4918.02,
+     "actual_total_ms": 31.018
     },
     {
      "depth": 5,
@@ -1138,95 +1138,95 @@
      "actual_rows": 112650,
      "loops": 1,
      "total_cost": 3425.5,
-     "actual_total_ms": 8.97
+     "actual_total_ms": 8.704
     },
     {
      "depth": 5,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 1220,
+     "est_rows": 1263,
      "actual_rows": 1234,
      "loops": 1,
-     "total_cost": 66.58,
-     "actual_total_ms": 0.28
+     "total_cost": 67.22,
+     "actual_total_ms": 0.271
     },
     {
      "depth": 6,
      "node": "Index Only Scan",
      "relation": "orders",
      "index": "ix_orders_inactive",
-     "est_rows": 1220,
+     "est_rows": 1263,
      "actual_rows": 1234,
      "loops": 1,
-     "total_cost": 66.58,
-     "actual_total_ms": 0.129
+     "total_cost": 67.22,
+     "actual_total_ms": 0.131
     },
     {
      "depth": 1,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 93,
+     "est_rows": 94,
      "actual_rows": 18908,
      "loops": 1,
-     "total_cost": 4767.63,
-     "actual_total_ms": 226.926
+     "total_cost": 4775.31,
+     "actual_total_ms": 220.433
     },
     {
      "depth": 2,
      "node": "Nested Loop",
      "relation": null,
      "index": null,
-     "est_rows": 93,
+     "est_rows": 94,
      "actual_rows": 18908,
      "loops": 1,
-     "total_cost": 4764.35,
-     "actual_total_ms": 218.629
+     "total_cost": 4772.0,
+     "actual_total_ms": 212.299
     },
     {
      "depth": 3,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 93,
+     "est_rows": 94,
      "actual_rows": 18908,
      "loops": 1,
-     "total_cost": 4349.34,
-     "actual_total_ms": 149.995
+     "total_cost": 4352.52,
+     "actual_total_ms": 146.301
     },
     {
      "depth": 4,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 933,
+     "est_rows": 939,
      "actual_rows": 18908,
      "loops": 1,
-     "total_cost": 4334.93,
-     "actual_total_ms": 80.721
+     "total_cost": 4338.02,
+     "actual_total_ms": 78.463
     },
     {
      "depth": 5,
      "node": "Nested Loop",
      "relation": null,
      "index": null,
-     "est_rows": 933,
+     "est_rows": 939,
      "actual_rows": 21539,
      "loops": 1,
-     "total_cost": 4316.27,
-     "actual_total_ms": 67.428
+     "total_cost": 4319.24,
+     "actual_total_ms": 65.786
     },
     {
      "depth": 6,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 945,
+     "est_rows": 951,
      "actual_rows": 21587,
      "loops": 1,
-     "total_cost": 3858.04,
-     "actual_total_ms": 25.506
+     "total_cost": 3858.1,
+     "actual_total_ms": 24.775
     },
     {
      "depth": 7,
@@ -1237,7 +1237,7 @@
      "actual_rows": 112650,
      "loops": 1,
      "total_cost": 3425.5,
-     "actual_total_ms": 9.231
+     "actual_total_ms": 8.996
     },
     {
      "depth": 7,
@@ -1281,7 +1281,7 @@
      "actual_rows": 20,
      "loops": 1,
      "total_cost": 0.4,
-     "actual_total_ms": 64.421
+     "actual_total_ms": 63.102
     },
     {
      "depth": 5,
@@ -1292,7 +1292,7 @@
      "actual_rows": 20,
      "loops": 1,
      "total_cost": 0.4,
-     "actual_total_ms": 64.41
+     "actual_total_ms": 63.09
     },
     {
      "depth": 3,
@@ -1314,7 +1314,7 @@
      "actual_rows": 1,
      "loops": 18908,
      "total_cost": 4.44,
-     "actual_total_ms": 0.003
+     "actual_total_ms": 0.002
     }
    ]
   },
@@ -1324,32 +1324,32 @@
  "q5_payment_distribution.sql": {
   "before": {
    "elapsed_ms": [
-    475.193,
-    473.928,
-    476.689,
-    470.334,
-    475.821,
-    469.461,
-    463.022,
-    469.093,
-    471.61,
-    467.459,
-    468.269,
-    465.283,
-    460.605,
-    468.77,
-    468.972
+    462.431,
+    464.473,
+    468.844,
+    463.156,
+    465.178,
+    468.45,
+    455.968,
+    455.152,
+    458.866,
+    461.393,
+    460.547,
+    454.937,
+    458.986,
+    454.794,
+    455.623
    ],
-   "median_ms": 469.093,
-   "p95_ms": 476.689,
-   "max_ms": 476.689,
+   "median_ms": 460.547,
+   "p95_ms": 468.844,
+   "max_ms": 468.844,
    "under_budget_median": false,
    "all_runs_under_budget": false,
    "rows": 27,
    "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984",
    "sql_sha256": "8431a89292fa31a0b1fd7ef4cde8b3940048adc7bd9281be289d555a35fe7551",
-   "server_execution_ms": 552.68,
-   "planning_ms": 0.314,
+   "server_execution_ms": 538.496,
+   "planning_ms": 0.325,
    "scans": {
     "seq_scan": [
      "payments",
@@ -1363,22 +1363,22 @@
      "node": "WindowAgg",
      "relation": null,
      "index": null,
-     "est_rows": 10261,
+     "est_rows": 10257,
      "actual_rows": 27,
      "loops": 1,
-     "total_cost": 26333.12,
-     "actual_total_ms": 551.389
+     "total_cost": 26323.91,
+     "actual_total_ms": 537.325
     },
     {
      "depth": 1,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 6772.35,
-     "actual_total_ms": 96.685
+     "total_cost": 6771.81,
+     "actual_total_ms": 95.596
     },
     {
      "depth": 2,
@@ -1389,29 +1389,29 @@
      "actual_rows": 103886,
      "loops": 1,
      "total_cost": 2219.86,
-     "actual_total_ms": 8.158
+     "actual_total_ms": 8.056
     },
     {
      "depth": 2,
      "node": "Hash",
      "relation": null,
      "index": null,
-     "est_rows": 98221,
+     "est_rows": 98178,
      "actual_rows": 98207,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 32.487
+     "actual_total_ms": 32.038
     },
     {
      "depth": 3,
      "node": "Seq Scan",
      "relation": "orders",
      "index": null,
-     "est_rows": 98221,
+     "est_rows": 98178,
      "actual_rows": 98207,
      "loops": 1,
      "total_cost": 3052.01,
-     "actual_total_ms": 15.762
+     "actual_total_ms": 15.415
     },
     {
      "depth": 1,
@@ -1421,74 +1421,74 @@
      "est_rows": 200,
      "actual_rows": 98206,
      "loops": 1,
-     "total_cost": 2824.3,
-     "actual_total_ms": 168.106
+     "total_cost": 2823.09,
+     "actual_total_ms": 165.332
     },
     {
      "depth": 2,
      "node": "CTE Scan",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 2052.22,
-     "actual_total_ms": 86.665
+     "total_cost": 2051.34,
+     "actual_total_ms": 85.696
     },
     {
      "depth": 1,
      "node": "Nested Loop",
      "relation": null,
      "index": null,
-     "est_rows": 10261,
+     "est_rows": 10257,
      "actual_rows": 27,
      "loops": 1,
-     "total_cost": 16556.91,
-     "actual_total_ms": 551.337
+     "total_cost": 16549.51,
+     "actual_total_ms": 537.268
     },
     {
      "depth": 2,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 10261,
+     "est_rows": 10257,
      "actual_rows": 27,
      "loops": 1,
-     "total_cost": 16422.63,
-     "actual_total_ms": 524.7
+     "total_cost": 16415.28,
+     "actual_total_ms": 511.25
     },
     {
      "depth": 3,
      "node": "Sort",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 14703.9,
-     "actual_total_ms": 499.063
+     "total_cost": 14697.28,
+     "actual_total_ms": 486.624
     },
     {
      "depth": 4,
      "node": "Hash Join",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 5906.63,
-     "actual_total_ms": 297.967
+     "total_cost": 5904.1,
+     "actual_total_ms": 292.083
     },
     {
      "depth": 5,
      "node": "CTE Scan",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 2052.22,
-     "actual_total_ms": 40.0
+     "total_cost": 2051.34,
+     "actual_total_ms": 39.293
     },
     {
      "depth": 5,
@@ -1499,7 +1499,7 @@
      "actual_rows": 98206,
      "loops": 1,
      "total_cost": 4.0,
-     "actual_total_ms": 201.897
+     "actual_total_ms": 198.467
     },
     {
      "depth": 6,
@@ -1510,7 +1510,7 @@
      "actual_rows": 98206,
      "loops": 1,
      "total_cost": 4.0,
-     "actual_total_ms": 188.538
+     "actual_total_ms": 185.16
     },
     {
      "depth": 2,
@@ -1521,7 +1521,7 @@
      "actual_rows": 1,
      "loops": 27,
      "total_cost": 6.02,
-     "actual_total_ms": 0.986
+     "actual_total_ms": 0.963
     },
     {
      "depth": 3,
@@ -1532,7 +1532,7 @@
      "actual_rows": 1,
      "loops": 1,
      "total_cost": 6.01,
-     "actual_total_ms": 26.604
+     "actual_total_ms": 25.988
     },
     {
      "depth": 4,
@@ -1543,38 +1543,38 @@
      "actual_rows": 98206,
      "loops": 1,
      "total_cost": 4.0,
-     "actual_total_ms": 6.133
+     "actual_total_ms": 6.08
     }
    ]
   },
   "after": {
    "elapsed_ms": [
-    157.399,
-    157.435,
-    156.579,
-    157.98,
-    158.144,
-    158.789,
-    157.717,
-    157.591,
-    155.098,
-    154.794,
-    154.543,
-    156.081,
-    155.302,
-    156.727,
-    158.533
+    155.643,
+    155.405,
+    157.809,
+    155.331,
+    155.685,
+    154.43,
+    156.433,
+    155.806,
+    156.621,
+    156.769,
+    158.077,
+    156.403,
+    155.788,
+    155.548,
+    159.201
    ],
-   "median_ms": 157.399,
-   "p95_ms": 158.789,
-   "max_ms": 158.789,
+   "median_ms": 155.806,
+   "p95_ms": 159.201,
+   "max_ms": 159.201,
    "under_budget_median": true,
    "all_runs_under_budget": true,
    "rows": 27,
    "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984",
    "sql_sha256": "7c02cb64c4b7b8eeb45f9d6953ca3d6f97d0b44cfa323478968ca59de0a184c0",
-   "server_execution_ms": 180.251,
-   "planning_ms": 0.316,
+   "server_execution_ms": 179.426,
+   "planning_ms": 0.305,
    "scans": {
     "seq_scan": [],
     "index_scan": [
@@ -1591,41 +1591,41 @@
      "est_rows": 1,
      "actual_rows": 27,
      "loops": 1,
-     "total_cost": 17776.75,
-     "actual_total_ms": 180.192
+     "total_cost": 17773.88,
+     "actual_total_ms": 179.373
     },
     {
      "depth": 1,
      "node": "Aggregate",
      "relation": null,
      "index": null,
-     "est_rows": 101,
+     "est_rows": 106,
      "actual_rows": 28,
      "loops": 1,
-     "total_cost": 17772.17,
-     "actual_total_ms": 180.093
+     "total_cost": 17769.08,
+     "actual_total_ms": 179.277
     },
     {
      "depth": 2,
      "node": "WindowAgg",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 11100.19,
-     "actual_total_ms": 124.813
+     "total_cost": 11099.84,
+     "actual_total_ms": 123.657
     },
     {
      "depth": 3,
      "node": "Merge Join",
      "relation": null,
      "index": null,
-     "est_rows": 102611,
+     "est_rows": 102567,
      "actual_rows": 102573,
      "loops": 1,
-     "total_cost": 7508.8,
-     "actual_total_ms": 31.262
+     "total_cost": 7509.99,
+     "actual_total_ms": 31.324
     },
     {
      "depth": 4,
@@ -1636,18 +1636,18 @@
      "actual_rows": 103886,
      "loops": 1,
      "total_cost": 7166.71,
-     "actual_total_ms": 14.603
+     "actual_total_ms": 14.627
     },
     {
      "depth": 4,
      "node": "Index Only Scan",
      "relation": "orders",
      "index": "ix_orders_inactive",
-     "est_rows": 1220,
+     "est_rows": 1263,
      "actual_rows": 1234,
      "loops": 1,
-     "total_cost": 66.58,
-     "actual_total_ms": 0.164
+     "total_cost": 67.22,
+     "actual_total_ms": 0.167
     },
     {
      "depth": 1,
@@ -1657,8 +1657,8 @@
      "est_rows": 1,
      "actual_rows": 27,
      "loops": 1,
-     "total_cost": 4.56,
-     "actual_total_ms": 180.17
+     "total_cost": 4.79,
+     "actual_total_ms": 179.354
     },
     {
      "depth": 2,
@@ -1668,8 +1668,8 @@
      "est_rows": 1,
      "actual_rows": 27,
      "loops": 1,
-     "total_cost": 2.27,
-     "actual_total_ms": 180.081
+     "total_cost": 2.38,
+     "actual_total_ms": 179.264
     },
     {
      "depth": 2,
@@ -1679,12 +1679,12 @@
      "est_rows": 1,
      "actual_rows": 1,
      "loops": 27,
-     "total_cost": 2.27,
+     "total_cost": 2.38,
      "actual_total_ms": 0.003
     }
    ]
   },
   "same_result": true,
-  "speedup": 2.98
+  "speedup": 2.96
  }
 }
