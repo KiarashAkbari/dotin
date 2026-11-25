@@ -458,6 +458,11 @@ def load_from_csv(
     connection = (connect or (lambda uri: _connect(uri, purpose="mirror the audit")))(target)
     try:
         with connection.cursor() as cursor:
+            # a fresh database has no capstone schema yet; 001 is CREATE ... IF NOT EXISTS only, so
+            # applying it here is what lets `load-audit` be the chain's first capstone step
+            schema_sql = config.features.sql_migrations_dir / "001_capstone_schema.sql"
+            if schema_sql.is_file():
+                cursor.execute(schema_sql.read_text(encoding="utf-8"))
             before = read_audit_table(cursor)
             cursor.execute(RESET_STATEMENT)
             cursor.executemany(LOAD_STATEMENT, load_values(rows))
