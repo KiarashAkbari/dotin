@@ -43,7 +43,7 @@ class CodeVersionTests(unittest.TestCase):
 
         with mock.patch.object(manifest.subprocess, "run", side_effect=run):
             manifest.code_version()
-        status = [args for args in calls if args[:2] == ["git", "status"]][0]
+        status = next(args for args in calls if args[:2] == ["git", "status"])
         self.assertEqual(status[-1], str(manifest.STAGE_DIR))
         self.assertTrue((manifest.STAGE_DIR / "src" / "data_factory").is_dir())
 
