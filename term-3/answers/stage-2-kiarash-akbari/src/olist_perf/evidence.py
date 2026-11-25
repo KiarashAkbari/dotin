@@ -201,6 +201,36 @@ def index_sizes(engine: sa.Engine) -> list[dict]:
             {"schema": SCHEMA, "ours": list(INDEXES)}).mappings()]
 
 
+def rebuilt_sizes(engine: sa.Engine) -> list[dict]:
+    """Size of each 004 index as the load left it vs right after REINDEX.
+
+    004 runs before the CSV load, so its indexes grow by page splits during
+    the inserts; REINDEX shows what a build after the load would occupy. Each
+    REINDEX runs in a transaction that is rolled back.
+    """
+    size = sa.text(
+        "SELECT pg_relation_size(c.oid) FROM pg_class AS c "
+        "JOIN pg_namespace AS n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = :schema AND c.relname = :name")
+    out = []
+    with engine.connect() as connection:
+        raw = connection.connection.driver_connection
+        for name in INDEXES:
+            params = {"schema": SCHEMA, "name": name}
+            try:
+                loaded = connection.scalar(size, params)
+                with raw.cursor() as cursor:
+                    cursor.execute(pgsql.SQL("REINDEX INDEX {}").format(
+                        pgsql.Identifier(SCHEMA, name)))
+                rebuilt = connection.scalar(size, params)
+            finally:
+                connection.rollback()
+            out.append({"index": name, "bytes_as_loaded": loaded,
+                        "bytes_after_reindex": rebuilt,
+                        "ratio": round(loaded / rebuilt, 3)})
+    return out
+
+
 def size_summary(rows: list[dict]) -> dict:
     """Per table: heap bytes, 004 index bytes, ratio; plus the total."""
     tables: dict[str, dict] = {}

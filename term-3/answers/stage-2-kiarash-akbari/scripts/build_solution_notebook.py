@@ -239,7 +239,7 @@ display(pd.DataFrame([
 md("""
 ## ۷. هزینهٔ پنهان Index
 
-**حجم:** اندازهٔ هر Index و نسبت مجموع Indexهای 004 به حجم heap همان جدول‌ها. **نوشتن:** هر جدول یک بار در یک کپیِ دارای Indexهای 004 و یک بار در کپیِ فقط با کلید اصلی درج می‌شود (`INSERT ... SELECT` همهٔ سطرها، سه تکرار، در schema موقتی که rollback می‌شود؛ کلید خارجی در هیچ‌کدام از دو حالت نیست). **Indexهای حذف‌شده:** Index پوشای جزئی برای Q2 و Index `(seller_id, order_id)` برای Q4 ساخته، اندازه‌گیری و حذف شدند (هر کدام در تراکنشی که rollback می‌شود دوباره ساخته و اندازه‌گیری می‌شود).
+**حجم:** اندازهٔ هر Index و نسبت مجموع Indexهای 004 به حجم heap همان جدول‌ها؛ و همان Indexها پس از `REINDEX` (در تراکنش rollback‌شونده)، چون 004 پیش از بارگذاری اجرا می‌شود و Index در حین درج‌ها با شکستن صفحه‌ها بزرگ‌تر از ساخت یک‌باره می‌شود. **نوشتن:** هر جدول یک بار در یک کپیِ دارای Indexهای 004 و یک بار در کپیِ فقط با کلید اصلی درج می‌شود (`INSERT ... SELECT` همهٔ سطرها، سه تکرار، در schema موقتی که rollback می‌شود؛ کلید خارجی در هیچ‌کدام از دو حالت نیست). **Indexهای حذف‌شده:** Index پوشای جزئی برای Q2 و Index `(seller_id, order_id)` برای Q4 ساخته، اندازه‌گیری و حذف شدند (هر کدام در تراکنشی که rollback می‌شود دوباره ساخته و اندازه‌گیری می‌شود).
 """)
 
 code("""
@@ -249,6 +249,8 @@ display(pd.DataFrame(sizes))
 display(pd.DataFrame(size_sum["tables"]).T)
 print("004 indexes:", size_sum["total_004_bytes"], "bytes =",
       size_sum["ratio"], "x the heap of the tables they index")
+rebuilt = evidence.rebuilt_sizes(engine)   # REINDEX in a rolled-back transaction
+display(pd.DataFrame(rebuilt))
 """)
 
 code("""
@@ -260,7 +262,8 @@ display(pd.DataFrame([{"index": name, **{k: r[k] for k in (
     "query", "used_in_plan", "index_bytes", "build_ms", "median_without_ms",
     "median_with_ms", "same_result")}} for name, r in rejected.items()]))
 evidence.save("index-evidence.json", {"indexes": index_ev, "rejected_indexes": rejected})
-evidence.save("index-cost.json", {"sizes": sizes, "summary": size_sum, "write_cost": writes});
+evidence.save("index-cost.json", {"sizes": sizes, "summary": size_sum, "write_cost": writes,
+                                  "rebuilt_sizes": rebuilt});
 """)
 
 md("""
