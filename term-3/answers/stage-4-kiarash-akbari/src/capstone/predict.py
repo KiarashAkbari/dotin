@@ -212,6 +212,11 @@ def staged_frame(files: dict[str, Path], config: CapstoneConfig):
                 merge(connection, files)
                 for snapshot in SNAPSHOTS:
                     connection.execute(sa.text(f"REFRESH MATERIALIZED VIEW {snapshot}"))
+                # fresh statistics for what this transaction just wrote: without them the planner
+                # guessed the staged table and the refreshed snapshots, and one rehearsal read took
+                # minutes instead of seconds
+                staged_tables = ", ".join(f"{STAGE_SCHEMA}.{table}" for table in files)
+                connection.execute(sa.text(f"ANALYZE {staged_tables}, {', '.join(SNAPSHOTS)}"))
                 raw = connection.connection.driver_connection
                 frame = read_frame(
                     raw,
