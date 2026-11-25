@@ -6,3 +6,5 @@ the Q3 median from 201.18 ms to 197.70 ms, but the maximum remained 216.17 ms.
 It was therefore not retained because every measured run must stay below 200 ms.
 
 Evidence: `data/curated/benchmark-q3-join-first-20261028-221325.json`.
+
+> Note (2026-11): the evidence file named above was never committed, so this number cannot be checked from the repository. The query this experiment tried to fix has since been rewritten; current before/after evidence is in `data/curated/evidence/before-after.json`.
