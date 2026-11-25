@@ -18,27 +18,49 @@ UNKNOWN_VERSION = "unknown"
 TMP_SUFFIX = ".tmp"
 
 
-def _git_revision() -> str | None:
+PACKAGE_DIR = Path(__file__).resolve().parent
+# src/data_factory -> the stage folder; only changes under it make a run "dirty".
+STAGE_DIR = PACKAGE_DIR.parents[1]
+
+
+def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", *args],
             capture_output=True,
             text=True,
             check=True,
             timeout=5,
-            cwd=Path(__file__).resolve().parent,
+            cwd=PACKAGE_DIR,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return out.stdout.strip() or None
+    return out.stdout.strip()
+
+
+def _git_revision() -> str | None:
+    """The commit the code ran from, with -dirty when tracked stage files differ from it."""
+    revision = _git("rev-parse", "--short=12", "HEAD")
+    if not revision:
+        return None
+    changed = _git("status", "--porcelain", "--untracked-files=no", "--", str(STAGE_DIR))
+    return f"{revision}-dirty" if changed else revision
 
 
 def code_version() -> str:
+    """Name the code that produced a run, preferring the git commit.
+
+    The package version is "0.1.0" for every commit, so it cannot tell two runs
+    apart; a git checkout (the editable install this project uses) gives the
+    commit instead. Outside a checkout the installed version is the best left.
+    """
+    revision = _git_revision()
+    if revision:
+        return f"git:{revision}"
     try:
         return metadata.version(PACKAGE_NAME)
     except metadata.PackageNotFoundError:
-        revision = _git_revision()
-        return f"git:{revision}" if revision else UNKNOWN_VERSION
+        return UNKNOWN_VERSION
 
 
 def utc_now_iso() -> str:
