@@ -49,21 +49,19 @@ class ChainPlanTest(unittest.TestCase):
         """
         self.assertEqual(
             [step.name for step in CHAIN],
-            ["ingest", "load-database", "load-audit", "features", "model", "capacity-list"],
+            ["ingest", "load-database", "load-audit", "features", "external", "model",
+             "capacity-list"],
         )
 
     def test_the_prediction_path_is_not_part_of_the_training_chain(self) -> None:
         self.assertNotIn("predict", [step.name for step in CHAIN])
 
-    def test_dry_run_reports_what_blocks_and_why(self) -> None:
+    def test_dry_run_reports_every_step_ready(self) -> None:
         code, out, _ = run("chain", "--dry-run")
         self.assertEqual(code, int(ExitCode.OK))
-        # phase 4 landed, so the plan now blocks on the model layer and names the phase that owns
-        # it; the features line has to say "ready" rather than merely appear
-        self.assertIn("[ready  ] features", out)
-        self.assertIn("[blocked] model", out)
-        self.assertIn("phase 5", out)
-        self.assertIn("6.1", out)
+        for step in CHAIN:
+            self.assertIn(f"[ready  ] {step.name}", out)
+        self.assertNotIn("[blocked]", out)
 
     def test_dry_run_json_is_machine_readable(self) -> None:
         code, out, _ = run("chain", "--dry-run", "--json")
@@ -74,44 +72,11 @@ class ChainPlanTest(unittest.TestCase):
 
     def test_readiness_is_derived_from_the_code_not_from_a_status_table(self) -> None:
         rows = {row["name"]: row for row in statuses()}
-        # features flipped to ready when phase 4 wrote its body, and nothing in this file or in
-        # chain.py was edited to make that happen -- which is the whole point of deriving it
-        self.assertTrue(rows["features"]["ready"])
-        self.assertEqual(rows["features"]["reason"], "")
-        self.assertFalse(rows["model"]["ready"])
-        # still a placeholder, and still worth asserting after phase 5 landed: the step is
-        # ``model:run``, whose body is blocked on the config and on the list writer -- see
-        # the docstring of that function for what exactly is missing
-        self.assertIn("placeholder", rows["model"]["reason"])
-        # Where the chain stops is a fact about the interpreter, not about this code: the two stage-1
-        # steps count as ready exactly when ``find_spec`` can see that package, so in a venv that has
-        # stage 1 installed the chain stops at ``model`` -- and the hard-coded "ingest" used to fail
-        # there, which punished a working setup. So the test asks the same question ``implemented()``
-        # asks and checks the answer that follows. Both branches assert: skipping the ready case
-        # would let a chain that ignores stage 1 pass unnoticed.
-        stage_one = find_spec("data_factory") is not None
-        if stage_one:
-            self.assertTrue(
-                rows["ingest"]["ready"],
-                msg="stage 1 is importable here, so ingest cannot be the blocker the chain names",
-            )
-            self.assertEqual(first_blocked().name, "model")
-        else:
-            self.assertEqual(first_blocked().name, "ingest")
-            self.assertIn("not importable", rows["ingest"]["reason"])
-
-    def test_the_placeholders_refuse_with_their_phase(self) -> None:
-        # features.build is absent on purpose: its body landed with phase 4, and
-        # LayerStatusTests in test_capstone_features.py pins that it no longer carries the marker.
-        # model.train is absent for the same reason and with the opposite sign -- phase 5 wrote it,
-        # so the list names the step that wraps it (model.run) instead. A placeholder that stops
-        # being one has to leave this list deliberately, in the commit that replaces it, or the
-        # test quietly stops covering anything.
-        for function in (model.run, predict._score_rows):
-            with self.assertRaises(NotReadyError) as caught:
-                function(None, [])  # type: ignore[arg-type]
-            self.assertIn("ROADMAP phase", str(caught.exception))
-            self.assertTrue(is_pending(function))
+        # every body has landed, and nothing in a status table was edited to say so: readiness is
+        # still read off the code (a pending marker or a missing attribute would flip it)
+        self.assertTrue(all(row["ready"] for row in rows.values()))
+        self.assertIsNone(first_blocked())
+        self.assertFalse(is_pending(model.run))
 
     def test_requiring_an_unknown_step_says_what_exists(self) -> None:
         with self.assertRaises(NotReadyError) as caught:

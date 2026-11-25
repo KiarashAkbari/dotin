@@ -186,24 +186,12 @@ def command_chain(args: argparse.Namespace) -> int:
                     print(f"          {row['reason']}")
         return ExitCode.OK
     config = _load(args, decided=True)
-    from .pending import is_pending  # late import: only the real run needs the marker
+    from .chain import CHAIN, run_step
 
-    for row in rows:
-        module_name, _, attribute = row["entrypoint"].partition(":")
-        try:
-            module = __import__(module_name, fromlist=[attribute or module_name])
-        except ImportError as exc:
-            raise CapstoneError(
-                f"step {row['name']!r} needs {module_name}, which this interpreter cannot "
-                f"import ({exc}); stage 1's package is on the path via stage-1/src, see README.md"
-            ) from exc
-        function = getattr(module, attribute or "main", None)
-        if function is None:
-            raise CapstoneError(
-                f"step {row['name']!r} points at {row['entrypoint']}, which is absent"
-            )
-        if is_pending(function):
-            function(config, [])  # raises NotReadyError with the phase and the items
+    for step in CHAIN:
+        print(f"[run] {step.name}", file=sys.stderr)
+        result = run_step(step, config)
+        print(json.dumps({"step": step.name, "result": result}, ensure_ascii=False, default=str))
     return ExitCode.OK
 
 
@@ -234,7 +222,20 @@ def _run_load_audit(config: CapstoneConfig) -> dict:
 
 #: step name -> how the CLI runs it. Absent means "implemented, but the state it needs has no
 #: carrier yet", which is a phase-6 decision rather than something to guess at in a dispatcher.
-STEP_ADAPTERS = {"load-audit": _run_load_audit, "features": _run_features}
+def _run_by_chain(name: str):
+    def adapter(config: CapstoneConfig) -> dict:
+        from .chain import CHAIN, run_step
+
+        return run_step(next(step for step in CHAIN if step.name == name), config)
+
+    return adapter
+
+
+STEP_ADAPTERS = {
+    "load-audit": _run_load_audit,
+    "features": _run_features,
+    **{name: _run_by_chain(name) for name in ("ingest", "load-database", "model", "capacity-list")},
+}
 
 
 def command_step(args: argparse.Namespace) -> int:
@@ -398,7 +399,8 @@ def build_parser() -> argparse.ArgumentParser:
     from .chain import CHAIN
 
     for step in CHAIN:
-        if step.owner != "capstone":
+        if step.owner != "capstone" or step.name == "external":
+            # ``external`` has its own command below (``capstone external --load`` is the step)
             continue
         name = step.name.replace("-", "_")
         # the underscore form is what argparse names a function; the hyphenated one is what

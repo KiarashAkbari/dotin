@@ -965,3 +965,24 @@ def _open(url: str, headers: dict[str, str]) -> Any:
     from urllib.request import Request, urlopen
 
     return urlopen(Request(url, headers=headers), timeout=20).read()  # noqa: S310 - https by config
+
+
+def chain_step(config: CapstoneConfig) -> dict[str, Any]:
+    """The ``external`` chain step: fetch the live source, store it, read the match rate back.
+
+    ``external.name = "none"`` is an answer, so the step reports it and does nothing. A source that
+    cannot be reached raises :class:`SourceError` (exit 69): the chain stops there rather than
+    training a "with external" model on whatever an earlier run left in the table.
+    """
+    if not config.external.enabled:
+        return {"skipped": f"external.name is {config.external.name!r}; no signal is fetched"}
+    report = refresh(config, fetch_rows=True, store=True, report=True)
+    rate = report.get("match_rate") or {}
+    return {
+        "source": config.external.name,
+        "fetched": report["fetched"],
+        "stored": report["stored"],
+        "match_rate": {key: (float(value) if value is not None else None) for key, value in rate.items()}
+        if isinstance(rate, dict)
+        else rate,
+    }

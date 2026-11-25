@@ -77,25 +77,16 @@ class Step:
         }
 
 
-#: the order the brief describes; the prediction entry point is deliberately absent
+#: the order the brief describes; the prediction entry point is deliberately absent. Every step is
+#: a capstone function taking the config: the two stage-1 steps go through capstone.ingest, which
+#: runs stage 1's own CLI from stage 1's folder with absolute paths (review B4).
 CHAIN: tuple[Step, ...] = (
+    Step(name="ingest", phase=1, entrypoint="capstone.ingest:verify", checklist=("11.1", "3.9")),
     Step(
-        name="ingest",
-        phase=1,
-        entrypoint="data_factory.cli",
-        checklist=("11.1", "3.9"),
-        owner="stage-1",
+        name="load-database", phase=1, entrypoint="capstone.ingest:load", checklist=("11.1", "11.4")
     ),
-    Step(
-        name="load-database",
-        phase=1,
-        entrypoint="data_factory.cli",
-        checklist=("11.1", "11.4"),
-        owner="stage-1",
-    ),
-    # the audit mirror comes first, and it is a step rather than a note in the README: the guard in
-    # ``features`` is fail-closed on an empty ``capstone.column_audit``, so a chain that starts from a
-    # fresh database would die at its third command on a missing prerequisite instead of on a finding
+    # the audit mirror comes before ``features``: the guard there is fail-closed on an empty
+    # ``capstone.column_audit``, so a fresh database would die at the frame on a missing prerequisite
     Step(
         name="load-audit",
         phase=2,
@@ -103,9 +94,10 @@ CHAIN: tuple[Step, ...] = (
         checklist=("4.1", "4.2"),
     ),
     Step(name="features", phase=4, entrypoint="capstone.features:run", checklist=("5.1", "5.3")),
-    # ``model`` points at ``run``, not at ``train``: the arithmetic of phase 5 is written and
-    # tested, and the step still cannot finish until the config names its two families and the
-    # scored frame has a place to live -- see the placeholder's docstring for the pairing.
+    # after features, because sql/005 creates the table the fetch is stored in (review B5)
+    Step(
+        name="external", phase=4, entrypoint="capstone.external:chain_step", checklist=("12.1",)
+    ),
     Step(name="model", phase=5, entrypoint="capstone.model:run", checklist=("6.1", "6.2")),
     Step(name="capacity-list", phase=5, entrypoint="capstone.capacity:report", checklist=("6.3",)),
 )

@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,62 +42,38 @@ sys.path.insert(0, str(STAGE_ROOT / "src"))
 # in this repository complains about. Import cost is paid once, on the first call.
 
 
-def python_for_stage() -> str:
-    """The interpreter the README documents: stage 1's venv, else the active one."""
-    venv = STAGE_ROOT.parent / "stage-1-kiarash-akbari" / ".venv" / "bin" / "python"
-    return str(venv) if venv.is_file() else sys.executable
-
-
-def external_step_command(step) -> list[str]:
-    """Steps stage 1 owns run through stage 1's own CLI, with this stage's config."""
-    if step.name == "ingest":
-        return [python_for_stage(), "-m", "data_factory", "fetch"]
-    if step.name == "load-database":
-        return [python_for_stage(), "-m", "data_factory", "load-database"]
-    return [python_for_stage(), "-m", "capstone", step.name.replace("-", "_")]
-
-
 def plan() -> list[dict]:
-    """The steps with their reason, for ``--dry-run`` and for the report's appendix."""
-    from capstone.chain import CHAIN, statuses
+    """The steps with their entry point and readiness, for ``--dry-run`` and the report's appendix."""
+    from capstone.chain import statuses
 
     rows = statuses()
-    for row, step in zip(rows, CHAIN, strict=True):
-        if step.owner != "capstone":
-            row["command"] = " ".join(external_step_command(step))
-        else:
-            row["command"] = f"python -m capstone {step.name} (via {step.entrypoint})"
+    for row in rows:
+        row["command"] = f"python -m capstone {row['name']} (via {row['entrypoint']})"
     return rows
 
 
 def execute(args: argparse.Namespace, timer) -> int:
-    """Run each step, one layer each, and stop at the first refusal.
+    """Run each step in its own timed layer, and stop at the first failure.
 
-    ``timer`` is a :class:`capstone.timing.ChainTimer`, built by the caller so the
-    manifest can still be written when this function raises.
+    Every step is ``entrypoint(config)`` through :func:`capstone.chain.run_step`; the two stage-1
+    steps are capstone functions that run stage 1's CLI from stage 1's folder
+    (:mod:`capstone.ingest`). A step's own exit code is kept: a stage-1 failure leaves with stage
+    1's code, a missing source with 69, not a flattened 1 (review B20). ``--skip`` exists for the
+    smoke run on a database that is already loaded; the manifest records the skip.
     """
     from capstone import chain as capstone_chain
     from capstone.chain import CHAIN
-    from capstone.errors import CapstoneError
     from capstone.exit_codes import ExitCode
 
+    results: dict[str, object] = {}
     for step in CHAIN:
+        if step.name in (args.skip or []):
+            results[step.name] = "skipped"
+            continue
         with timer.layer(step.name):
-            if step.owner != "capstone":
-                command = external_step_command(step)
-                result = subprocess.run(command, capture_output=True, text=True, check=False)
-                if result.returncode != 0:
-                    raise CapstoneError(
-                        f"step {step.name!r} failed in stage 1 with exit "
-                        f"{result.returncode}: {(result.stderr or result.stdout).strip()[:200]}",
-                        context={"command": command},
-                    )
-                continue
-            # one positional, the config: the contract lives in capstone.chain.run_step, and the
-            # tests in tests/test_run_chain.py hold every step in CHAIN to it. Passing argv here is
-            # what used to break -- `load_from_csv(config)` took the extra [] as a second argument
-            # and died, while `features.build(config, audit)` accepted it as an empty audit.
-            capstone_chain.run_step(step, args.loaded_config)
+            results[step.name] = capstone_chain.run_step(step, args.loaded_config)
+        print(json.dumps({"step": step.name, "result": results[step.name]}, default=str))
+    args.results = results
     return int(ExitCode.OK)
 
 
@@ -115,6 +90,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, help="capstone.toml to act on")
     parser.add_argument("--dry-run", action="store_true", help="print the plan; change nothing")
     parser.add_argument("--manifest", type=Path, help="where to write the timing manifest")
+    parser.add_argument(
+        "--skip",
+        action="append",
+        metavar="STEP",
+        help="leave one step out (repeatable), e.g. --skip load-database on a loaded database",
+    )
     args = parser.parse_args(argv)
 
     config_path = args.config or default_config_path(STAGE_ROOT)

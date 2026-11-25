@@ -147,7 +147,10 @@ class ChainTimer:
             started_at=started,
             finished_at=finished,
             seconds=self.seconds_used,
-            status="ok" if not self.over_budget else "failed",
+            # a failed or blocked layer fails the run even inside the budget (review B19)
+            status="ok"
+            if not self.over_budget and all(layer.status == "ok" for layer in self._layers)
+            else "failed",
             detail=f"budget {self.budget_minutes} min",
         )
 

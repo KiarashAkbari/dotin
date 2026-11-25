@@ -67,8 +67,14 @@ class FakeAuditTable:
         self.rows: dict[tuple[str, str], tuple] = {}
         self.statements: list[str] = []
         self.allow_ddl = allow_ddl
+        self.bootstrapped = False
 
     def execute(self, sql: str) -> list[tuple]:
+        if "CREATE SCHEMA IF NOT EXISTS capstone" in sql:
+            # sql/001, the idempotent bootstrap load_from_csv runs first on a fresh database; kept
+            # apart so the sequence assertions below stay about the load itself
+            self.bootstrapped = True
+            return []
         # every statement is recorded, the TRUNCATE included: "the load is one reset and one insert"
         # is only worth asserting if the reset shows up where a reader can look for it
         self.statements.append(sql)
@@ -311,6 +317,11 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(table.statements[1], audit.RESET_STATEMENT)
         self.assertEqual(table.statements.count(audit.LOAD_STATEMENT), 1)
         self.assertEqual(table.statements[-1], audit.READ_STATEMENT)
+
+    def test_a_fresh_database_gets_the_capstone_schema_before_the_first_read(self):
+        table = FakeAuditTable()
+        self.load(table)
+        self.assertTrue(table.bootstrapped, "sql/001 must run before capstone.column_audit is read")
 
     def test_a_missing_audit_file_names_its_writer(self):
         table = FakeAuditTable()

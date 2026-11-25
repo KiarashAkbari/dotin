@@ -28,7 +28,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .config import CapstoneConfig
-from .errors import ConfigError, InputError
+from .errors import CapstoneError, ConfigError, InputError
 
 #: the file each stage-2 table is loaded from (mirrors data_factory.database.OLIST_CSV_FILES)
 OLIST_FILES = {
@@ -237,3 +237,52 @@ def subprocess_env(plan_: IngestPlan, environ: dict[str, str] | None = None) -> 
         [src, *[p for p in environ.get("PYTHONPATH", "").split(os.pathsep) if p]]
     )
     return environ
+
+
+class Stage1Failure(CapstoneError):
+    """Stage 1's loader failed; the chain passes its exit code on instead of flattening it (B20)."""
+
+    def __init__(self, message: str, exit_code: int, context: dict | None = None) -> None:
+        super().__init__(message, context=context)
+        self.exit_code = exit_code
+
+
+def verify(config: CapstoneConfig) -> dict:
+    """The ``ingest`` chain step: the nine files are there, with the right headers; counts."""
+    directory = olist_dir(config)
+    counts = verify_files(directory)
+    return {
+        "olist_dir": str(directory),
+        "records": counts,
+        "full_public_olist": counts == PUBLIC_OLIST_ROWS,
+    }
+
+
+def load(config: CapstoneConfig, *, run=None) -> dict:
+    """The ``load-database`` chain step: stage 1's ``load-database --reset``, from stage 1's folder."""
+    import subprocess
+
+    plan_ = plan(config)
+    runner = run or subprocess.run
+    result = runner(
+        list(plan_.command),
+        cwd=str(plan_.stage1_dir),
+        env=subprocess_env(plan_),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout or "").strip()[-600:]
+        raise Stage1Failure(
+            f"stage 1's load-database exited {result.returncode}: {tail}",
+            exit_code=result.returncode,
+            context={"command": " ".join(plan_.command), "cwd": str(plan_.stage1_dir)},
+        )
+    loaded = {}
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("table=") and " loaded=" in line:
+            name, _, count = line[len("table="):].partition(" loaded=")
+            loaded[name] = int(count)
+    return {"command": " ".join(plan_.command[1:]), "cwd": str(plan_.stage1_dir), "loaded": loaded,
+            "files": plan_.counts}
