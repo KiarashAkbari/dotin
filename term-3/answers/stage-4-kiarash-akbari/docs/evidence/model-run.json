@@ -1205,7 +1205,18 @@
       "2018-08": 0.2059659090909091,
       "2018-09": 1.0
     },
-    "recall_range": 0.7976190476190477,
+    "min_month_labelled": 500,
+    "months_not_judged": [
+      "2018-09"
+    ],
+    "recall_range": 0.05974025974025976,
+    "last_full_month": {
+      "month": "2018-08",
+      "labelled": 6594,
+      "negatives": 704,
+      "recall": 0.2059659090909091,
+      "auc": 0.5730395797962649
+    },
     "top_shifted_features": [
       {
         "feature": "shipping_limit_days",
@@ -1229,5 +1240,5 @@
       }
     ]
   },
-  "run_id": "run-20261125T091701Z"
+  "run_id": "run-20261125T100959Z"
 }

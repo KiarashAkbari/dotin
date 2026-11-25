@@ -1,7 +1,7 @@
 # sealed-cut rehearsal, month 2018-08 (scripts/sealed_cut_rehearsal.py)
 bundle: data/raw/sealed_cut_2018-08/ (orders, customers, items, payments, products, sellers; no reviews)
 orders in the cut: 6620; scored: 6620; follow-up list: 662; not scored (no order_approved_at): 0
-model: hgb.d3 run run-20261125T091701Z
+model: hgb.d3 run run-20261125T100959Z
 
 ## 1. same preparation: predict vs the model step's stored score for the same order
 orders compared: 6620 of 6620; max |difference|: 4.999903863989186e-07
