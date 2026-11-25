@@ -25,7 +25,6 @@ INDEXES = {
     "ix_orders_purchase_ts": ("orders", "q1_monthly_category_sales.sql"),
     "ix_orders_inactive": ("orders", "q5_payment_distribution.sql"),
     "ix_orders_dispatch_cover": ("orders", "q4_top_sellers.sql"),
-    "ix_order_items_seller_order": ("order_items", "q4_top_sellers.sql"),
     "ix_order_reviews_order_score": ("order_reviews", "q3_delay_and_satisfaction.sql"),
     "ix_payments_order_type_inst": ("payments", "q5_payment_distribution.sql"),
 }
@@ -37,16 +36,21 @@ TRIM_SNAPSHOT = sa.text(
     "DELETE FROM olist.monthly_category_snapshot WHERE month_start > CAST(:month AS date)"
 )
 
-# The index that was built, measured and dropped (sql/rejected/).
-REJECTED_INDEX_DDL = (
-    "CREATE INDEX ix_orders_delivered_partial ON olist.orders "
-    "(customer_id) INCLUDE (order_purchase_timestamp, "
-    "order_delivered_customer_date, order_estimated_delivery_date) "
-    "WHERE order_status = 'delivered' "
-    "AND order_delivered_customer_date IS NOT NULL"
-)
-REJECTED_INDEX = pgsql.SQL(REJECTED_INDEX_DDL)
-REJECTED_QUERY = "q2_delivery_by_state_month.sql"
+# Indexes that were built, measured and dropped (sql/rejected/004_rejected_*).
+REJECTED_INDEXES = {
+    "ix_orders_delivered_partial": (
+        "CREATE INDEX ix_orders_delivered_partial ON olist.orders "
+        "(customer_id) INCLUDE (order_purchase_timestamp, "
+        "order_delivered_customer_date, order_estimated_delivery_date) "
+        "WHERE order_status = 'delivered' "
+        "AND order_delivered_customer_date IS NOT NULL",
+        "orders", "q2_delivery_by_state_month.sql"),
+    "ix_order_items_seller_order": (
+        "CREATE INDEX ix_order_items_seller_order ON olist.order_items "
+        "(seller_id, order_id)",
+        "order_items", "q4_top_sellers.sql"),
+}
+
 
 # Write cost is measured on copies in a scratch schema created inside a
 # transaction that is rolled back: the real tables never receive the rows, so
@@ -139,40 +143,46 @@ def index_evidence(engine: sa.Engine, stage2: Path, *, repeats: int = 9,
     return out
 
 
-def rejected_index(engine: sa.Engine, stage2: Path, *, repeats: int = 9,
-                   warmups: int = 2) -> dict:
-    """Build the rejected partial covering index for Q2, measure, roll back."""
-    source = bench.read_query(stage2 / "sql" / "queries" / REJECTED_QUERY)
-    runs = {}
+def rejected_indexes(engine: sa.Engine, stage2: Path, *, repeats: int = 9,
+                     warmups: int = 2) -> dict:
+    """Build each rejected index in a transaction, measure its query, roll back."""
+    out = {}
     with db.session(engine) as connection:
-        runs["without_index"] = _compact(bench.measure(
-            connection, source, repeats=repeats, warmups=warmups))
-        connection.begin()
-        try:
-            raw = connection.connection.driver_connection
-            started = perf_counter()
-            with raw.cursor() as cursor:
-                cursor.execute(REJECTED_INDEX)
-                cursor.execute("ANALYZE olist.orders")
-            build_ms = (perf_counter() - started) * 1000
-            size = connection.scalar(sa.text(
-                "SELECT pg_relation_size(CAST(:name AS regclass))"),
-                {"name": "olist.ix_orders_delivered_partial"})
-            runs["with_index"] = _compact(bench.measure(
-                connection, source, repeats=repeats, warmups=warmups,
-                end_transaction=False))
-        finally:
-            connection.rollback()
-    used = any(node["index"] == "ix_orders_delivered_partial"
-               for node in runs["with_index"]["plan_nodes"])
-    return {
-        "index": "ix_orders_delivered_partial", "query": REJECTED_QUERY,
-        "definition": REJECTED_INDEX_DDL,
-        "build_ms": round(build_ms, 3), "index_bytes": size, "used_in_plan": used,
-        "median_with_ms": runs["with_index"]["median_ms"],
-        "median_without_ms": runs["without_index"]["median_ms"],
-        **runs,
-    }
+        for name, (ddl, table, query) in REJECTED_INDEXES.items():
+            source = bench.read_query(stage2 / "sql" / "queries" / query)
+            runs = {"without_index": _compact(bench.measure(
+                connection, source, repeats=repeats, warmups=warmups))}
+            connection.begin()
+            try:
+                raw = connection.connection.driver_connection
+                started = perf_counter()
+                with raw.cursor() as cursor:
+                    cursor.execute(pgsql.SQL(ddl))
+                    cursor.execute(pgsql.SQL("ANALYZE {}").format(
+                        pgsql.Identifier(SCHEMA, table)))
+                build_ms = (perf_counter() - started) * 1000
+                size = connection.scalar(sa.text(
+                    "SELECT pg_relation_size(c.oid) FROM pg_class AS c "
+                    "JOIN pg_namespace AS n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND c.relname = :name"),
+                    {"schema": SCHEMA, "name": name})
+                runs["with_index"] = _compact(bench.measure(
+                    connection, source, repeats=repeats, warmups=warmups,
+                    end_transaction=False))
+            finally:
+                connection.rollback()
+            out[name] = {
+                "query": query, "definition": ddl,
+                "build_ms": round(build_ms, 3), "index_bytes": size,
+                "used_in_plan": any(node["index"] == name
+                                    for node in runs["with_index"]["plan_nodes"]),
+                "median_with_ms": runs["with_index"]["median_ms"],
+                "median_without_ms": runs["without_index"]["median_ms"],
+                "same_result": runs["with_index"]["result_sha256"]
+                == runs["without_index"]["result_sha256"],
+                **runs,
+            }
+    return out
 
 
 def index_sizes(engine: sa.Engine) -> list[dict]:
@@ -417,3 +427,17 @@ def q1_tail_series(engine: sa.Engine, stage2: Path, *, repeats: int = 9,
                         "result_sha256": result["result_sha256"],
                         "scans": result["scans"]})
     return out
+
+
+EVIDENCE_DIR = Path(__file__).resolve().parents[2] / "data" / "curated" / "evidence"
+
+
+def save(name: str, payload) -> Path:
+    """Write one evidence JSON under data/curated/evidence/ (fixed name, overwritten)."""
+    import json
+
+    EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+    path = EVIDENCE_DIR / name
+    path.write_text(json.dumps(payload, indent=1, ensure_ascii=False, default=str) + "\n",
+                    encoding="utf-8")
+    return path

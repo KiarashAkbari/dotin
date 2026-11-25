@@ -1,0 +1,20 @@
+-- REJECTED INDEX - built, measured and dropped. Not part of 004.
+--
+-- Candidate for the rewritten Q4: after the top 20 sellers are ranked, read
+-- their order lines through (seller_id, order_id) instead of scanning
+-- order_items.
+--
+-- CREATE INDEX ix_order_items_seller_order
+--     ON olist.order_items (seller_id, order_id);
+--
+-- Why dropped: the planner used it (Index Only Scan, 20 loops), but Q4 was
+-- not faster. The top 20 sellers own about a fifth of all order lines, so the
+-- alternative (one Seq Scan of order_items hashed against the 20 seller ids)
+-- costs about the same as ~21k index probes. In three alternating rounds
+-- during development the medians with and without the index were within
+-- about 2 ms of each other, while the index adds a large structure to every
+-- order_items insert. An index without a measured gain is not kept.
+--
+-- Evidence (built inside a rolled-back transaction by
+-- olist_perf.evidence.rejected_indexes): data/curated/evidence/index-evidence.json,
+-- key "rejected_indexes".

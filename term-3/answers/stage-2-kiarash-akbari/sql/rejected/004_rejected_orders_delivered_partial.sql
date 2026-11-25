@@ -16,5 +16,5 @@
 -- would be paid for nothing. Q2 was already under the budget without it.
 --
 -- Evidence (built inside a transaction that is rolled back, by
--- olist_perf.evidence.rejected_index): data/curated/evidence/index-evidence.json,
--- key "rejected_index": used_in_plan, size, median with and without.
+-- olist_perf.evidence.rejected_indexes): data/curated/evidence/index-evidence.json,
+-- key "rejected_indexes": used_in_plan, size, median with and without.

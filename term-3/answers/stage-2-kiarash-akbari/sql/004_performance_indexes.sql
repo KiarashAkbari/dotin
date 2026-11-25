@@ -7,8 +7,8 @@
 -- Every index below has plan evidence (with vs without the index, same query,
 -- same session settings) in data/curated/evidence/index-evidence.json, built
 -- by olist_perf.evidence.index_evidence(). Sizes and the write cost are in
--- index-cost.json. The one index that was built and dropped is documented in
--- sql/rejected/004_rejected_orders_delivered_partial.sql.
+-- index-cost.json. The two indexes that were built, measured and dropped are
+-- documented in sql/rejected/004_rejected_*.sql.
 
 -- Schema for DataFrames the notebook writes back with pandas.to_sql and an
 -- explicit dtype map (olist_perf.bridge.write_typed). Kept out of olist so a
@@ -33,11 +33,6 @@ CREATE INDEX IF NOT EXISTS ix_orders_inactive
 CREATE INDEX IF NOT EXISTS ix_orders_dispatch_cover
     ON olist.orders (order_id)
     INCLUDE (order_status, order_approved_at, order_delivered_carrier_date);
-
--- Q4: after the top 20 sellers are known, their order lines are read through
--- this index (seller, then order) instead of a Seq Scan of 112k lines.
-CREATE INDEX IF NOT EXISTS ix_order_items_seller_order
-    ON olist.order_items (seller_id, order_id);
 
 -- Q3 and Q4: per-order review averages. Q3 reads the whole index in order_id
 -- order (Index Only Scan, no Sort before the GroupAggregate); Q4 probes it

@@ -107,12 +107,17 @@ class EvidenceTables(unittest.TestCase):
                 self.assertIn(name, (STAGE2 / "sql" / "queries" / query).read_text(
                     encoding="utf-8") + ddl)
 
-    def test_rejected_index_is_documented_and_not_applied(self):
+    def test_rejected_indexes_are_documented_and_not_applied(self):
         ddl = (STAGE2 / "sql" / "004_performance_indexes.sql").read_text(encoding="utf-8")
-        self.assertNotRegex(ddl, r"CREATE INDEX[^;]*ix_orders_delivered_partial")
-        self.assertIn("CREATE INDEX ix_orders_delivered_partial", evidence.REJECTED_INDEX_DDL)
-        self.assertTrue(any("ix_orders_delivered_partial" in p.read_text(encoding="utf-8")
-                            for p in (STAGE2 / "sql" / "rejected").glob("*.sql")))
+        rejected = [p.read_text(encoding="utf-8")
+                    for p in (STAGE2 / "sql" / "rejected").glob("004_rejected_*.sql")]
+        self.assertGreaterEqual(len(evidence.REJECTED_INDEXES), 1)
+        for name, (statement, _table, query) in evidence.REJECTED_INDEXES.items():
+            with self.subTest(index=name):
+                self.assertNotRegex(ddl, rf"CREATE INDEX[^;]*{name}")
+                self.assertIn(f"CREATE INDEX {name}", statement)
+                self.assertTrue(any(name in text for text in rejected))
+                self.assertTrue((STAGE2 / "sql" / "queries" / query).exists())
 
     def test_size_summary_ratio(self):
         rows = [

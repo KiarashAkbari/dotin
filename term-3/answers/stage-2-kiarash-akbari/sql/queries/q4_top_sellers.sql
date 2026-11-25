@@ -1,9 +1,10 @@
 -- Q4 top 20 sellers by revenue (price + freight), with mean approval-to-carrier
 -- days and mean per-order review score. Same rules as sql/baseline/q4.
 -- Change: rank sellers first (revenue only, NOT EXISTS against the tiny
--- ix_orders_inactive), then read only the top 20 sellers' orders through
--- ix_order_items_seller_order + ix_orders_dispatch_cover and their reviews
--- through ix_order_reviews_order_score, instead of computing every seller.
+-- ix_orders_inactive), then read only the top 20 sellers' orders (a hash
+-- join of the 20 ids with order_items), their dates through
+-- ix_orders_dispatch_cover and their reviews through
+-- ix_order_reviews_order_score, instead of computing every seller.
 -- Assumption kept from the baseline: an order's review counts for each seller
 -- in that order; freight is part of seller revenue.
 WITH top_sellers AS MATERIALIZED (
