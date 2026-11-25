@@ -562,7 +562,7 @@ class ReadFrameTests(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as tmp:
             config = decided_config(Path(tmp))
-            wide = self.COLUMNS + ["external_matched", "external_density_2022"]
+            wide = self.COLUMNS + ["external_matched", "external_density_2010"]
             values = [("o1", 1.0, 0.0, True, 2, 1, True, "2018-06", True, 12.4)]
             self.feed(values, columns=wide)
             with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
@@ -621,7 +621,7 @@ class ReadFrameTests(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as tmp:
             config = decided_config(Path(tmp))
-            wide = self.COLUMNS + ["external_matched", "external_density_2022"]
+            wide = self.COLUMNS + ["external_matched", "external_density_2010"]
             self.feed([("o1", 1.0, 0.0, True, 2, 1, True, "2018-06", True, 12.4)], columns=wide)
             with mock.patch.dict(os.environ, {"CAPSTONE_DATABASE_URI": "postgresql+psycopg://x/y"}):
                 frame = read_frame(config, require_matched=True)

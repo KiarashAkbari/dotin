@@ -46,7 +46,7 @@ MONTH_KEY = "decision_month"
 #: cut line, taken from the schema rather than from a list of names that would drift
 EXTERNAL_PREFIX = "external_"
 #: the one number of the three agregado ``4714`` offers that is neither area nor population
-DENSITY_COLUMN = "external_density_2022"
+DENSITY_COLUMN = "external_density_2010"
 
 #: the baseline the brief can state without a model: rank everybody at the observed rate
 PRIOR_RATE = "prior_rate"
@@ -731,7 +731,7 @@ def ablation(runs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         },
         "reading": (
             "an ablation of the same fitted runs at the same quota, not a measured lift: "
-            "no forward-in-time experiment was run, and 614 is a 2022 density number"
+            "no forward-in-time experiment was run, and 616 is the 2010 census density"
         ),
     }
 

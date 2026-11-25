@@ -500,12 +500,12 @@ class StaticSqlContractTests(unittest.TestCase):
         )
 
     def test_the_bridge_columns_year_is_the_year_its_guard_checks(self) -> None:
-        """`external_density_2022` earns its suffix, inside one file.
+        """`external_density_2010` earns its suffix, inside one file.
 
         The column name is a claim about the data (the year the registered contract fetched), and the
         `DO` block is what refuses a database that disagrees. Both live in `006`, so the rot that has
-        to be prevented is the pair drifting: somebody edits the guard to accept 2023, leaves the
-        column name alone, and the report then reads a 2023 number under a 2022 label. Nothing outside
+        to be prevented is the pair drifting: somebody edits the guard to accept 2022, leaves the
+        column name alone, and the report then reads a 2022 number under a 2010 label. Nothing outside
         this file can be compared against -- `external.py` takes the period from the response and the
         URL that carried it sits in the student's ignored local config -- so the check is that the
         file names exactly one year, and that the name and the check agree.
@@ -515,14 +515,14 @@ class StaticSqlContractTests(unittest.TestCase):
         years = set(re.findall(r"(?<![0-9])(?:19|20)[0-9]{2}(?![0-9])", body))
         self.assertEqual(
             years,
-            {"2022"},
+            {"2010"},
             msg=f"the bridge speaks {sorted(years)}; one column per period means one year per file, and a "
             "second year has to arrive as a second column with its own decision",
         )
-        self.assertIn("AS external_density_2022", text)
-        self.assertIn("e.period <> '2022'", text)
+        self.assertIn("AS external_density_2010", text)
+        self.assertIn("e.period <> '2010'", text)
         self.assertNotIn(
-            "LIKE '%@2022'",
+            "LIKE '%@2010'",
             text,
             "filtering by a spelled key is how the indicator name sneaks back into SQL: the guard's job is "
             "to refuse an ambiguous pick, not to guess a string",
