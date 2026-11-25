@@ -59,7 +59,11 @@ def make_engine(path: Path | None = None) -> sa.Engine:
     return sa.create_engine(
         build_database_url(cfg),
         pool_pre_ping=True,
-        connect_args={"application_name": APPLICATION_NAME},
+        # prepare_threshold=None: psycopg would otherwise turn a statement run
+        # five times into a server-side prepared statement and keep its plan;
+        # every measured run here is planned fresh, like the EXPLAIN beside it.
+        connect_args={"application_name": APPLICATION_NAME,
+                      "prepare_threshold": None},
     )
 
 
@@ -79,6 +83,35 @@ def session(engine: sa.Engine) -> Iterator[sa.Connection]:
         apply_session_settings(connection)
         connection.commit()
         yield connection
+
+
+OLIST_TABLES = ("customers", "sellers", "product_category_name_translation",
+                "products", "orders", "order_items", "payments", "order_reviews",
+                "geolocation", "monthly_category_snapshot")
+
+
+def vacuum_analyze(engine: sa.Engine) -> list[dict]:
+    """VACUUM (ANALYZE) every olist table; returns per-table elapsed ms.
+
+    A bulk load leaves no visibility map (Index Only Scans fall back to heap
+    fetches) and no planner statistics until autovacuum gets to the tables.
+    Running it explicitly makes the first measurement after a load the same
+    as the tenth. VACUUM cannot run in a transaction, hence AUTOCOMMIT.
+    """
+    from time import perf_counter
+
+    from psycopg import sql as pgsql
+
+    out = []
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        raw = connection.connection.driver_connection
+        for table in OLIST_TABLES:
+            started = perf_counter()
+            raw.execute(pgsql.SQL("VACUUM (ANALYZE) {}").format(
+                pgsql.Identifier("olist", table)))
+            out.append({"table": table,
+                        "elapsed_ms": round((perf_counter() - started) * 1000, 1)})
+    return out
 
 
 def leftover_sessions(engine: sa.Engine) -> list[dict]:

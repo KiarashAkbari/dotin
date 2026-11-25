@@ -97,13 +97,17 @@ evidence.save("fk-audit.json", fk);
 """)
 
 md("""
-## ۳. ساخت snapshot ماه‌های بسته
+## ۳. نگهداری پس از بارگذاری و ساخت snapshot ماه‌های بسته
 
+**VACUUM (ANALYZE):** بارگذاری انبوه، visibility map و آمار planner را خالی می‌گذارد تا autovacuum سراغ جدول‌ها بیاید. بدون آن، Index Only Scanها باید برای هر سطر به heap سر بزنند و planner با تخمین پیش‌فرض کار می‌کند؛ در اجرای آزمایشی این نوت‌بوک که بلافاصله بعد از بارگذاری و پیش از autovacuum شروع شد، Q2 بیش از سه برابر کندتر بود (`data/curated/evidence/benchmark-final-unvacuumed-run.json`). این سلول همان کار را صریح انجام می‌دهد تا اندازه‌گیری به زمان‌بندی autovacuum وابسته نباشد.
+
+**snapshot:**
 `olist.refresh_monthly_category_snapshot_range` (در 004) برای هر ماه، procedure یک‌ماههٔ 003 را صدا می‌زند؛ همه در یک تراکنش، پس خطا در هر ماه هیچ ماهی را نیمه‌کاره نمی‌گذارد. «ماه بسته» یعنی هر ماه پیش از ماهِ آخرین خرید. این همان کاری است که در عمل پس از هر بارگذاری یا هر شب زمان‌بندی می‌شود؛ Q1 ماه‌های بسته را از این جدول و ماه‌های بعد از آن را زنده حساب می‌کند.
 """)
 
 code("""
 snapshot_state = evidence.refresh_closed_months(engine)
+display(pd.DataFrame(db.vacuum_analyze(engine)).set_index("table").T)
 display(pd.Series(snapshot_state))
 """)
 
