@@ -122,9 +122,13 @@ class PlanTests(unittest.TestCase):
         """
         self.assertEqual(
             self.builder.SECTIONS,
-            ("intent", "context", "label", "missing", "time-audit", "external", "failures"),
-            "the ids are 9.1's list: EDA, the time audit, hypotheses, failures -- plus the three the "
-            "phase actually has to show (label, missing values, the external signal)",
+            (
+                "intent", "context", "label", "missing", "time-audit", "external", "plots",
+                "hypotheses", "failures",
+            ),
+            "the ids are 9.1's list: EDA (with its plots), the time audit, hypotheses tested on the "
+            "training window, failures -- plus the three the phase actually has to show (label, "
+            "missing values, the external signal)",
         )
         prose = "\n".join(text for kind, text in self.builder.with_section_markers(self.cells) if kind == "markdown")
         for name in self.builder.SECTIONS:
@@ -160,7 +164,9 @@ class PlanTests(unittest.TestCase):
                 continue
             if "SELECT " in text.upper() and "read_frame" not in text:
                 offenders.append(text.splitlines()[0][:48])
-            if "pandas" in text or "read_csv" in text:
+            # pandas itself is fine (the plots and tests work on the frame capstone returns); what is
+            # not fine is reading a file or a table behind the pipeline's back
+            if "read_csv" in text or "read_sql" in text or "read_parquet" in text:
                 offenders.append(f"{text.splitlines()[0][:40]}: reads files the pipeline owns")
         self.assertEqual(offenders, [])
 

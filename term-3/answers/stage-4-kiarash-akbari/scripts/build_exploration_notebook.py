@@ -63,7 +63,10 @@ CELLS_FILE = STAGE / "docs" / "exploration_notebook_cells.md"
 #: with ``<!--section:NAME-->``, which a reader never sees and a test can count -- so the check is
 #: "the section exists", not "the Persian prose still says the words I guessed". Prose gets reworded;
 #: an id in an HTML comment does not.
-SECTIONS = ("intent", "context", "label", "missing", "time-audit", "external", "failures")
+SECTIONS = (
+    "intent", "context", "label", "missing", "time-audit", "external", "plots", "hypotheses",
+    "failures",
+)
 
 #: appended to the "not executed" note cell, so a test or a doctor can check the claim in ASCII
 NOT_RUN_MARK = "<!--capstone:not-executed-->"
@@ -264,7 +267,37 @@ def render(rendered: list[dict], *, executed: bool) -> dict[str, Any]:
     }
 
 
-def build(cells: list[tuple[str, str]], *, executed: bool) -> tuple[dict[str, Any], list[str]]:
+def run_in_kernel(document: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Execute the un-executed document top to bottom in a fresh Jupyter kernel (nbclient).
+
+    The ``exec`` path below runs every cell in this interpreter's namespace, which is fast but is
+    not "Restart & Run All" and cannot render a figure (review B: no plots). This is the real thing:
+    one new kernel, cells in order, outputs (images included) as the kernel produced them.
+    """
+    import nbformat
+    from nbclient import NotebookClient
+
+    notebook = nbformat.from_dict(document)
+    NotebookClient(
+        notebook, timeout=1200, kernel_name="python3", allow_errors=True,
+        resources={"metadata": {"path": str(STAGE)}},
+    ).execute()
+    failures = [
+        f"cell {index}: {output.get('ename')}: {output.get('evalue')}"
+        for index, cell in enumerate(notebook.cells)
+        if cell.cell_type == "code"
+        for output in cell.get("outputs", [])
+        if output.get("output_type") == "error"
+    ]
+    result = json.loads(nbformat.writes(notebook))
+    result["metadata"]["capstone_executed"] = True
+    result["metadata"]["capstone_kernel"] = True
+    return result, failures
+
+
+def build(
+    cells: list[tuple[str, str]], *, executed: bool, kernel: bool = False
+) -> tuple[dict[str, Any], list[str]]:
     """The whole document, from the parsed cell file: compile-check, then run or decline to."""
     problems = compile_cells(cells)
     if problems:
@@ -275,6 +308,13 @@ def build(cells: list[tuple[str, str]], *, executed: bool) -> tuple[dict[str, An
             "fix the cell file, do not delete the section"
         )
     marked = with_section_markers(cells)
+    if executed and kernel:
+        plain = [
+            markdown(text) if kind == "markdown" else code_cell(text, executed=False, index=0, outputs=[])
+            for kind, text in marked
+            if kind != "note"
+        ]
+        return run_in_kernel(render(plain, executed=False))
     if executed:
         rendered, _, failures = execute(marked)
         return render(rendered, executed=True), failures
@@ -322,6 +362,11 @@ def main(argv: list[str] | None = None) -> int:
         help="run the cells and write their real outputs (this is what makes the file a deliverable)",
     )
     parser.add_argument(
+        "--kernel",
+        action="store_true",
+        help="with --execute: run in a fresh Jupyter kernel (Restart & Run All), so figures render",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="overwrite an existing notebook even if this script did not write it",
@@ -344,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
             return int(66)
 
     try:
-        document, failures = build(read_cells(args.cells), executed=args.execute)
+        document, failures = build(read_cells(args.cells), executed=args.execute, kernel=args.kernel)
     except BuilderError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return int(EXIT_BAD_CELLS)
