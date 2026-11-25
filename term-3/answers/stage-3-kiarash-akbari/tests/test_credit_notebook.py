@@ -465,6 +465,17 @@ class ReportEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(filled, "cost: 3250, rows: 90,000.")
 
+    def test_a_small_rate_keeps_four_places(self):
+        """Two places would turn the threshold 0.075 into 0.07 - another operating point."""
+        filled = self.report.fill_placeholders(
+            "t={{t}} r={{r}} big={{b}}", {"t": 0.075, "r": 0.759601, "b": 363.6333}
+        )
+        self.assertEqual(filled, "t=0.075 r=0.7596 big=363.63")
+        self.assertEqual(
+            self.report.check_traceability(filled, {"t": 0.075, "r": 0.759601, "b": 363.6333}),
+            [],
+        )
+
     def test_an_unknown_slot_stays_visible(self):
         filled = self.report.fill_placeholders("{{does.not.exist}}", self.evidence)
         self.assertIn("missing(does.not.exist)", filled)

@@ -272,8 +272,11 @@ def fill_placeholders(markdown: str, evidence: dict) -> str:
             return f"\u26a0\ufe0f missing({key})"
         value = flat[key]
         if isinstance(value, float):
+            # a rate or a threshold below 1 keeps four places: two would print the
+            # chosen threshold 0.075 as 0.07, a different operating point
+            places = 4 if abs(value) < 1 else 2
             return (
-                f"{value:.2f}".rstrip("0").rstrip(".")
+                f"{value:.{places}f}".rstrip("0").rstrip(".")
                 if abs(value) < 1_000_000
                 else f"{value:,.2f}"
             )
