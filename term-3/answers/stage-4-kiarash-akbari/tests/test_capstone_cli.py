@@ -24,7 +24,7 @@ from capstone import features, model, predict
 from capstone.audit import AUDIT_HEADER
 from capstone.chain import CHAIN, first_blocked, require_ready, statuses
 from capstone.cli import default_config_path, main
-from capstone.errors import CapstoneError, NotReadyError
+from capstone.errors import CapstoneError, InputError, NotReadyError
 from capstone.exit_codes import ExitCode
 from capstone.pending import is_pending
 from capstone.predict import check_schema, read_header, score_file
@@ -129,17 +129,17 @@ class SchemaGateTest(unittest.TestCase):
             read_header(self.root / "nope.csv")
         self.assertIn("no input file", str(caught.exception))
 
-    def test_a_good_file_reaches_the_unwritten_model_and_stops_there(self) -> None:
-        """The gate runs, the model does not: two different errors, in that order."""
+    def test_a_good_orders_file_alone_asks_for_the_rest_of_its_bundle(self) -> None:
+        """The gate passes the orders file, then names the sibling files the features need."""
         columns = helpers.columns_from_stage2_ddl("orders")
         path = self.root / "sealed.csv"
         path.write_text(",".join(columns) + "\n", encoding="utf-8")
         config = helpers.load_example_contract()
-        with self.assertRaises(NotReadyError) as caught:
+        with self.assertRaises(InputError) as caught:
             score_file(path, config)
-        self.assertIn("phase 6", str(caught.exception))
+        self.assertIn("olist_order_items_dataset.csv", str(caught.exception))
 
-    def test_a_bad_file_is_refused_even_though_the_model_is_missing(self) -> None:
+    def test_a_bad_file_is_refused_before_the_bundle_is_looked_at(self) -> None:
         path = self.root / "sealed.csv"
         path.write_text("order_id,basket_size\n", encoding="utf-8")
         config = helpers.load_example_contract()

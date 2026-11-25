@@ -140,6 +140,10 @@ def tidy(frame):
             elif column in CATEGORICAL:
                 # object, not pandas' string dtype: the encoder's blank imputer wants np.nan cells
                 frame[column] = series.astype(object).where(series.notna(), None)
+    for column in CATEGORICAL:
+        if column in frame:
+            series = frame[column]
+            frame[column] = series.astype(object).where(series.notna(), None)
     frame["order_approved_at"] = pd.to_datetime(frame["order_approved_at"])
     if "is_negative" in frame:
         frame["is_negative"] = frame["is_negative"].astype("float")  # NaN = no review (D2)
@@ -148,7 +152,9 @@ def tidy(frame):
     return frame
 
 
-def read_frame(connection: Any, *, external: bool | None = None, where: str = ""):
+def read_frame(
+    connection: Any, *, external: bool | None = None, where: str = "", allow_empty: bool = False
+):
     """The frame for the model step. ``external=None`` means "join it when the view exists"."""
     cursor = connection.cursor()
     if external is None or external:
@@ -159,7 +165,7 @@ def read_frame(connection: Any, *, external: bool | None = None, where: str = ""
             )
         external = present
     frame = copy_frame(cursor, frame_sql(external=bool(external), where=where))
-    if frame.empty:
+    if frame.empty and not allow_empty:
         raise NotReadyError(
             "capstone.v_feature_frame returned no rows: run the ingest and features steps first"
         )

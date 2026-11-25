@@ -333,8 +333,8 @@ def command_external(args: argparse.Namespace) -> int:
 def command_predict(args: argparse.Namespace) -> int:
     """Validate a fresh order file and hand it to the scoring layer."""
     config = _load(args, decided=True)
-    rows = score_file(Path(args.input), config)
-    print(json.dumps(rows, ensure_ascii=False))
+    summary = score_file(Path(args.input), config, out=Path(args.out) if args.out else None)
+    print(json.dumps(summary, ensure_ascii=False))
     return ExitCode.OK
 
 
@@ -433,7 +433,13 @@ def build_parser() -> argparse.ArgumentParser:
     external.set_defaults(func=command_external)
 
     predict = sub.add_parser("predict", parents=(_CONFIG_PARENT,), help="rank a fresh order file")
-    predict.add_argument("--input", required=True, help="a CSV with the orders schema")
+    predict.add_argument(
+        "--input",
+        required=True,
+        help="a folder of fresh-order CSVs with the Olist names and schema (orders, customers, "
+        "order_items, payments; products/sellers optional), or its orders file",
+    )
+    predict.add_argument("--out", help="where to write the ranked CSV (default: data/curated/)")
     predict.set_defaults(func=command_predict)
 
     return parser
