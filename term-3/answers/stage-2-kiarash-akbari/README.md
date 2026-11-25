@@ -18,8 +18,8 @@ export OLIST_DB_PASSWORD=...            # فقط در shell؛ هیچ‌جا comm
 
 | مورد | نتیجه | شاهد |
 |---|---|---|
-| ساخت از schema خالی با یک فرمان، دو بار | دو بارگذاری مستقل: محتوای همهٔ جدول‌ها و نتیجهٔ پنج کوئری یکسان؛ هر بار حدود ۵۵ ثانیه | `data/curated/evidence/determinism-two-loads.json` |
-| نوت‌بوک، Restart & Run All بدون دخالت (بلافاصله پس از بارگذاری تازه) | ۲۱ سلول کد با شمارهٔ ۱ تا ۲۱، بدون خطا، 136.1 ثانیه؛ هیچ session باقی‌مانده | `solution.ipynb`، `notebook-run.json` |
+| ساخت از schema خالی با یک فرمان، دو بار | دو بارگذاری مستقل: محتوای همهٔ جدول‌ها و نتیجهٔ پنج کوئری یکسان؛ هر بار حدود ۵۶ ثانیه | `data/curated/evidence/determinism-two-loads.json` |
+| نوت‌بوک، Restart & Run All بدون دخالت (بلافاصله پس از بارگذاری تازه) | ۲۱ سلول کد با شمارهٔ ۱ تا ۲۱، بدون خطا، 136.2 ثانیه؛ هیچ session باقی نماند | `solution.ipynb`، `notebook-run.json` |
 | پنج کوئری داشبورد، ۱۵ اجرای اندازه‌گیری‌شده | همهٔ اجراها زیر ۲۰۰ms (جدول پایین) | `benchmark-final.json` |
 | `tests/` با `TEST_DATABASE_URL` | `Ran 72 tests`، `OK`، صفر skip | (پیش از این شاخه: 46 OK) |
 | `tests/` بدون پایگاه‌داده | `Ran 72 tests`، `OK (skipped=32)` | skip قبولی حساب نمی‌شود |
@@ -95,13 +95,13 @@ cd ../stage-2-kiarash-akbari
 
 | کوئری | قبل: میانه / بیشینه، ms | بعد، نهایی: میانه / بیشینه، ms | تغییر اصلی |
 |---|---:|---:|---|
-| Q1 | 319.316 / 325.264 | 7.758 / 8.716 | snapshot ماه‌های بسته + محاسبهٔ زندهٔ ماه‌های باز (نه Index) |
-| Q2 | 148.673 / 152.966 | 115.135 / 125.743 | CTE `MATERIALIZED` (بدون Index) |
-| Q3 | 201.542 / 229.714 | 155.104 / 157.688 | Index پوشای نظرها، تجمیع جریانی |
-| Q4 | 458.818 / 472.255 | 187.469 / 190.169 | اول ۲۰ فروشنده، بعد جزئیات با کلید |
-| Q5 | 469.093 / 476.689 | 159.039 / 160.093 | یک WindowAgg روی Index پرداخت + `GROUPING SETS` |
+| Q1 | 317.236 / 322.137 | 7.85 / 8.965 | snapshot ماه‌های بسته + محاسبهٔ زندهٔ ماه‌های باز (نه Index) |
+| Q2 | 151.142 / 155.227 | 112.744 / 115.812 | CTE `MATERIALIZED` (بدون Index) |
+| Q3 | 201.74 / 204.139 | 155.568 / 160.298 | Index پوشای نظرها، تجمیع جریانی |
+| Q4 | 450.441 / 466.021 | 187.516 / 188.134 | اول ۲۰ فروشنده، بعد جزئیات با کلید |
+| Q5 | 460.547 / 468.844 | 155.575 / 158.497 | یک WindowAgg روی Index پرداخت + `GROUPING SETS` |
 
-شاهد: ستون «قبل» از `data/curated/evidence/before-after.json` و ستون «بعد» از `data/curated/evidence/benchmark-final.json`. در مرحلهٔ before/after همان اجرا یکی از پانزده نمونهٔ Q3 به 209.5ms رسید؛ Q4 کم‌حاشیه‌ترین کوئری است. شواهد اکتبر (`data/curated/benchmark-final-2026102*.json`، `q2-cte-comparison-*.json`) تاریخی‌اند و به نسخهٔ materialized view کوئری‌ها تعلق دارند.
+شاهد: ستون «قبل» از `data/curated/evidence/before-after.json` و ستون «بعد» از `data/curated/evidence/benchmark-final.json`. Q4 کم‌حاشیه‌ترین کوئری است؛ Q3 و Q4 کمتر از ۵۰ms با مرز فاصله دارند. شواهد اکتبر تاریخی‌اند: `data/curated/benchmark-final-2026102*.json` به نسخهٔ materialized view کوئری‌ها تعلق دارد و `q2-cte-comparison-*.json` به بازنویسی Q2.
 
 ## تست‌های نیازمند PostgreSQL
 
