@@ -572,6 +572,37 @@ def negative_rate_by_month(frame) -> list[dict[str, Any]]:
     ]
 
 
+#: what a config with no roster has to be told; `max()` over an empty selection says neither
+#: which file nor which key, and arrives only after the feature frame has been read.
+ROSTER_HELP = (
+    "the config names no model families; [model] families needs at least two "
+    "'family.variant' entries, e.g. ['logreg.c0_1', 'hgb.d3']"
+)
+
+
+def roster_of(config: CapstoneConfig) -> list[str]:
+    """`[model].families` as a list, refused while it is still empty.
+
+    Measured on a live run: a config whose `[model] families` was empty reached `max(selection)`
+    with an empty list and raised `ValueError: max() iterable argument is empty` -- after the frame
+    had been read, and without naming the file or the key that was at fault.
+    """
+    roster = list(config.model.families)
+    if len(roster) < 2:
+        raise InputError(f"{ROSTER_HELP}; got {len(roster)}")
+    return roster
+
+
+def seed_label(config: CapstoneConfig) -> str:
+    """How a witness should print the seed: a `None` seed is not 0, it is an undecided key.
+
+    Three scripts coerced a missing seed to zero, so a config with no seed printed `seed 0` and the
+    run looked as reproducible as one that had said which seed it used.
+    """
+    seed = config.model.random_seed
+    return f"seed {seed}" if seed is not None else "seed not set in config"
+
+
 # --------------------------------------------------------------------------------------------
 # the whole experiment
 # --------------------------------------------------------------------------------------------
@@ -582,12 +613,20 @@ def experiment(frame, config: CapstoneConfig, *, with_drift: bool = True) -> dic
 
     Returns the metrics dict plus the fitted winner under ``"_pipeline"`` (not JSON).
     """
+    # Both guards come before `np`: a config that cannot be honoured costs no frame read and no
+    # import, which is the difference between a typo and a wasted minute on a shared cluster.
+    seed_value = config.model.random_seed
+    if seed_value is None:
+        raise InputError(
+            "[model] random_seed is not set; a run that invents a seed is not a reproducible run "
+            f"({seed_label(config)})"
+        )
+    seed = int(seed_value)
+    roster = roster_of(config)
     import numpy as np
 
     share = float(config.capacity.share)
     shares = list(config.capacity.report_shares)
-    seed = int(config.model.random_seed or 0)
-    roster = list(config.model.families)
     split = time_split(frame, config.split.boundary, config.model.validation_months)
     external_values = (
         EXTERNAL_COLUMN in frame.columns and frame.loc[split.train, EXTERNAL_COLUMN].notna().any()

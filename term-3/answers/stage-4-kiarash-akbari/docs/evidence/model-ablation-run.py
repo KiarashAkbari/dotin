@@ -44,7 +44,15 @@ def reading(rows: list[dict]) -> str:
 
     Pure on purpose: the caller feeds it the rows it just printed, so the sentence and the table cannot
     come from different runs -- and so the test can hand it a table without fitting a model.
+
+    An empty table is not a table of inconclusive families. It is the shape a config with no roster
+    produces, and "no family moved measurably" would dress that up as a finding.
     """
+    if not rows:
+        return (
+            "reading: nothing was measured -- the table above has no families in it, so these numbers "
+            "say nothing about the external signal; check [model] families in the config named above"
+        )
     inside = [r for r in rows if r["ci"] is None or (r["ci"]["low"] <= 0.0 <= r["ci"]["high"])]
     outside = [r for r in rows if r not in inside]
     if not outside:
@@ -85,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     share = float(config.capacity.share)
     shares = list(config.capacity.report_shares)
-    seed = int(config.model.random_seed or 0)
+    roster = system.roster_of(config)
+    seed_label = system.seed_label(config)
+    seed = int(config.model.random_seed)
 
     connection = connect(database_uri(config), purpose="read the frame for the ablation")
     try:
@@ -102,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     with redirect_stdout(out):
         print("# external-signal ablation on the time split (docs/evidence/model-ablation-run.py)")
         print(f"boundary {config.split.boundary}; train {len(train_rows)} rows, evaluation {len(eval_rows)} rows; "
-              f"quota {share:.0%}; seed {seed}")
+              f"quota {share:.0%}; {seed_label}; roster {' '.join(roster)}")
         print(f"external column: {system.EXTERNAL_COLUMN}; coverage over all approved orders "
               f"{frame[system.EXTERNAL_COLUMN].notna().mean():.4f} (NULL stays NULL)")
         print()

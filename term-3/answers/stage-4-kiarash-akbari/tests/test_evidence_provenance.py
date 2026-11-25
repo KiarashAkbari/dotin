@@ -15,6 +15,8 @@ Four rules, each of them earned on a real run rather than guessed offline:
   both ``--olist`` and ``CAPSTONE_OLIST_DIR``, not a traceback out of ``pandas``.
 * ``advice()`` in the performance probe does not recommend ``work_mem`` to a plan whose own counters
   say nothing spilled, and does not repeat one sentence once per hot node.
+* a witness names the seed and the roster it actually ran, and reports "nothing was measured" when the
+  table is empty -- see ``tests/test_undecided_config.py`` for the guard on the other side of that.
 """
 
 from __future__ import annotations
@@ -128,8 +130,16 @@ class GapWitnessProvenanceTest(unittest.TestCase):
         self.assertLess(refusal, source.index('connect(database_uri(config)'))
 
     def test_the_header_of_a_new_witness_names_the_config_it_read(self) -> None:
+        """The header names the config, the seed and nothing invented.
+
+        `seed not set in config` is the sentence a witness has to print when the key is missing: the
+        live run that motivated this printed `seed 0` from `random_seed or 0`, which is a number nobody
+        chose and which a reader cannot distinguish from a deliberate seed of zero.
+        """
         source = (STAGE / "scripts" / "cheating_model_gap.py").read_text(encoding="utf-8")
-        self.assertIn("(config {args.config.name})", source)
+        self.assertIn("(config {args.config.name}, ", source)
+        self.assertIn("{seed_label})", source)
+        self.assertNotIn("random_seed or 0", source)
 
     def test_force_is_the_only_way_past_and_is_a_flag_not_a_default(self) -> None:
         source = (STAGE / "scripts" / "cheating_model_gap.py").read_text(encoding="utf-8")
@@ -217,6 +227,30 @@ class AblationReadingTest(unittest.TestCase):
         text = self.script.reading(rows)
         self.assertIn("no family moved measurably", text)
         self.assertNotIn("1 of 2", text)
+
+    def test_an_empty_table_is_reported_as_nothing_measured(self) -> None:
+        """A config with no roster used to yield "no family moved measurably" -- a finding from nothing.
+
+        That is the same lie as the boilerplate, only quieter: the witness on a live run printed an
+        empty table with a sentence about intervals covering 0 under it.
+        """
+        text = self.script.reading([])
+        self.assertIn("nothing was measured", text)
+        self.assertIn("no families", text)
+        self.assertNotIn("no family moved measurably", text)
+        self.assertNotIn("1 of 0", text)
+
+    def test_the_header_names_the_seed_and_the_roster(self) -> None:
+        """Both came out of a live run that printed `seed 0` and an empty table, and looked fine.
+
+        The script must ask for the roster (so an empty one stops there) and print the seed and the
+        families it actually ran, not a number it invented.
+        """
+        source = (STAGE / "docs" / "evidence" / "model-ablation-run.py").read_text(encoding="utf-8")
+        self.assertIn("system.roster_of(config)", source)
+        self.assertIn("seed_label", source)
+        self.assertIn("roster {' '.join(roster)}", source)
+        self.assertNotIn("random_seed or 0", source)
 
     def test_a_missing_interval_is_treated_as_inconclusive_not_as_zero(self) -> None:
         rows = [{"name": "hgb.d3", "delta": 0.01, "ci": None}]

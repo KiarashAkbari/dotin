@@ -81,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     import csv
 
     from capstone.capacity import capacity_table
+    from capstone.system import seed_label
     from capstone.cli import default_config_path
     from capstone.config import load_config
     from capstone.features import connect, database_uri
@@ -166,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         f"orders in the cut: {len(ids)}; scored: {summary['scored']}; follow-up list: {summary['follow_up']}; "
         f"not scored (no order_approved_at): {summary['not_scored_no_approval']}",
         f"model: {summary['model']} run {summary['model_run_id']}",
+        f"config {args.config.name}; {seed_label(config)}",
         "",
         "## 1. same preparation: predict vs the model step's stored score for the same order",
         f"orders compared: {len(common)} of {len(predicted)}; max |difference|: {worst}",

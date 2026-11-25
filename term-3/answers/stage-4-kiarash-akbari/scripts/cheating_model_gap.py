@@ -85,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
     share = float(config.capacity.share)
-    seed = int(config.model.random_seed or 0)
+    seed_label = system.seed_label(config)
+    seed = int(config.model.random_seed)
 
 
     metrics_path = config.features.curated_dir / system.METRICS_NAME
@@ -130,7 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     }
     lines = [
         "# cheating-model gap (scripts/cheating_model_gap.py)",
-        f"model family: {chosen}; split boundary {config.split.boundary} (config {args.config.name}); evaluation window "
+        f"model family: {chosen}; split boundary {config.split.boundary} (config {args.config.name}, "
+        f"{seed_label}); evaluation window "
         f"{split.describe(frame)['evaluation']['months']}; quota {share:.0%}",
         "tempting columns added: order_status, order_delivered_customer_date (as delivery_days and "
         "late_days), order_delivered_carrier_date (as carrier_days)",
