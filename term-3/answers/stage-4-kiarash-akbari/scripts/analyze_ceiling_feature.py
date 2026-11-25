@@ -23,18 +23,41 @@ called a defect::
 
     python scripts/analyze_ceiling_feature.py --config config/capstone.default.toml
     python scripts/analyze_ceiling_feature.py --set "max_parallel_workers_per_gather=4"
+    python scripts/analyze_ceiling_feature.py --set "max_parallel_workers_per_gather=2" --control
+
+`--control` then puts those settings back off with `RESET` and measures the previous state one more time,
+last; see the ordering paragraph below for what that buys.
 
 `--set` runs `SET` on this connection and nothing else: no `ALTER SYSTEM`, no `postgresql.conf`, no
 config key. A witness produced with it says so in its own header, and a witness measured *without* the
 setting it already claims is refused -- so a pass nobody can reproduce cannot be committed by accident.
 
-Crediting a condition is a separate claim from measuring one, so the plan is read in every state and a
-delta is only attributed when the plan actually moved (`plans_moved` in the JSON, `plan moved across …`
-in the witness). A state that meets the ceiling with an unchanged plan is reported as
-``uncredited``: one fast repeat at the end of a warming session, not a cure -- and it does not exit 0.
-Measured on a live database: `--set max_parallel_workers_per_gather=4` moved the judged statistic from
-666.8 ms to 481.2 ms while `Workers Launched` stayed at 1 in both plans and 4 of that state's own 5
-repeats stayed over the ceiling.
+Crediting a condition is a separate claim from measuring one, so the plan is read in every state and
+compared on its **shape** -- estimates, `Workers Planned/Launched`, spill markers, with the `(actual …)`
+noise and the two timing lines removed, because a timing line differs between any two runs of the same
+plan. The verdict is then one of five words (`attribution`): ``credited`` (the plan moved), ``conditional``
+(the plan did not move but a majority of that state's own repeats met the ceiling), ``ordering`` (a control
+arm says most of the drop was the session warming up anyway), ``uncredited`` (a pass resting on one fast
+repeat) or ``refuted``. Only ``credited`` and ``conditional`` exit 0.
+
+Measured on a live database, twice: the first run put 4 of 5 tuned repeats under 500 ms and the second put
+5 of 5 there, with bests of 443.1 and 443.2 ms, while both states' plans stayed `Workers Launched: 1`
+over the identical `cost=22585.11..39899.80 rows=99252`. So the number is reproducible and the mechanism
+is not -- ``conditional``, and the report has to carry it that way: the step that ships the frame never
+issues that ``SET``.
+
+The frame is also read once per state with the transfer included (`features.FRAME_READ_SQL`), because
+`EXPLAIN (ANALYZE) SELECT *` discards the rows on the server: whatever the judged number says, it has
+never included the client, and 99,281 rows × 261 bytes is a cost a reader is entitled to see priced.
+
+The order the states are measured in is itself a condition, and the one that lies most easily: every
+repeat warms the session, so a best-of taken from a still-descending sequence is reading the clock. Each
+state's line therefore ends with `first to last ±X ms, still warming|converged`, and `--control` prices
+the effect instead of arguing about it. What the control recovers by itself is what the run refuses to
+credit to the condition. The comparison only works one way, because only one way exists: a session setting
+comes off with `RESET` in the same connection, while `ANALYZE` has no inverse -- nothing un-writes the row
+estimates it stored -- so the before -> after gap has no arm and stays a claim about estimates, not about
+speed.
 
 Writes ``docs/evidence/ceiling-feature-analysis.txt`` (+ ``.json``) and refuses to overwrite a witness
 whose header names a different ceiling, frame row count or tuning, for the same reason
@@ -67,6 +90,19 @@ ANALYZE_TARGETS = ("capstone.external_municipio", "capstone.mv_external_density"
 
 PLAN_SQL = "EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) SELECT * FROM {frame}"
 TIMING_SQL = "EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM {frame}"
+#: the frame *with* the transfer included -- `features.FRAME_READ_SQL`, copied because this module must
+#: import without a driver, and pinned to it by a test. `EXPLAIN` discards the rows on the server, so
+#: the judged number never says how much of it is network and client; this statement is what his own
+#: comment reserves for that question, and the witness now answers it per state.
+READ_SQL = "SELECT * FROM {frame} AS frame"
+
+#: what makes a plan a *different* plan: the estimates, the worker counts and the spill. Node lines keep
+#: their `(cost=… rows=…)` because those are what `ANALYZE` moves, and lose their `(actual …)` because
+#: those move on their own every run -- and the two timing lines are pure wall clock, so leaving them in
+#: would make every comparison of two identical plans report a change (which is exactly the bug one live
+#: pair of runs exposed: `plan moved across the setting: True`, with a byte-identical plan above it).
+PLAN_ACTUAL_NOISE = re.compile(r"\s*\(actual[^)]*\)")
+PLAN_TIMING_LINES = ("Execution Time", "Planning Time")
 
 #: the witness a plain run writes; a tuned run derives its own name from this one so the two states
 #: never fight over one file
@@ -101,6 +137,65 @@ def parse_settings(pairs: list[str] | None) -> dict[str, str]:
 def setting_lines(settings: dict[str, str]) -> list[str]:
     """The statements, one per setting, with the value quoted in exactly one place."""
     return [f"SET {key} = '{value.replace(chr(39), chr(39) * 2)}'" for key, value in settings.items()]
+
+
+def reset_lines(settings: dict[str, str]) -> list[str]:
+    """How a session condition comes back off: `RESET`, in the reverse order it went on.
+
+    A control arm has to measure the *earlier state again*, which means the setting has to leave. `RESET`
+    is the session-scoped mirror of `SET`, so the same rule that keeps `--set` inside one connection keeps
+    the control inside one run: no `ALTER SYSTEM`, no config file, nothing the next session inherits.
+    """
+    return [f"RESET {key}" for key in reversed(list(settings))]
+
+
+def tag_settings(settings: dict[str, str], *, control: bool) -> dict[str, str]:
+    """What the witness filename is hashed from: the SET pairs, plus the control arm when it was taken.
+
+    `0038`'s rule, applied to a new dimension -- a run that re-measured a state is not the same measurement
+    as one that did not, so the two must not fight over one file. With `control` off this is the same dict,
+    which is why the tag of a plain `--set max_parallel_workers_per_gather=4` run is still `411fdc`.
+    """
+    return {**settings, "control": "same-state-last"} if control else dict(settings)
+
+
+def warmth_ms(state: dict) -> float:
+    """First sample minus last, inside one state: the size of the gradient the run was riding.
+
+    A state whose five repeats read 671.7, 672.4, 651.0, 567.9, 532.8 is not a measurement of a state, it
+    is a snapshot of a curve. This is the number that says so.
+    """
+    runs = state["runs_ms"]
+    return round(runs[0] - runs[-1], 3) if len(runs) >= 2 else 0.0
+
+
+def still_warming(state: dict) -> bool:
+    """Whether the state had stopped falling before its timer ran out.
+
+    The judged statistic is the *fastest* repeat, so when the fastest one is also the last one the run
+    did not find the floor of that state -- it found the end of its patience. `verdict()` already records
+    which repeat won, so this costs one comparison.
+    """
+    runs = state["runs_ms"]
+    return len(runs) >= 2 and state["best_repeat"] == len(runs)
+
+
+def gain_split(*, naive_ms: float, drift_ms: float) -> dict:
+    """Split an observed drop between the intervention and the moment it was measured at.
+
+    `naive_ms` is the gap the run would otherwise credit to `ANALYZE` or to a `SET`; `drift_ms` is how
+    much the *same state* improved again when it was re-measured at the end with nothing changed (so the
+    control arm is what makes this number exist). A negative drift means the control was slower, which is
+    not a credit to the condition, so it is floored at zero; the ordering share is capped at the whole gap.
+    """
+    naive = float(naive_ms)
+    ordering = min(max(float(drift_ms), 0.0), naive) if naive > 0 else 0.0
+    return {
+        "naive_ms": round(naive, 3),
+        "ordering_ms": round(ordering, 3),
+        "attributed_ms": round(naive - ordering, 3),
+        "ordering_share": round(ordering / naive, 3) if naive > 0 else 0.0,
+    }
 
 
 def tuning_tag(settings: dict[str, str]) -> str:
@@ -179,6 +274,20 @@ def read_plan(cursor, frame: str) -> str:
     return "\n".join(str(row[0]) for row in cursor.fetchall())
 
 
+def measure_read(cursor, frame: str, *, clock) -> tuple[float, int]:
+    """One read of the frame *with* the transfer included, to price what `EXPLAIN` throws away.
+
+    `EXPLAIN (ANALYZE) SELECT *` computes every row and column and discards them on the server, so the
+    judged number can never say how much of it is the client. `features.FRAME_READ_SQL` exists for that
+    question and nothing in `src/` runs it; this takes it once per state -- once, because a single sample
+    of the read is a cost estimate, not a second verdict.
+    """
+    started = clock()
+    cursor.execute(READ_SQL.format(frame=frame))
+    rows = sum(1 for _ in cursor)
+    return (clock() - started) * 1000.0, rows
+
+
 def plan_summary(plan: str) -> str:
     """One line per state -- the numbers a reader has to compare before crediting anything."""
     workers = ", ".join(str(count) for count in workers_launched(plan)) or "no Gather"
@@ -204,23 +313,41 @@ def measure(cursor, frame: str, *, repeat: int, clock) -> list[float]:
 
 
 #: the plan lines that decide whether a session setting did anything at all
-PLAN_KEYS = ("Workers Planned", "Workers Launched", "Gather", "Execution Time", "Planning Time")
+PLAN_KEYS = ("Workers Planned", "Workers Launched", "Gather", "Join", "Scan")
+SPILL_MARK = re.compile(r"Batches: [2-9]\d*|Temp Read|Temp Written")
+
+
+def plan_shape(plan: str) -> list[str]:
+    """The comparison key: estimates, worker counts and spill -- and nothing the run itself decides.
+
+    Two filters, and the second one is the whole rule: keep a line if it names a node, a worker count or
+    a spill marker. `Execution Time` and `Planning Time` fall out of it on their own -- they name no node
+    -- which is why the shape cannot move just because the clock moved. `PLAN_TIMING_LINES` is what puts
+    them back for `plan_fingerprint`, the human-facing list.
+    """
+    lines: list[str] = []
+    for raw in plan.splitlines():
+        line = PLAN_ACTUAL_NOISE.sub("", raw.strip())
+        if line and (any(key in line for key in PLAN_KEYS) or SPILL_MARK.search(line)):
+            lines.append(line)
+    return lines
 
 
 def plan_fingerprint(plan: str) -> list[str]:
-    """The handful of plan lines a reader needs to see whether the shape moved.
+    """The handful of plan lines a reader needs to see whether the shape moved, timings included.
 
-    A whole `EXPLAIN` is ~100 lines, and a witness that carries two of them cannot be read; the lines
-    below are the ones that change when a setting changes the plan, plus the spill markers -- a
-    `Batches: 2` or a `Temp Read` appearing is a memory story, not a parallelism one.
+    A whole `EXPLAIN` is ~100 lines, and a witness that carries three of them cannot be read. These are
+    the ones that change when a setting changes the plan, plus the spill markers -- a `Batches: 2` or a
+    `Temp Read` appearing is a memory story, not a parallelism one. This is what the witness prints per
+    state and what `plan_shape` is for the machine: `plan_shape` is the same list without the two timing
+    lines, and only that one is compared. A reader may diff these by hand; feeding them to `plan_changed`
+    is what made the first version of this gate answer True to everything.
     """
-    kept = [line.strip() for line in plan.splitlines() if any(key in line for key in PLAN_KEYS)]
-    kept += [
+    return plan_shape(plan) + [
         line.strip()
         for line in plan.splitlines()
-        if re.search(r"Batches: [2-9]\d*|Temp Read|Temp Written", line)
+        if any(key in line for key in PLAN_TIMING_LINES)
     ]
-    return kept
 
 
 def workers_launched(plan: str) -> list[int]:
@@ -229,8 +356,13 @@ def workers_launched(plan: str) -> list[int]:
 
 
 def plan_changed(before: str, after: str) -> bool:
-    """Whether the two states ran *different* plans, which is what a setting has to do to be credited."""
-    return plan_fingerprint(before) != plan_fingerprint(after)
+    """Whether the two states ran *different* plans, which is what a setting has to do to be credited.
+
+    `plan_shape`, not `plan_fingerprint`: a wall clock is not a plan. Comparing the fingerprints made this
+    answer True for two byte-identical plans that merely ran at different times, which is how a live run
+    reported "plan moved across the setting" above a plan with the same costs and the same one worker.
+    """
+    return plan_shape(before) != plan_shape(after)
 
 
 def verdict(durations: list[float], ceiling_ms: float) -> dict:
@@ -257,15 +389,57 @@ def verdict(durations: list[float], ceiling_ms: float) -> dict:
 def state_line(label: str, state: dict) -> str:
     """One measured state, printed with the two numbers that say how much of it is a fluke."""
     n = len(state["runs_ms"])
-    return (
+    text = (
         f"{label}: best {state['best_ms']:.1f} ms, mean {state['mean_ms']:.1f} ms, "
         f"worst {state['worst_ms']:.1f} ms, runs {state['runs_ms']}; "
         f"{state['below_ceiling']}/{n} repeats under the ceiling, fastest was repeat "
         f"{state['best_repeat']} of {n}"
     )
+    if state.get("read_ms") is not None:
+        text += f" | read with transfer, one sample: {state['read_ms']:.1f} ms"
+    if state.get("warmth_ms") is not None:
+        text += (
+            f" | first to last {state['warmth_ms']:+.1f} ms, "
+            + ("still warming" if state["still_warming"] else "converged")
+        )
+    return text
 
 
-def describe(before: dict, after: dict, *, state: str = "ANALYZE", plans_changed: bool = True) -> str:
+def attribution(
+    *,
+    plans_changed: bool,
+    below_ceiling: int,
+    repeats: int,
+    ordering_share: float | None = None,
+) -> str:
+    """What a state that met the ceiling may be called. Five answers, and only one of them is a cure.
+
+    `credited` needs the plan to have moved; `conditional` is the honest label for the case a live pair of
+    runs produced -- the same plan in both states, yet a majority of the state's own repeats under the
+    ceiling, which is reproducible and unexplained at once; `uncredited` is a pass resting on one fast
+    repeat; `refuted` needs no sentence. `ordering` outranks the two that met the ceiling when a control
+    arm was taken and most of the gap was paid for by measuring later: a number that only appears when the
+    session is warm is not an effect of the condition, whatever the plan did.
+    """
+    if below_ceiling == 0:
+        return "refuted"
+    if ordering_share is not None and ordering_share >= 0.5:
+        return "ordering"
+    if plans_changed:
+        return "credited"
+    if below_ceiling * 2 > repeats:
+        return "conditional"
+    return "uncredited"
+
+
+def describe(
+    before: dict,
+    after: dict,
+    *,
+    state: str = "ANALYZE",
+    plans_changed: bool = True,
+    split: dict | None = None,
+) -> str:
     """The sentence the report needs, in the shape of a decision rather than a number.
 
     `state` names what changed between the two measurements, because the remedy differs entirely: warm
@@ -273,6 +447,11 @@ def describe(before: dict, after: dict, *, state: str = "ANALYZE", plans_changed
     can only be credited to a condition that changed the plan it ran under. Without it, a single fast
     repeat at the end of a warmed-up session reads as a cure -- which is exactly what one live run of
     `--set max_parallel_workers_per_gather=4` looked like before anyone compared the two plans.
+
+    The sentence also opens with the word `attribution()` returns -- `credited`, `conditional`,
+    `uncredited` -- because the witness prints both, and a reader who sees `(conditional)` above a prose
+    that says `artefact` is left with two vocabularies for one run. `refuted` is the exception: a state
+    where no repeat met the ceiling opens with the word the report acts on, `query finding`.
     """
     n = len(after["runs_ms"])
     if before["passes"]:
@@ -281,7 +460,34 @@ def describe(before: dict, after: dict, *, state: str = "ANALYZE", plans_changed
             f"{before['below_ceiling']}/{len(before['runs_ms'])} repeats under "
             f"{before['ceiling_ms']:.0f} ms); this run is context, not a fix"
         )
-    if after["passes"] and not plans_changed:
+    kind = attribution(
+        plans_changed=plans_changed,
+        below_ceiling=after["below_ceiling"],
+        repeats=n,
+        ordering_share=None if split is None else split["ordering_share"],
+    )
+    if kind == "ordering":
+        # deliberately no `before`/`after` numbers in here: the control prices the gap between the state
+        # *before the condition* and the state *inside* it, which is not the before -> after pair this
+        # function is otherwise asked about. Quoting both would print two different gaps as one story.
+        return (
+            f"ordering: the {split['naive_ms']:.1f} ms between the untuned state and `{state}` is not "
+            f"the condition\'s doing -- the control, which is that untuned state measured again at the end "
+            f"of the session with the condition back off, came to within {split['attributed_ms']:.1f} ms "
+            f"of the tuned one. So {split['ordering_ms']:.1f} ms ({split['ordering_share']:.0%}) of the "
+            f"gap is the tail of warming, and {split['attributed_ms']:.1f} ms is not enough to write the "
+            "ceiling off: take more repeats, or carry the shortfall"
+        )
+    if kind == "conditional":
+        return (
+            f"conditional pass: {state} puts {after['below_ceiling']} of {n} of its own repeats under "
+            f"{after['ceiling_ms']:.0f} ms (best {after['best_ms']:.1f}, worst {after['worst_ms']:.1f}) "
+            f"while both states ran the same plan shape -- same `Workers Launched`, same estimates, same "
+            f"spill. The number is reproducible and the mechanism is not, so `report.md` writes "
+            f"\"meets the ceiling only under {state}\" and not \"fixed\": the step that ships the frame "
+            "never issues this condition, and a verdict that needs one is a finding about the harness"
+        )
+    if kind == "uncredited":
         return (
             f"uncredited: {state} moves the fastest repeat from {before['best_ms']:.1f} ms to "
             f"{after['best_ms']:.1f} ms, but the two states ran the same plan shape -- same "
@@ -290,16 +496,17 @@ def describe(before: dict, after: dict, *, state: str = "ANALYZE", plans_changed
             f"fastest as repeat {after['best_repeat']} of {n}. carry this as one fast outlier, not as "
             "a pass, and not as a condition the report can rely on"
         )
-    if after["passes"]:
+    if kind == "credited" and after["passes"]:
         remedy = (
             "so the breach was a stale plan on the rebuilt snapshot, not a cost of the frame -- the "
             "remedy is to keep those statistics warm"
             if state == "ANALYZE"
             else "so the breach is a session condition rather than the frame itself -- carry the "
-                 "setting into the report as the condition the number was measured under"
+                 "setting into the report as the condition the number was measured under, and the "
+                 "step that ships the frame has to issue it for the number to mean anything"
         )
         return (
-            f"artefact: {before['best_ms']:.1f} ms becomes {after['best_ms']:.1f} ms after {state}, "
+            f"credited: {before['best_ms']:.1f} ms becomes {after['best_ms']:.1f} ms after {state}, "
             f"{remedy}"
         )
     if before["below_ceiling"] == 0 and after["below_ceiling"] == 0:
@@ -331,12 +538,18 @@ def main(argv: list[str] | None = None) -> int:
         "--evidence",
         type=Path,
         default=DEFAULT_EVIDENCE,
-        help="base witness; a run with --set writes <base>.tuned-<tag>.txt instead of over it",
+        help="base witness; --set and --control write <base>.tuned-<tag>.txt instead of over it",
     )
     parser.add_argument(
         "--force",
         action="store_true",
         help="overwrite a witness measured at a different ceiling, row count or tuning",
+    )
+    parser.add_argument(
+        "--control",
+        action="store_true",
+        help="after the last measurement, RESET the settings and measure the same state once more, so "
+        "a gain that is really the tail of warming can be priced instead of argued about",
     )
     parser.add_argument(
         "--set",
@@ -359,7 +572,8 @@ def main(argv: list[str] | None = None) -> int:
     frame = features.FRAME_VIEW
     tuning = ", ".join(f"{key}={value}" for key, value in settings.items())
 
-    witness = witness_path(args.evidence, settings)
+    tagged = tag_settings(settings, control=args.control)
+    witness = witness_path(args.evidence, tagged)
     previous = None
     if witness.exists():
         # the guard is about *what the file claims*; `--force` is consulted inside it, so it stays the
@@ -380,11 +594,12 @@ def main(argv: list[str] | None = None) -> int:
         claims = {"ceiling_ms": str(int(ceiling)), "frame_rows": str(rows), "tuning": tuning}
         difference = state_difference(stored, claims) if previous else []
         if difference and not args.force:
-            print(refusal(witness, stored, claims, witness_path(DEFAULT_EVIDENCE, settings)))
+            print(refusal(witness, stored, claims, witness_path(DEFAULT_EVIDENCE, tagged)))
             return 2
 
         before_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
         plan_before = read_plan(cursor, frame)
+        read_before, read_rows = measure_read(cursor, frame, clock=time.perf_counter)
         connection.commit()
         for target in ANALYZE_TARGETS:
             if target == "capstone.mv_external_density":
@@ -395,13 +610,24 @@ def main(argv: list[str] | None = None) -> int:
         connection.commit()
         after_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
         plan_after = read_plan(cursor, frame)
+        read_after, _ = measure_read(cursor, frame, clock=time.perf_counter)
         tuned_runs = None
         plan_tuned = ""
+        read_tuned = None
         if settings:
             for statement in setting_lines(settings):
                 cursor.execute(statement)
             tuned_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
             plan_tuned = read_plan(cursor, frame)
+            read_tuned, _ = measure_read(cursor, frame, clock=time.perf_counter)
+        control_runs = None
+        if args.control:
+            # the arm is only worth taking if it re-measures the state whose gap it prices: put the session
+            # back the way the untuned states found it, then read that state again, last
+            for statement in reset_lines(settings):
+                cursor.execute(statement)
+            connection.commit()
+            control_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
         # the plan the error line asked for is the one from the state the run ends in
         plan = plan_tuned or plan_after
     finally:
@@ -410,12 +636,44 @@ def main(argv: list[str] | None = None) -> int:
     before = verdict(before_runs, ceiling)
     after = verdict(after_runs, ceiling)
     tuned = verdict(tuned_runs, ceiling) if tuned_runs else None
+    control = verdict(control_runs, ceiling) if control_runs else None
+    before["read_ms"], after["read_ms"] = round(read_before, 3), round(read_after, 3)
+    if tuned is not None and read_tuned is not None:
+        tuned["read_ms"] = round(read_tuned, 3)
+    for state in (before, after, tuned, control):
+        if state is not None:
+            state["warmth_ms"] = warmth_ms(state)
+            state["still_warming"] = still_warming(state)
+    # the control re-measures `after`, so the gap it prices is the after -> tuned one: the setting's claim
+    split = (
+        gain_split(
+            naive_ms=after["best_ms"] - tuned["best_ms"],
+            drift_ms=after["best_ms"] - control["best_ms"],
+        )
+        if tuned is not None and control is not None
+        else None
+    )
     # the two verdicts are computed once, so the .txt and the .json cannot disagree about what was found
     moved_analyze = plan_changed(plan_before, plan_after)
     moved_setting = plan_changed(plan_after, plan_tuned) if tuned is not None else False
+    kind_analyze = attribution(
+        plans_changed=moved_analyze, below_ceiling=after["below_ceiling"], repeats=len(after["runs_ms"])
+    )
+    kind_setting = (
+        attribution(
+            plans_changed=moved_setting,
+            below_ceiling=tuned["below_ceiling"],
+            repeats=len(tuned["runs_ms"]),
+            ordering_share=None if split is None else split["ordering_share"],
+        )
+        if tuned is not None
+        else "not measured"
+    )
     verdict_text = describe(before, after, plans_changed=moved_analyze)
     verdict_tuned_text = (
-        describe(before, tuned, state="ANALYZE + SET " + tuning, plans_changed=moved_setting)
+        describe(
+            before, tuned, state="ANALYZE + SET " + tuning, plans_changed=moved_setting, split=split
+        )
         if tuned is not None
         else None
     )
@@ -424,6 +682,14 @@ def main(argv: list[str] | None = None) -> int:
         f"config {args.config.name}; frame {frame}; ceiling {int(ceiling)} ms; frame rows {rows}"
         + (f"; tuned by {tuning}" if tuning else ""),
         f"basis: {features.TIMING_BASIS}, the same statistic the feature step judges on",
+        *(
+            [
+                "control: the last untuned state, measured again after RESET -- what that recovers by "
+                "itself is what this run refuses to credit to the condition"
+            ]
+            if args.control
+            else []
+        ),
         *(
             [f"companion: the same measurement without the setting is in {shown(args.evidence)}"]
             if witness != args.evidence
@@ -436,21 +702,38 @@ def main(argv: list[str] | None = None) -> int:
         "",
         "plan shape per state -- a condition has to move these to be credited with the delta:",
         f"  before ANALYZE: {plan_summary(plan_before)}",
+        f"    fingerprint: {'; '.join(plan_fingerprint(plan_before))}",
         f"  after  ANALYZE: {plan_summary(plan_after)}",
+        f"    fingerprint: {'; '.join(plan_fingerprint(plan_after))}",
         *(
-            [f"  tuned ({tuning}): {plan_summary(plan_tuned)}"]
+            [
+                f"  tuned ({tuning}): {plan_summary(plan_tuned)}",
+                f"    fingerprint: {'; '.join(plan_fingerprint(plan_tuned))}",
+            ]
             if tuned is not None
             else []
         ),
-        f"  plan moved across the ANALYZE: {moved_analyze}",
+        f"  plan moved across the ANALYZE: {moved_analyze} ({kind_analyze})",
+        "  transfer: the judged statistic discards the rows on the server (`features.FRAME_TIMING_SQL`),"
+        f" so the {read_rows:,} rows the frame returns are priced only by the read sample above",
         "",
         verdict_text,
     ]
     if tuned is not None:
         lines += [
             state_line(f"after  ANALYZE + SET {tuning}", tuned),
-            f"  plan moved across the setting: {moved_setting}",
+            f"  plan moved across the setting: {moved_setting} ({kind_setting})",
             f"with the setting applied: {verdict_tuned_text}",
+        ]
+    if control is not None:
+        lines += [state_line("control (ANALYZE, no setting, measured last)", control)]
+    if split is not None:
+        # a `--control` run with no `--set` has a second measurement of the same state and nothing to
+        # divide: the gap that would be priced belongs to the setting, and it does not exist here
+        lines += [
+            f"  gain split: {split['naive_ms']:.1f} ms observed = {split['attributed_ms']:.1f} ms "
+            f"credited to the condition + {split['ordering_ms']:.1f} ms ordering "
+            f"({split['ordering_share']:.0%} of the gap)",
         ]
     lines += [
         "",
@@ -469,12 +752,23 @@ def main(argv: list[str] | None = None) -> int:
                 "before": before,
                 "after": after,
                 "tuned": tuned,
+                "control": control,
+                "gain_split": split,
                 "plan_shapes": {
                     "before_analyze": plan_summary(plan_before),
                     "after_analyze": plan_summary(plan_after),
                     "tuned": plan_summary(plan_tuned) if tuned is not None else None,
                 },
+                # the comparison itself, in machine-readable form: diff these three lists instead of the
+                # ~100-line plan when the question is "did anything about the plan move?"
+                "plan_shapes_compared": {
+                    "before_analyze": plan_shape(plan_before),
+                    "after_analyze": plan_shape(plan_after),
+                    "tuned": plan_shape(plan_tuned) if tuned is not None else None,
+                },
                 "plans_moved": {"analyze": moved_analyze, "setting": moved_setting},
+                "attribution": {"analyze": kind_analyze, "setting": kind_setting},
+                "frame_rows_read": read_rows,
                 "verdict": verdict_text,
                 "verdict_tuned": verdict_tuned_text,
             },
@@ -484,11 +778,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("\n".join(lines))
     print(f"\nwrote {shown(witness)} and {shown(witness.with_suffix('.json'))}")
-    # a tuned state only exits green if the setting moved the plan: otherwise the "pass" is one fast
-    # repeat in a warming session, and an exit code is read as a verdict, not as a number
-    met = before["passes"] or after["passes"] or (
-        tuned is not None and tuned["passes"] and moved_setting
-    )
+    # a tuned state exits green only when the condition is credited (the plan moved) or reproducible
+    # (a majority of its own repeats met the ceiling); an `uncredited` pass is one fast repeat in a
+    # warming session, and an exit code is read as a verdict, not as a number
+    met = before["passes"] or after["passes"] or kind_setting in ("credited", "conditional")
     return 0 if met else 1
 
 

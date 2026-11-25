@@ -55,9 +55,10 @@ FRAME_TIMING_SQL = "EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM {frame}"
 #: refusal prints the same string the manifest records -- so a change of rule is one edit, and a
 #: docstring that lags behind is a test failure rather than a sentence nobody re-reads.
 TIMING_BASIS = "best of the repeats"
-#: the same frame with the transfer included. Nothing in ``src/`` runs this -- it exists so the
-#: performance log can show how much of the wall time is the database and how much is the client,
-#: which is the one number a reader is entitled to ask for after "under 500 ms" is claimed.
+#: the same frame with the transfer included. Nothing in ``src/`` runs this -- the feature step judges
+#: ``FRAME_TIMING_SQL``, whose rows the server discards -- but ``scripts/analyze_ceiling_feature.py``
+#: times it once per state and writes the number into the witness, because a reader is entitled to ask
+#: how much of "under 500 ms" is the database and how much is carrying 99,281 rows to the client.
 FRAME_READ_SQL = "SELECT * FROM {frame} AS frame"
 #: how many rows the frame holds. A count of the view, not of the timing wrapper: the two answer
 #: different questions ("how big is the frame" and "how long does reading it take") and a log that
