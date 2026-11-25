@@ -408,7 +408,14 @@ def train(
     omit: Sequence[str] = (),
     on_refusal: str = "raise",
 ) -> dict[str, Any]:
-    """Score every baseline and family, on every feature set, at the operational quota.
+    """Score every baseline and family, on every feature set, at the operational quota -- IN SAMPLE.
+
+    Not the model step. Review B1 found this function fits and scores the same rows and then picks
+    the "best" run on those in-sample numbers; it is kept only as the arithmetic harness its tests
+    pin (a hand-countable scorer protocol), and every result it returns says ``"in_sample": True``.
+    The chain's model step is :func:`capstone.system.run`: time split on ``split.boundary``,
+    selection on a validation slice inside the training window, one score on the evaluation months.
+    No number in report.md comes from here.
 
     The comparison the brief asks for is a table, so this returns one entry per (scorer, feature
     set) pair rather than "a model": the baseline and the two families are ranked by the same
@@ -545,6 +552,7 @@ def train(
         )
     best = max(scored_runs, key=_rank_key)
     return {
+        "in_sample": True,
         "label": label_definition(),
         "operational_share": quota,
         "rows": len(labels),
@@ -619,21 +627,17 @@ def external_readiness(config: CapstoneConfig) -> dict[str, Any]:
     return {"view_present": view_present, "coverage": coverage, "note": note}
 
 
-@pending(phase=6, checklist=("6.1", "6.2"), step="model")
 def run(config: CapstoneConfig) -> dict:
-    """The chain step: read the frame, fit the roster, persist the scored frame.
+    """The chain step: read the frame, fit the roster on a time split, persist the scored frame.
 
-    Phase 5 wrote :func:`train` and every metric the comparison table needs, so the refusal here is
-    not "the arithmetic is missing". Two things are, and both belong to the phase that owns the
-    one-command run: the config cannot yet say *which two families* the report compares -- naming
-    them in code would write the report's central row into a library default -- and nothing has
-    decided whether the scored frame travels to ``capacity.build_list`` through the database,
-    through ``run_manifest.json``, or through one process that runs both. Pointing the step at
-    :func:`train` would report the chain as ready while its artifact stays impossible to produce,
-    which is the same reason ``capacity-list`` names ``build_list`` instead of the finished
-    ``report``.
+    The work lives in :mod:`capstone.system` (pandas + scikit-learn, imported late so the offline
+    arithmetic in this module keeps needing nothing): the scores go to ``capstone.order_score`` and
+    the run's metrics to ``capstone.model_run``, which is the carrier ``capacity.report`` reads --
+    the database, so the two steps can run as separate commands.
     """
-    raise AssertionError("placeholder")
+    from .system import run as system_run
+
+    return system_run(config)
 
 
 def _rank_key(run: Mapping[str, Any]) -> tuple[float, float, str]:

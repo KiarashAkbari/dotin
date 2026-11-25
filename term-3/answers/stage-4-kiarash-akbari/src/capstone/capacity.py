@@ -14,17 +14,87 @@ from __future__ import annotations
 from math import ceil
 
 from .config import CapstoneConfig
-from .pending import pending
 
 
-@pending(phase=5, checklist=("6.3", "6.4", "3.7", "3.8"), step="capacity-list")
-def report(config: CapstoneConfig, scores: list[float], negatives: list[bool]) -> list[dict]:
-    """Write the 5 / 10 / 20 table the report and the notebooks both quote from.
+#: where the final list goes, under features.curated_dir
+FOLLOWUP_NAME = "followup_list.csv"
+CAPACITY_NAME = "capacity_table.json"
 
-    Phase 5 owns the body: it must join ``capacity_table`` with the secondary metric on
-    the last evaluation month (3.8) and with the gap to the cheating model (4.5).
+LATEST_RUN_SQL = (
+    "SELECT run_id, model, metrics FROM capstone.model_run ORDER BY created_at DESC, run_id DESC LIMIT 1"
+)
+#: the evaluation window of the latest run, ranked; ties break by order_id so a rerun is identical
+RANKED_SQL = (
+    "SELECT s.order_id, s.order_approved_at, s.score FROM capstone.order_score AS s "
+    "WHERE s.run_id = %s AND s.window_name = 'eval' ORDER BY s.score DESC, s.order_id"
+)
+
+
+def report(config: CapstoneConfig) -> dict:
+    """The ``capacity-list`` chain step: the 10 % follow-up list and the 5 / 10 / 20 table.
+
+    Reads the latest ``capstone.model_run`` and its scored evaluation window from the database
+    (the model step wrote them), writes ``followup_list.csv`` -- the top ``capacity.share`` of the
+    window's approved orders, ranked -- and ``capacity_table.json`` with the table the operations
+    manager decides with. The list is over *all* approved orders of the window, the way the team
+    would receive it; the catch rates in the table are the model step's, over labelled orders
+    (D2), with the all-approved variant beside them.
     """
-    raise AssertionError("placeholder")
+    import csv
+    import json
+
+    from .features import connect, database_uri
+
+    uri = database_uri(config, purpose="build the follow-up list")
+    connection = connect(uri, purpose="read the scored frame for the follow-up list")
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT to_regclass('capstone.model_run') IS NOT NULL")
+        if not cursor.fetchone()[0]:
+            from .errors import NotReadyError
+
+            raise NotReadyError("no capstone.model_run: run the model step first")
+        cursor.execute(LATEST_RUN_SQL)
+        latest = cursor.fetchone()
+        if latest is None:
+            from .errors import NotReadyError
+
+            raise NotReadyError("capstone.model_run is empty: run the model step first")
+        run_id, model_name, metrics = latest
+        cursor.execute(RANKED_SQL, (run_id,))
+        ranked = cursor.fetchall()
+    finally:
+        connection.close()
+    if isinstance(metrics, str):
+        metrics = json.loads(metrics)
+    chosen = top_share_indexes(len(ranked), config.capacity.share)
+    curated = config.features.curated_dir
+    curated.mkdir(parents=True, exist_ok=True)
+    target = curated / FOLLOWUP_NAME
+    with target.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["rank", "order_id", "order_approved_at", "score", "model_run_id"])
+        for index in chosen:
+            order_id, approved, score = ranked[index]
+            writer.writerow([index + 1, order_id, approved.isoformat(sep=" "), f"{score:.6f}", run_id])
+    evaluation = metrics["evaluation"][model_name]
+    table = {
+        "run_id": run_id,
+        "model": model_name,
+        "window": metrics["split"]["evaluation"],
+        "share": config.capacity.share,
+        "list_rows": len(chosen),
+        "window_rows": len(ranked),
+        "capacity_labelled": evaluation["capacity"],
+        "capacity_all_approved": evaluation["capacity_all_approved"],
+        "rule_baseline": {
+            "rule": metrics["rule_baseline"]["chosen"]["rule"],
+            "capacity_labelled": metrics["rule_baseline"]["evaluation"]["capacity"],
+        },
+    }
+    (curated / CAPACITY_NAME).write_text(json.dumps(table, indent=2), encoding="utf-8")
+    return {"list": str(target), "rows": len(chosen), "of": len(ranked), "run_id": run_id,
+            "table": str(curated / CAPACITY_NAME)}
 
 
 def top_share_indexes(size: int, share: float) -> list[int]:
