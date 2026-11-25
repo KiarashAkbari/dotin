@@ -36,7 +36,8 @@ Run from ``stage-4/`` with the driver the URI asks for::
 With no ``CAPSTONE_DATABASE_URI`` it prints what is missing and exits 0: a laptop without the
 project's database is not a failed measurement, and a log full of tracebacks teaches nobody anything.
 ``--runs N`` repeats the timing more often (the brief's protocol is warm and cold, so the first run
-is labelled cold). Nothing is written beside the log: the log is the artifact, and a second file of
+is labelled cold), and it refuses a value that would collapse that protocol -- zero, a negative, a
+word, or a flag it does not know -- with a sentence and exit 2 rather than measuring something else. Nothing is written beside the log: the log is the artifact, and a second file of
 the same numbers is a second thing to keep true.
 """
 
@@ -188,7 +189,9 @@ def timed(cursor: Any, sql: str, runs: int) -> dict:
     by order instead: the first is the one that pays whatever the rest get for free.
     """
     samples: list[float] = []
-    for _ in range(max(1, runs)):
+    if runs < 1:
+        raise ValueError(f"timed() needs at least one run, not {runs}")
+    for _ in range(runs):
         started = time.perf_counter()
         cursor.execute(sql)
         for _row in cursor:
@@ -381,11 +384,52 @@ def advice(hot: list[dict], over_ms: float | None) -> list[str]:
     return lines
 
 
-def main(argv: list[str]) -> int:
+def parse_runs(argv: list[str]) -> tuple[int, str | None]:
+    """``(--runs N, problem)`` -- the only flag this script takes, and it refuses rather than guesses.
+
+    Three ways an invocation used to reach a wrong number instead of an error: ``--runs 0`` and
+    ``--runs -3`` were silently clamped to a single run, ``--runs`` with a value that is not an
+    integer (or with no value at all) raised a bare ``ValueError`` -- a traceback, which this file's
+    own header promises nobody gets -- and a misspelled flag was ignored, so ``--run 5`` measured
+    three. The clamping is the one that matters for the verdict: one run has no best-of-repeats to
+    take, it is the cold sample alone, and the step this probe mirrors refuses ``repeat < 1`` in
+    :func:`capstone.features.run` for exactly that reason. An unknown flag now says so on the same
+    line, because a wasted DB round-trip is only annoying, while a measurement taken on the wrong
+    protocol is wrong.
+    """
     runs = 3
-    for index, item in enumerate(argv):
-        if item == "--runs" and index + 1 < len(argv):
-            runs = int(argv[index + 1])
+    problem = None
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item == "--runs":
+            if index + 1 >= len(argv):
+                problem = "--runs needs a value, e.g. --runs 5"
+                break
+            try:
+                wanted = int(argv[index + 1])
+            except ValueError:
+                problem = f"--runs wants a whole number of repeats, not {argv[index + 1]!r}"
+                break
+            if wanted < 1:
+                problem = (
+                    f"--runs {wanted} is not a measurement: the ceiling is judged on the {TIMING_BASIS}"
+                    ", and there is no best of a single run -- nor of none -- to take"
+                )
+                break
+            runs = wanted
+            index += 2
+            continue
+        problem = f"unknown argument {item!r}; this script takes only --runs N"
+        break
+    return runs, problem
+
+
+def main(argv: list[str]) -> int:
+    runs, problem = parse_runs(argv)
+    if problem is not None:
+        print(problem)
+        return 2
     config = load_contract(STAGE / "config" / "capstone.example.toml")
     print("=" * 72)
     print("feature frame performance -- timing, plan, and what the plan says about the ceiling")

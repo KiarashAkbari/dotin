@@ -86,5 +86,62 @@ class CeilingVerdictTest(unittest.TestCase):
         self.assertEqual(self.probe.advice([], None), [])
 
 
+class RunsFlagTest(unittest.TestCase):
+    """``--runs`` is the only knob the probe has, so its refusal has to be a refusal.
+
+    The step this script mirrors rejects ``repeat < 1``; a probe that silently clamped ``--runs 0``
+    to a single sample would print a best-of-repeats verdict taken over one run, which is the same
+    mistake in the other direction -- and it would do it after a full pass over the frame.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.probe = load_probe()
+
+    def test_no_arguments_keeps_the_documented_default(self) -> None:
+        self.assertEqual(self.probe.parse_runs([]), (3, None))
+
+    def test_a_valid_repeat_is_taken_at_face_value(self) -> None:
+        self.assertEqual(self.probe.parse_runs(["--runs", "5"]), (5, None))
+
+    def test_zero_and_negative_refuse_instead_of_collapsing_to_one_run(self) -> None:
+        for value in ("0", "-3"):
+            with self.subTest(runs=value):
+                runs, problem = self.probe.parse_runs(["--runs", value])
+                self.assertIsNotNone(problem)
+                self.assertIn("not a measurement", problem)
+                self.assertIn("best of the repeats", problem)
+
+    def test_an_unparsable_or_missing_value_returns_a_sentence_not_a_traceback(self) -> None:
+        # the file's own header promises "a log full of tracebacks teaches nobody anything"
+        for value in ("abc", "5.5"):
+            with self.subTest(runs=value):
+                _, problem = self.probe.parse_runs(["--runs", value])
+                self.assertIn("whole number", problem)
+        _, problem = self.probe.parse_runs(["--runs"])
+        self.assertIn("needs a value", problem)
+
+    def test_a_misspelled_flag_is_named_instead_of_ignored(self) -> None:
+        _, problem = self.probe.parse_runs(["--run", "5"])
+        self.assertIn("unknown argument", problem)
+        self.assertIn("--run", problem)
+
+    def test_main_refuses_before_touching_the_database(self) -> None:
+        """exit 2 for a bad flag, and the config is never read: no DB, no connection, no waiting."""
+        import io
+        from contextlib import redirect_stdout
+
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = self.probe.main(["--runs", "0"])
+        self.assertEqual(code, 2)
+        self.assertIn("not a measurement", buffer.getvalue())
+
+    def test_the_timed_helper_refuses_a_collapsed_protocol_too(self) -> None:
+        """The clamp lived in the loop; a direct caller must not be able to re-create it."""
+        with self.assertRaises(ValueError):
+            self.probe.timed(None, "SELECT 1", 0)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
