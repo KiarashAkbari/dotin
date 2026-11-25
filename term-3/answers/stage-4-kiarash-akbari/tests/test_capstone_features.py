@@ -57,6 +57,7 @@ class RecordingConnection:
         clock: object = None,
         audit_rows: int = 53,
         bridge_pairs: int = 0,
+        bridge_present: bool | None = None,
     ) -> None:
         self.statements: list[str] = []
         #: how many rows ``capstone.column_audit`` holds; 0 is the fresh-database case the
@@ -72,6 +73,9 @@ class RecordingConnection:
         #: how many indicator-period pairs `capstone.external_municipio` holds; 0 is the fresh
         #: database the preflight must not complain about, 2 is the mixture 006 refuses
         self.bridge_pairs = bridge_pairs
+        #: whether `capstone.external_municipio` exists at all; default follows `bridge_pairs`, so a
+        #: fixture that never mentions the bridge keeps the fresh-database path
+        self.bridge_present = bridge_pairs > 0 if bridge_present is None else bridge_present
         self._clock = clock
 
     def cursor(self) -> "RecordingCursor":
@@ -92,7 +96,9 @@ class RecordingCursor:
     def execute(self, sql: str, params=None) -> None:
         self.connection.statements.append(sql)
         if "to_regclass('capstone.external_municipio')" in sql:
-            self._rows = [(self.connection.bridge_pairs > 0,)]
+            self._rows = [(self.connection.bridge_present,)]
+        elif "to_regclass('capstone.mv_external_density')" in sql:
+            self._rows = [(self.connection.bridge_present,)]
         elif "coalesce(count(DISTINCT (indicator, period))" in sql:
             self._rows = [(self.connection.bridge_pairs,)]
         elif "count(*) FROM capstone.column_audit" in sql:
@@ -988,6 +994,25 @@ class BridgePreflightBuildTests(_SqlFixtureMixin, unittest.TestCase):
     Added after measuring that ignoring `bridge_pairs_error`'s return value left every other test in
     this file green -- the preflight had become a query that asked a question and dropped the answer.
     """
+
+    def test_the_statistics_are_warmed_before_the_judged_repeat(self) -> None:
+        """`006` refreshes the snapshot, a refreshed view has no statistics, and the ceiling reads the
+        fastest repeat of a query planned in that state. So the fix belongs inside the judge.
+        """
+        connection = RecordingConnection(bridge_pairs=1)
+        self.build(connection)
+        analyzed = [i for i, sql in enumerate(connection.statements) if sql.strip() == "ANALYZE capstone.external_municipio"]
+        self.assertEqual(len(analyzed), 1, msg="the probe runs once, not once per repeat")
+        timed = [i for i, sql in enumerate(connection.statements) if "EXPLAIN (ANALYZE, TIMING OFF)" in sql]
+        self.assertTrue(timed, msg="the fixture must still reach the timing loop")
+        self.assertLess(max(i for i in analyzed), min(timed))
+        ddl = (self.root / "sql" / "001_first.sql").read_text()
+        self.assertLess(analyzed[0], max(i for i, sql in enumerate(connection.statements) if sql == ddl) + 1000)
+
+    def test_a_database_without_the_bridge_is_not_asked_about_it(self) -> None:
+        connection = RecordingConnection()
+        self.build(connection)
+        self.assertEqual([sql for sql in connection.statements if sql.strip().startswith("ANALYZE")], [])
 
     def test_the_fixture_runs_with_a_clean_bridge(self) -> None:
         """Zero pairs (the stub's default) is the fresh-database case, and it must pass untouched."""

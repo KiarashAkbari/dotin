@@ -148,8 +148,10 @@ def check_query_cost(measured_ms: float, config: CapstoneConfig) -> float:
     if measured_ms > ceiling:
         raise BudgetError(
             f"the feature query took {measured_ms:.1f} ms ({TIMING_BASIS}), over the {ceiling} ms the "
-            "brief allows (checklist 5.3). Store the EXPLAIN (ANALYZE) output with the number "
-            "and fix the query; raising the ceiling in config is a report finding, not a fix.",
+            "brief allows (checklist 5.3). `python scripts/analyze_ceiling_feature.py` stores the "
+            "EXPLAIN (ANALYZE, BUFFERS) output beside the number, either side of one ANALYZE, and "
+            "says whether the breach is a stale plan on the rebuilt snapshot or a cost of the frame; "
+            "raising the ceiling in config is a report finding, not a fix.",
             context={"measured_ms": measured_ms, "ceiling_ms": ceiling},
         )
     return float(measured_ms)
@@ -161,6 +163,12 @@ def check_query_cost(measured_ms: float, config: CapstoneConfig) -> float:
 BRIDGE_PAIRS_STATEMENT = (
     "SELECT coalesce(count(DISTINCT (indicator, period)), 0) FROM capstone.external_municipio"
 )
+
+#: the statistics the bridge resets. `sql/006` rebuilds `capstone.mv_external_density` on every apply
+#: and a refreshed materialised view arrives with no rows in `pg_statistic`, so the frame would be
+#: planned against a table the planner believes is empty -- which is a measurement artefact wearing a
+#: query's clothes. Analysed before the timing loop, and only for the snapshot when it exists.
+BRIDGE_ANALYZE = ("capstone.external_municipio", "capstone.mv_external_density", FRAME_VIEW)
 
 #: where `006`'s contract is stated, and the only sanctioned way out of a mixture
 BRIDGE_HELP = (
@@ -467,7 +475,8 @@ def build(
             # asked before *any* migration, so a mixture is reported by this project's sentence and a
             # file-by-file apply never leaves the snapshot rebuilt over it
             cursor.execute("SELECT to_regclass('capstone.external_municipio') IS NOT NULL")
-            if cursor.fetchone()[0]:
+            bridge_present = bool(cursor.fetchone()[0])
+            if bridge_present:
                 cursor.execute(BRIDGE_PAIRS_STATEMENT)
                 clash = bridge_pairs_error(int(cursor.fetchone()[0] or 0))
                 if clash:
@@ -534,6 +543,15 @@ def build(
                     "removed every order, and a model trained on nothing is not a baseline"
                 )
 
+            # the judge reads the fastest repeat, so the state it judges has to be the state a reader
+            # can reproduce: statistics warm, on the relations this stage actually changes
+            if bridge_present:
+                for target in BRIDGE_ANALYZE:
+                    if target == "capstone.mv_external_density":
+                        cursor.execute("SELECT to_regclass('capstone.mv_external_density') IS NOT NULL")
+                        if not cursor.fetchone()[0]:
+                            continue
+                    cursor.execute(f"ANALYZE {target}")
             durations_ms: list[float] = []
             for _ in range(repeat):
                 started = clock()

@@ -823,6 +823,30 @@
   `test_a_mixture_is_refused_before_a_migration_is_sent` اضافه شد؛ بعد از آن `FAILED (failures=1)` و
   بازگردانی → `Ran 481 … OK (skipped=9)`.
 
+## ۲۵. سقفِ ۵۰۰ ms روی دیتابیسِ واقعی: اول آینه، بعد داوری
+
+- **زمینه:** پس از پاک‌سازیِ `external_municipio`، زنجیره در `features` با `663.4 ms (best of the
+  repeats)` ایستاد؛ در حالی که یک دورِ قبل روی همان تعریفِ frame، `477.231 ms` خوانده بود. دو عدد از دو
+  حالتِ یک کوئری، و هیچ‌کدام در `report.md` توضیح نداشت. فریم‌ریتِ بیرونی هم عوض شد (`4014 → 4010` کلیدِ
+  match‌شده) چون سطرهای ۲۰۲۲ برداشته شده بودند.
+- **تصمیم:** داوری بدونِ دانستنِ حالتِ آمار، داوری نیست. دو کار: (۱) `features.build` پیش از حلقۀ زمان‌سنجی،
+  روی سه رابطۀ زیرِ دستِ `006` (`external_municipio`، `mv_external_density`، خودِ frame) `ANALYZE`
+  می‌زند — با probeِ  `to_regclass` تا دیتابیسِ بدونِ پل هیچ چیزی را حدس نزند؛ (۲) اسکریپتِ
+  `scripts/analyze_ceiling_feature.py` همان اندازه‌گیری را *دورِ* یک ANALYZE دوبار می‌گیرد، پلانِ `EXPLAIN
+  (ANALYZE, BUFFERS)` را در شاهد می‌نویسد، و سه حالت را با جمله اعلام می‌کند: از قبل سبز / artefactِ
+  پلانِ کهنه / query finding.
+- **گزینه‌ها:** (الف) بالا بردنِ سقف در config — همان چیزی که پیامِ خطا «یافتۀ گزارش است نه رفعِ ایراد»
+  می‌خواند؛ (ب) `REFRESH … CONCURRENTLY` در `006` — رد شد چون `006` زیر checksum است و داخلِ `build`
+  قفلِ Exclusive می‌شکند؛ (پ) ANALYZE در انتهای `006` — همان مانعِ (ب)؛ (ت) پرسش در `build` + ابزارِ
+  مقایسه در `scripts/` (انتخاب)، چون `build` تنها جایی است که خودش داوری می‌کند و مقایسه باید قابلِ
+  خواندن برای داوری‌کننده بماند.
+- **شاهد:** `src/capstone/features.py` (`BRIDGE_ANALYZE`، `bridge_present`، پیامِ تازهٔ خطای سقف)؛
+  `scripts/analyze_ceiling_feature.py`؛ `tests/test_ceiling_probe.py` (۸ تست) و
+  `tests/test_capstone_features.py` (دو تستِ تازه، یکی با شمارشِ دقیقِ `ANALYZE` در ترتیب)؛ mutation:
+  خاموش‌کردنِ ANALYZE در `build` → `FAILED (failures=1)`، و بی‌اعتنایی به `before["passes"]` در
+  `describe()` → `FAILED (failures=1)`. عددهای بالا از اجرایِ زندهٔ دانشجوست؛ در سندباکس این دور نه
+  دیتابیسی بود نه اندازه‌گیریِ تازه.
+
 ## چیزی که این فایل ثابت نمی‌کند
 
 همهٔ عددهای بالا روی ماشینِ سندباکس و دادهٔ عمومیِ Olist گرفته شده‌اند؛ روی ماشینِ دانشجو باید با همان یک فرمان
