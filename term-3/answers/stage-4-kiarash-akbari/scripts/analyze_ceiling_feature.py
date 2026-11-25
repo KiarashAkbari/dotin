@@ -28,6 +28,14 @@ called a defect::
 config key. A witness produced with it says so in its own header, and a witness measured *without* the
 setting it already claims is refused -- so a pass nobody can reproduce cannot be committed by accident.
 
+Crediting a condition is a separate claim from measuring one, so the plan is read in every state and a
+delta is only attributed when the plan actually moved (`plans_moved` in the JSON, `plan moved across …`
+in the witness). A state that meets the ceiling with an unchanged plan is reported as
+``uncredited``: one fast repeat at the end of a warming session, not a cure -- and it does not exit 0.
+Measured on a live database: `--set max_parallel_workers_per_gather=4` moved the judged statistic from
+666.8 ms to 481.2 ms while `Workers Launched` stayed at 1 in both plans and 4 of that state's own 5
+repeats stayed over the ceiling.
+
 Writes ``docs/evidence/ceiling-feature-analysis.txt`` (+ ``.json``) and refuses to overwrite a witness
 whose header names a different ceiling, frame row count or tuning, for the same reason
 `scripts/cheating_model_gap.py` refuses a witness from another split.
@@ -165,6 +173,20 @@ def refusal(path: Path, stored: dict[str, str], claims: dict[str, str], belongs:
 
 
 
+def read_plan(cursor, frame: str) -> str:
+    """The plan, as text: what the ceiling's error line asks to be stored, read in one state."""
+    cursor.execute(PLAN_SQL.format(frame=frame))
+    return "\n".join(str(row[0]) for row in cursor.fetchall())
+
+
+def plan_summary(plan: str) -> str:
+    """One line per state -- the numbers a reader has to compare before crediting anything."""
+    workers = ", ".join(str(count) for count in workers_launched(plan)) or "no Gather"
+    spill = " + spill" if re.search(r"Batches: [2-9]\d*|Temp Read", plan) else ", no spill"
+    execution = re.search(r"Execution Time: ([\d.]+) ms", plan)
+    return f"Workers Launched: {workers}{spill}; execution {execution.group(1) if execution else '?'} ms"
+
+
 def measure(cursor, frame: str, *, repeat: int, clock) -> list[float]:
     """The same statistic the feature step judges: wall clock of the full frame query, per repeat.
 
@@ -181,12 +203,50 @@ def measure(cursor, frame: str, *, repeat: int, clock) -> list[float]:
     return durations
 
 
+#: the plan lines that decide whether a session setting did anything at all
+PLAN_KEYS = ("Workers Planned", "Workers Launched", "Gather", "Execution Time", "Planning Time")
+
+
+def plan_fingerprint(plan: str) -> list[str]:
+    """The handful of plan lines a reader needs to see whether the shape moved.
+
+    A whole `EXPLAIN` is ~100 lines, and a witness that carries two of them cannot be read; the lines
+    below are the ones that change when a setting changes the plan, plus the spill markers -- a
+    `Batches: 2` or a `Temp Read` appearing is a memory story, not a parallelism one.
+    """
+    kept = [line.strip() for line in plan.splitlines() if any(key in line for key in PLAN_KEYS)]
+    kept += [
+        line.strip()
+        for line in plan.splitlines()
+        if re.search(r"Batches: [2-9]\d*|Temp Read|Temp Written", line)
+    ]
+    return kept
+
+
+def workers_launched(plan: str) -> list[int]:
+    """Every `Workers Launched: N` in the plan -- normally one number, from the top Gather."""
+    return [int(n) for n in re.findall(r"Workers Launched: (\d+)", plan)]
+
+
+def plan_changed(before: str, after: str) -> bool:
+    """Whether the two states ran *different* plans, which is what a setting has to do to be credited."""
+    return plan_fingerprint(before) != plan_fingerprint(after)
+
+
 def verdict(durations: list[float], ceiling_ms: float) -> dict:
-    """One state's numbers, judged on the basis the project fixed in `features.TIMING_BASIS`."""
+    """One state's numbers, judged on the basis the project fixed in `features.TIMING_BASIS`.
+
+    `best_repeat` and `below_ceiling` exist because the basis is `min`: a state whose fastest repeat is
+    one outlier of five has not met the ceiling, it has met it once. Both numbers cost nothing to record
+    and one of them is how a pass gets read honestly.
+    """
     best = min(durations)
     return {
         "runs_ms": [round(value, 3) for value in durations],
         "best_ms": round(best, 3),
+        # 1-based, so "repeat 5 of 5" reads the way a log does
+        "best_repeat": durations.index(best) + 1,
+        "below_ceiling": sum(1 for value in durations if value <= ceiling_ms),
         "mean_ms": round(sum(durations) / len(durations), 3),
         "worst_ms": round(max(durations), 3),
         "ceiling_ms": ceiling_ms,
@@ -194,33 +254,65 @@ def verdict(durations: list[float], ceiling_ms: float) -> dict:
     }
 
 
-def describe(before: dict, after: dict, *, state: str = "ANALYZE") -> str:
+def state_line(label: str, state: dict) -> str:
+    """One measured state, printed with the two numbers that say how much of it is a fluke."""
+    n = len(state["runs_ms"])
+    return (
+        f"{label}: best {state['best_ms']:.1f} ms, mean {state['mean_ms']:.1f} ms, "
+        f"worst {state['worst_ms']:.1f} ms, runs {state['runs_ms']}; "
+        f"{state['below_ceiling']}/{n} repeats under the ceiling, fastest was repeat "
+        f"{state['best_repeat']} of {n}"
+    )
+
+
+def describe(before: dict, after: dict, *, state: str = "ANALYZE", plans_changed: bool = True) -> str:
     """The sentence the report needs, in the shape of a decision rather than a number.
 
     `state` names what changed between the two measurements, because the remedy differs entirely: warm
-    statistics, a session setting, or nothing at all.
+    statistics, a session setting, or nothing at all. `plans_changed` is the attribution gate: a delta
+    can only be credited to a condition that changed the plan it ran under. Without it, a single fast
+    repeat at the end of a warmed-up session reads as a cure -- which is exactly what one live run of
+    `--set max_parallel_workers_per_gather=4` looked like before anyone compared the two plans.
     """
+    n = len(after["runs_ms"])
     if before["passes"]:
         return (
-            f"finding: the frame already meets the ceiling ({before['best_ms']:.1f} ms over "
-            f"{len(before['runs_ms'])} repeats); this run is context, not a fix"
+            f"finding: the frame already meets the ceiling ({before['best_ms']:.1f} ms best of "
+            f"{before['below_ceiling']}/{len(before['runs_ms'])} repeats under "
+            f"{before['ceiling_ms']:.0f} ms); this run is context, not a fix"
         )
-    remedy = (
-        "so the breach was a stale plan on the rebuilt snapshot, not a cost of the frame -- the remedy "
-        "is to keep those statistics warm"
-        if state == "ANALYZE"
-        else "so the breach is a session condition rather than the frame itself -- carry the setting "
-        "into the report as the condition the number was measured under"
-    )
+    if after["passes"] and not plans_changed:
+        return (
+            f"uncredited: {state} moves the fastest repeat from {before['best_ms']:.1f} ms to "
+            f"{after['best_ms']:.1f} ms, but the two states ran the same plan shape -- same "
+            f"`Workers Launched`, same spill markers -- so the delta is not {state}'s doing; and only "
+            f"{after['below_ceiling']} of {n} repeats in that state were under the ceiling, with the "
+            f"fastest as repeat {after['best_repeat']} of {n}. carry this as one fast outlier, not as "
+            "a pass, and not as a condition the report can rely on"
+        )
     if after["passes"]:
+        remedy = (
+            "so the breach was a stale plan on the rebuilt snapshot, not a cost of the frame -- the "
+            "remedy is to keep those statistics warm"
+            if state == "ANALYZE"
+            else "so the breach is a session condition rather than the frame itself -- carry the "
+                 "setting into the report as the condition the number was measured under"
+        )
         return (
             f"artefact: {before['best_ms']:.1f} ms becomes {after['best_ms']:.1f} ms after {state}, "
             f"{remedy}"
         )
+    if before["below_ceiling"] == 0 and after["below_ceiling"] == 0:
+        spread = "; no repeat in either state met it"
+    else:
+        spread = (
+            f" ({before['below_ceiling']}/{len(before['runs_ms'])} and {after['below_ceiling']}/{n} "
+            "repeats under it, across the two states)"
+        )
     return (
         f"query finding: {state} moves the fastest repeat from {before['best_ms']:.1f} ms to "
-        f"{after['best_ms']:.1f} ms and the ceiling still fails, so `report.md` has to carry this as a "
-        "measured shortfall and the plan below is the starting point"
+        f"{after['best_ms']:.1f} ms and the ceiling still fails{spread}, so `report.md` has to carry "
+        "this as a measured shortfall and the plan below is the starting point"
     )
 
 
@@ -292,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         before_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
+        plan_before = read_plan(cursor, frame)
         connection.commit()
         for target in ANALYZE_TARGETS:
             if target == "capstone.mv_external_density":
@@ -301,19 +394,31 @@ def main(argv: list[str] | None = None) -> int:
             cursor.execute(f"ANALYZE {target}")
         connection.commit()
         after_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
+        plan_after = read_plan(cursor, frame)
         tuned_runs = None
+        plan_tuned = ""
         if settings:
             for statement in setting_lines(settings):
                 cursor.execute(statement)
             tuned_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
-        cursor.execute(PLAN_SQL.format(frame=frame))
-        plan = "\n".join(str(row[0]) for row in cursor.fetchall())
+            plan_tuned = read_plan(cursor, frame)
+        # the plan the error line asked for is the one from the state the run ends in
+        plan = plan_tuned or plan_after
     finally:
         connection.close()
 
     before = verdict(before_runs, ceiling)
     after = verdict(after_runs, ceiling)
     tuned = verdict(tuned_runs, ceiling) if tuned_runs else None
+    # the two verdicts are computed once, so the .txt and the .json cannot disagree about what was found
+    moved_analyze = plan_changed(plan_before, plan_after)
+    moved_setting = plan_changed(plan_after, plan_tuned) if tuned is not None else False
+    verdict_text = describe(before, after, plans_changed=moved_analyze)
+    verdict_tuned_text = (
+        describe(before, tuned, state="ANALYZE + SET " + tuning, plans_changed=moved_setting)
+        if tuned is not None
+        else None
+    )
     lines = [
         "# ceiling on the feature frame, measured across one ANALYZE (scripts/analyze_ceiling_feature.py)",
         f"config {args.config.name}; frame {frame}; ceiling {int(ceiling)} ms; frame rows {rows}"
@@ -325,23 +430,32 @@ def main(argv: list[str] | None = None) -> int:
             else []
         ),
         "",
-        f"before ANALYZE: best {before['best_ms']:.1f} ms, mean {before['mean_ms']:.1f} ms, "
-        f"worst {before['worst_ms']:.1f} ms, runs {before['runs_ms']}",
-        f"after  ANALYZE: best {after['best_ms']:.1f} ms, mean {after['mean_ms']:.1f} ms, "
-        f"worst {after['worst_ms']:.1f} ms, runs {after['runs_ms']}",
+        state_line("before ANALYZE", before),
+        state_line("after  ANALYZE", after),
         f"analyzed: {', '.join(ANALYZE_TARGETS)}",
         "",
-        describe(before, after),
+        "plan shape per state -- a condition has to move these to be credited with the delta:",
+        f"  before ANALYZE: {plan_summary(plan_before)}",
+        f"  after  ANALYZE: {plan_summary(plan_after)}",
+        *(
+            [f"  tuned ({tuning}): {plan_summary(plan_tuned)}"]
+            if tuned is not None
+            else []
+        ),
+        f"  plan moved across the ANALYZE: {moved_analyze}",
+        "",
+        verdict_text,
     ]
     if tuned is not None:
         lines += [
-            f"after  ANALYZE + SET {tuning}: best {tuned['best_ms']:.1f} ms, "
-            f"mean {tuned['mean_ms']:.1f} ms, worst {tuned['worst_ms']:.1f} ms, runs {tuned['runs_ms']}",
-            f"with the setting applied: {describe(before, tuned, state='ANALYZE + SET ' + tuning)}",
+            state_line(f"after  ANALYZE + SET {tuning}", tuned),
+            f"  plan moved across the setting: {moved_setting}",
+            f"with the setting applied: {verdict_tuned_text}",
         ]
     lines += [
         "",
-        "## the plan the error line asked for, read after the last measurement",
+        "## the plan the error line asked for, read after the last measurement in "
+        + ("the tuned state " + f"({tuning})" if tuned is not None else "the untuned state"),
         plan,
     ]
     witness.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -355,10 +469,14 @@ def main(argv: list[str] | None = None) -> int:
                 "before": before,
                 "after": after,
                 "tuned": tuned,
-                "verdict": describe(before, after),
-                "verdict_tuned": describe(before, tuned, state="ANALYZE + SET " + tuning)
-                if tuned
-                else None,
+                "plan_shapes": {
+                    "before_analyze": plan_summary(plan_before),
+                    "after_analyze": plan_summary(plan_after),
+                    "tuned": plan_summary(plan_tuned) if tuned is not None else None,
+                },
+                "plans_moved": {"analyze": moved_analyze, "setting": moved_setting},
+                "verdict": verdict_text,
+                "verdict_tuned": verdict_tuned_text,
             },
             indent=2,
         ),
@@ -366,8 +484,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     print("\n".join(lines))
     print(f"\nwrote {shown(witness)} and {shown(witness.with_suffix('.json'))}")
-    states = [before, after] + ([tuned] if tuned else [])
-    return 0 if any(state["passes"] for state in states) else 1
+    # a tuned state only exits green if the setting moved the plan: otherwise the "pass" is one fast
+    # repeat in a warming session, and an exit code is read as a verdict, not as a number
+    met = before["passes"] or after["passes"] or (
+        tuned is not None and tuned["passes"] and moved_setting
+    )
+    return 0 if met else 1
 
 
 if __name__ == "__main__":

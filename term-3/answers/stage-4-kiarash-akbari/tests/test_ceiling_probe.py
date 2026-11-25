@@ -171,7 +171,85 @@ class WitnessStateTests(unittest.TestCase):
         self.assertNotIn("belongs at", text, msg="it would name the file it is already writing")
 
 
-class ScriptShapeTests(unittest.TestCase):
+#: two plans that differ only in how many workers the top Gather launched, and one that spills
+PLAN_ONE_WORKER = """Gather  (cost=22585.11..39899.80 rows=99252 width=261) (actual rows=99281 loops=1)
+  Workers Planned: 1
+  Workers Launched: 1
+  Buffers: shared hit=17887
+  ->  Hash Left Join  (cost=21585.11..28974.60 rows=58384 width=261) (actual rows=49640 loops=2)
+        ->  Hash  (cost=4031.34..4031.34 rows=41355 width=74) (actual rows=49640 loops=2)
+              Buckets: 131072  Batches: 1  Memory Usage: 11936kB
+Planning Time: 2.500 ms
+Execution Time: 452.304 ms
+"""
+
+PLAN_THREE_WORKERS = PLAN_ONE_WORKER.replace("Workers Planned: 1", "Workers Planned: 3").replace(
+    "Workers Launched: 1", "Workers Launched: 3"
+)
+
+PLAN_SPILLING = PLAN_ONE_WORKER.replace("Batches: 1", "Batches: 4").replace(
+    "Buffers: shared hit=17887", "Buffers: shared hit=17887 read=12 temp=908"
+)
+
+
+class AttributionTests(unittest.TestCase):
+    """A number moving is not a condition working: the plan has to move too, and the repeats have to agree.
+
+    The inputs here are his own live numbers from 2026-11-25 (`--set max_parallel_workers_per_gather=4`
+    on the 99,281-row frame), which is the case that motivated the gate: the judged statistic went
+    666.8 -> 481.2 ms, `Workers Launched` stayed at 1, and only the last of five repeats was under 500.
+    """
+
+    def setUp(self) -> None:
+        self.script = load_script()
+
+    def test_the_plan_is_compared_on_the_lines_that_would_move(self) -> None:
+        self.assertEqual(self.script.workers_launched(PLAN_ONE_WORKER), [1])
+        self.assertEqual(self.script.workers_launched("Seq Scan on x"), [])
+        self.assertFalse(self.script.plan_changed(PLAN_ONE_WORKER, PLAN_ONE_WORKER))
+        self.assertTrue(self.script.plan_changed(PLAN_ONE_WORKER, PLAN_THREE_WORKERS))
+        self.assertTrue(self.script.plan_changed(PLAN_ONE_WORKER, PLAN_SPILLING))
+        self.assertIn("Workers Launched: 1", "\n".join(self.script.plan_fingerprint(PLAN_ONE_WORKER)))
+
+    def test_the_summary_says_whether_there_is_a_memory_story(self) -> None:
+        self.assertIn("Workers Launched: 1", self.script.plan_summary(PLAN_ONE_WORKER))
+        self.assertIn("no spill", self.script.plan_summary(PLAN_ONE_WORKER))
+        self.assertIn("+ spill", self.script.plan_summary(PLAN_SPILLING))
+        self.assertIn("execution 452.304 ms", self.script.plan_summary(PLAN_ONE_WORKER))
+
+    def test_a_pass_with_an_unchanged_plan_is_an_outlier_not_a_verdict(self) -> None:
+        before = self.script.verdict([903.347, 719.423, 682.384, 668.676, 668.552], 500)
+        tuned = self.script.verdict([673.286, 677.286, 673.792, 584.003, 481.231], 500)
+        self.assertEqual((before["best_ms"], before["below_ceiling"]), (668.552, 0))
+        self.assertEqual((tuned["best_ms"], tuned["below_ceiling"], tuned["best_repeat"]), (481.231, 1, 5))
+        text = self.script.describe(
+            before, tuned, state="ANALYZE + SET max_parallel_workers_per_gather=4", plans_changed=False
+        )
+        self.assertIn("uncredited:", text)
+        self.assertIn("1 of 5 repeats", text)
+        self.assertIn("fastest as repeat 5 of 5", text)
+        self.assertNotIn("session condition", text)
+        credited = self.script.describe(
+            before, tuned, state="ANALYZE + SET max_parallel_workers_per_gather=4", plans_changed=True
+        )
+        self.assertIn("artefact:", credited)
+        self.assertIn("session condition", credited)
+
+    def test_the_witness_prints_how_much_of_a_state_is_fluke(self) -> None:
+        tuned = self.script.verdict([673.286, 677.286, 673.792, 584.003, 481.231], 500)
+        line = self.script.state_line("after  ANALYZE + SET x", tuned)
+        self.assertIn("1/5 repeats under the ceiling", line)
+        self.assertIn("fastest was repeat 5 of 5", line)
+
+    def test_a_failing_state_says_so_for_both_states(self) -> None:
+        before = self.script.verdict([668.6, 669.0, 670.5, 669.9, 667.0], 500)
+        after = self.script.verdict([666.78, 670.456, 670.47, 669.904, 666.978], 500)
+        text = self.script.describe(before, after)
+        self.assertIn("query finding:", text)
+        self.assertIn("no repeat in either state met it", text)
+
+
+
     def setUp(self) -> None:
         self.source = (STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
         self.script = load_script()
@@ -192,7 +270,24 @@ class ScriptShapeTests(unittest.TestCase):
     def test_the_plan_carries_buffers_and_is_read_after_the_analyze(self) -> None:
         self.assertIn("ANALYZE, BUFFERS", self.script.PLAN_SQL)
         body = self.source[self.source.index("def main(") :]
-        self.assertLess(body.index("after_runs = measure"), body.index("PLAN_SQL.format"))
+        self.assertLess(body.index("after_runs = measure"), body.index("plan_after = read_plan"))
+
+    def test_every_state_gets_its_own_plan(self) -> None:
+        """Attribution needs a plan *per state*; one plan at the end cannot say what a setting changed."""
+        body = self.source[self.source.index("def main(") :]
+        marks = [
+            "before_runs = measure",
+            "plan_before = read_plan",
+            "for target in ANALYZE_TARGETS",
+            "after_runs = measure",
+            "plan_after = read_plan",
+            "tuned_runs = measure",
+            "plan_tuned = read_plan",
+        ]
+        positions = [body.index(mark) for mark in marks]
+        self.assertEqual(positions, sorted(positions), msg="the plans must bracket the states they describe")
+        head = self.source[self.source.index("def main(") :]
+        self.assertIn('tuned["passes"] and moved_setting', head)
 
     def test_the_snapshot_is_probed_before_it_is_analyzed(self) -> None:
         """A database without `006` has no materialised view, and `ANALYZE` on it would be an error."""

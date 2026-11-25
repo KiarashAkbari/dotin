@@ -151,8 +151,10 @@ def check_query_cost(measured_ms: float, config: CapstoneConfig) -> float:
             "brief allows (checklist 5.3). `python scripts/analyze_ceiling_feature.py` stores the "
             "EXPLAIN (ANALYZE, BUFFERS) output beside the number, either side of one ANALYZE, and "
             "says whether the breach is a stale plan on the rebuilt snapshot or a cost of the frame, "
-            "and `--set KEY=VALUE` measures a session condition (parallelism, work_mem) the same way; "
-            "raising the ceiling in config is a report finding, not a fix.",
+            "and `--set KEY=VALUE` measures a session condition (parallelism, work_mem) the same way -- "
+            "a number that moves there is credited only when the stored plan moves with it, because "
+            "`best of the repeats` also rewards one fast outlier; raising the ceiling in config is a "
+            "report finding, not a fix.",
             context={"measured_ms": measured_ms, "ceiling_ms": ceiling},
         )
     return float(measured_ms)
