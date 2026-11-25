@@ -67,3 +67,9 @@ url = "https://servicodados.ibge.gov.br/api/v3/agregados/1301/periodos/2010/vari
 token_env = ""
 # how the signal joins to an order: a date, a place, or both.
 join_on = "city_state"
+
+[ingest]
+# Where the nine Olist CSVs are (relative to this file; CAPSTONE_OLIST_DIR overrides it), and the
+# stage-1 folder whose package loads them. Raw data is never committed: data/raw/ is gitignored.
+olist_csv_dir = "../data/raw/olist"
+stage1_dir = "../../stage-1-kiarash-akbari"
