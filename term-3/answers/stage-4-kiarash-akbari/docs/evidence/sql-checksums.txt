@@ -1,7 +1,7 @@
 # sha256 of every file under stage-4/sql, one per line, sorted by path -- the order the # migrations are applied in. Regenerate with: python3 scripts/write_sql_checksums.py
 fcadc1be3204757de31793298d78b4dea7e55c6c86ca482fe08d99553eb1d282  sql/001_capstone_schema.sql
 92c464d76866af4551930eae3b0c545be55b12d2e52ac6036a31536c3a2ec0c3  sql/002_time_guard.sql
-b47b80d2a80adcc0c7d499b86683c287ddda1493cf36a5ded106ece6926e06ea  sql/003_feature_views.sql
+5fd129f1267fec95850f1c3ad8554b66c19d419d623fa06314bb4ac4d7e9b659  sql/003_feature_views.sql
 4757d4fa16a95a24c9e18a546353d5d0073554a12cf9f4b80ced39fd9a7760c1  sql/004_as_of_functions.sql
 818f076c51c13d0890fe1aaca3023e3a0d8c8cf148e59f72ae9fef161ce66799  sql/005_external_signal.sql
 e9716781e480242273179e4f63be166265b5c766d01513a5aa37ce112b482576  sql/006_external_bridge.sql

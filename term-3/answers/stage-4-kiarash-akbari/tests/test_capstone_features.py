@@ -267,11 +267,12 @@ class BuildSequencingTests(unittest.TestCase):
             self.build(audit=audit)
         self.assertIn("orders.freight_value", str(caught.exception))
 
-    def test_the_duration_comes_from_the_clock_and_judges_the_mean(self):
+    def test_the_duration_comes_from_the_clock_and_judges_the_best_run(self):
         # seconds, because the injected clock is monotonic(): 0.010 s is what the brief counts
         ticks = iter([0.0, 0.010, 0.010, 0.020])
         metadata = self.build(clock=lambda: next(ticks))
         self.assertEqual(metadata["query_ms_mean"], 10.0)
+        self.assertEqual(metadata["query_ms_best"], 10.0)
         self.assertEqual(metadata["cold_ms"], 10.0)
         self.assertEqual(metadata["query_ms_runs"], [10.0, 10.0])
         self.assertEqual(metadata["ceiling_ms"], 500)
@@ -369,7 +370,9 @@ class BuildSequencingTests(unittest.TestCase):
                 "columns",
                 "features",
                 "frame",
+                "judged_on",
                 "migrations_applied",
+                "query_ms_best",
                 "query_ms_mean",
                 "query_ms_runs",
                 "rows",

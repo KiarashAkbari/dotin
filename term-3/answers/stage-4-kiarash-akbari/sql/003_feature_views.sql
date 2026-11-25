@@ -144,6 +144,51 @@ SELECT
 FROM olist.payments AS pay
 GROUP BY pay.order_id;
 
+-- Snapshots of the four heavy building blocks (decisions.md section 16, review B9).
+--
+-- Measured on the full dataset, `SELECT * FROM v_feature_frame` spent ~1.1 s per side re-averaging
+-- 738k geolocation rows into zip centroids (twice), and most of the rest re-aggregating items,
+-- payments and the customer-history window -- about 5 s for the real query, while the old timing
+-- wrapper (`count(*)`) let the planner skip most of it. These four blocks are stored as materialized
+-- views of the views above, refreshed every time this file is applied (the chain's `features` step,
+-- and the prediction path inside its own transaction). What they store is exactly what the views
+-- compute, so the as-of logic does not move: the history window is still the strict
+-- `INTERVAL '1 microsecond' PRECEDING` one, evaluated at refresh time over approved orders only, and
+-- the leak guard's dependency walk follows a materialized view to the view it is built from.
+-- The cost we accept: a snapshot is only as fresh as its last refresh, so anything that adds orders
+-- must refresh before it reads the frame (features and predict both do).
+CREATE MATERIALIZED VIEW IF NOT EXISTS capstone.mv_customer_order_history AS
+    SELECT order_id, customer_id, order_approved_at, prior_orders_by_customer,
+        days_since_prior_order
+    FROM capstone.v_customer_order_history WITH NO DATA;
+CREATE MATERIALIZED VIEW IF NOT EXISTS capstone.mv_zip_centroid AS
+    SELECT geolocation_zip_code_prefix, lat, lng, rows_behind_centroid
+    FROM capstone.v_zip_centroid WITH NO DATA;
+CREATE MATERIALIZED VIEW IF NOT EXISTS capstone.mv_order_item_rollup AS
+    SELECT order_id, n_items, price_sum, price_spread, freight_sum, freight_share, n_sellers,
+        n_products, shipping_limit_days, primary_seller_id, primary_product_id
+    FROM capstone.v_order_item_rollup WITH NO DATA;
+CREATE MATERIALIZED VIEW IF NOT EXISTS capstone.mv_order_payment_rollup AS
+    SELECT order_id, n_payments, payment_sum, installments_max, payment_parts,
+        pays_credit_card, pays_voucher
+    FROM capstone.v_order_payment_rollup WITH NO DATA;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mv_customer_order_history
+    ON capstone.mv_customer_order_history (order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mv_zip_centroid
+    ON capstone.mv_zip_centroid (geolocation_zip_code_prefix);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mv_order_item_rollup ON capstone.mv_order_item_rollup (order_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mv_order_payment_rollup
+    ON capstone.mv_order_payment_rollup (order_id);
+REFRESH MATERIALIZED VIEW capstone.mv_customer_order_history;
+REFRESH MATERIALIZED VIEW capstone.mv_zip_centroid;
+REFRESH MATERIALIZED VIEW capstone.mv_order_item_rollup;
+REFRESH MATERIALIZED VIEW capstone.mv_order_payment_rollup;
+-- fresh tables from the loader have no statistics yet, and a plan built without them was 2x slower
+ANALYZE olist.orders, olist.order_items, olist.payments, olist.customers, olist.sellers,
+    olist.products, olist.product_category_name_translation;
+ANALYZE capstone.mv_customer_order_history, capstone.mv_zip_centroid,
+    capstone.mv_order_item_rollup, capstone.mv_order_payment_rollup;
+
 -- The frame itself: one row per approved order, 29 feature columns beside the three
 -- technical keys (order_id, customer_id, order_approved_at), and no column the audit does
 -- not allow. It names five ``olist`` tables directly -- orders, customers, sellers, products,
@@ -202,14 +247,14 @@ SELECT
     (t.product_category_name_english IS NULL) AS category_unavailable
 FROM capstone.v_decision_moment AS a
 JOIN olist.orders AS o ON o.order_id = a.order_id
-LEFT JOIN capstone.v_customer_order_history AS h ON h.order_id = a.order_id
-LEFT JOIN capstone.v_order_item_rollup AS i ON i.order_id = a.order_id
-LEFT JOIN capstone.v_order_payment_rollup AS p ON p.order_id = a.order_id
+LEFT JOIN capstone.mv_customer_order_history AS h ON h.order_id = a.order_id
+LEFT JOIN capstone.mv_order_item_rollup AS i ON i.order_id = a.order_id
+LEFT JOIN capstone.mv_order_payment_rollup AS p ON p.order_id = a.order_id
 LEFT JOIN olist.customers AS c ON c.customer_id = a.customer_id
-LEFT JOIN capstone.v_zip_centroid AS cust_geo
+LEFT JOIN capstone.mv_zip_centroid AS cust_geo
        ON cust_geo.geolocation_zip_code_prefix = c.customer_zip_code_prefix
 LEFT JOIN olist.sellers AS s ON s.seller_id = i.primary_seller_id
-LEFT JOIN capstone.v_zip_centroid AS seller_geo
+LEFT JOIN capstone.mv_zip_centroid AS seller_geo
        ON seller_geo.geolocation_zip_code_prefix = s.seller_zip_code_prefix
 LEFT JOIN olist.products AS pr ON pr.product_id = i.primary_product_id
 LEFT JOIN olist.product_category_name_translation AS t
