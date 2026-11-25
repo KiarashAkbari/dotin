@@ -72,3 +72,4 @@ config/patch-0017-evidence.toml
 .pytest_cache/
 .mypy_cache/
 .DS_Store
+config/_e2e*.toml
