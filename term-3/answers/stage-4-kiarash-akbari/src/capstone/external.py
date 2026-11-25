@@ -943,6 +943,11 @@ def refresh(
         cursor = connection.cursor()
         if store:
             out["stored"] = load(cursor, rows, source=config.external.name)
+            # sql/006 keeps a per-key snapshot of the density; a load that did not refresh it would
+            # leave the model reading the previous fetch (or nothing, on a fresh database)
+            cursor.execute("SELECT to_regclass('capstone.mv_external_density') IS NOT NULL")
+            if cursor.fetchone()[0]:
+                cursor.execute("REFRESH MATERIALIZED VIEW capstone.mv_external_density")
         if report:
             out["match_rate"] = match_rate(cursor)
             out["unmatched_cities"] = [

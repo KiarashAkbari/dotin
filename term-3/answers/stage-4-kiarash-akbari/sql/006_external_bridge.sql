@@ -35,33 +35,48 @@
 -- knowable at `order_approved_at`. The model step reads it through this view, by `order_id`, and
 -- the with/without comparison is two fits on the same time split (see `capstone.system`).
 
--- Applying this file writes no rows, and re-applying it changes nothing: one view replaced, one DO
--- block that reads and prints. That keeps `005`'s re-apply invariant alive -- the idempotency guard
+-- Applying this file writes no rows of its own, and re-applying it changes nothing: one snapshot
+-- refreshed from the stored fetch, two views replaced, one DO block that reads and prints. That keeps `005`'s re-apply invariant alive -- the idempotency guard
 -- in `tests/test_capstone_sql_guards.py` compares the frame before and after a second apply, and a
 -- migration that wrote rows would be indistinguishable from a frame whose values drifted.
 
--- The per-order feature view: one row per frame row, keyed by order_id, no fan-out. `005`'s pivot is
--- grouped by `city_state`, so a municipality carrying two indicators for the period would multiply
--- the join -- which is the failure the DO block below refuses rather than sorts away.
+-- The density per (city, uf) key, stored: `005`'s JSON pivot is re-aggregated per probe when the
+-- planner picks a nested loop, and a prediction read of one month took ~58 s that way (6,621 probes of
+-- a 5,565-row GROUP BY). One indicator per key is the contract the DO block below enforces, so `max`
+-- here is a cast, not a choice. Refreshed by this file and by every external load.
+CREATE MATERIALIZED VIEW IF NOT EXISTS capstone.mv_external_density AS
+SELECT
+    e.city_state,
+    MAX(e.ibge_code) AS ibge_code,
+    COUNT(*) AS indicator_count,
+    MAX(e.value)::float8 AS density
+FROM capstone.external_municipio AS e
+GROUP BY e.city_state
+WITH NO DATA;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mv_external_density ON capstone.mv_external_density (city_state);
+REFRESH MATERIALIZED VIEW capstone.mv_external_density;
+
+-- The per-order feature view: one row per frame row, keyed by order_id, no fan-out (the key is
+-- unique in the snapshot above). It reads through `005`'s v_external_signal for the order and its
+-- join key, so the bridge still touches no source table; only `order_id` and `join_key` are used,
+-- and the planner drops `005`'s per-key pivot join (unique on the key), which is what made the old
+-- version slow. Measured on the full load: ~0.33 s for all 99,281 rows.
 CREATE OR REPLACE VIEW capstone.v_external_feature AS
 SELECT
     s.order_id,
-    s.external_matched,
-    s.external_ibge_code,
-    s.external_indicator_count,
-    -- the cast is float8 and not numeric: `model.numeric()` refuses a text cell, and the JSON
-    -- extraction hands back text, so an explicit cast is the one place the shape changes
-    (s.external_indicators ->> (
-        SELECT min(k.key)
-        FROM json_object_keys(s.external_indicators) AS k(key)
-    ))::float8 AS external_density_2010
-FROM capstone.v_external_signal AS s;
+    (x.city_state IS NOT NULL) AS external_matched,
+    x.ibge_code AS external_ibge_code,
+    x.indicator_count AS external_indicator_count,
+    x.density AS external_density_2010
+FROM capstone.v_external_signal AS s
+LEFT JOIN capstone.mv_external_density AS x
+       ON x.city_state = s.join_key;
 
 -- The guard, and the only place this directory admits what it resolved.
 --
 -- Both halves matter. The refusal is what stops "one value per municipality" from being an
--- assumption: with two indicators stored for 2010, the `min(key)` above would silently pick the
--- alphabetically first one, and the ablation would then be comparing a model to a coin flip. The
+-- assumption: with two indicators stored for 2010, the `max` above would silently pick the
+-- larger one, and the ablation would then be comparing a model to a coin flip. The
 -- notice is what makes the column honest: `external_density_2010` names the indicator the contract
 -- registers, and the only way to know that the table agrees is to print what is in it. On a database
 -- with no external rows -- every fresh clone, and every run of the smoke tests -- neither branch has
@@ -133,4 +148,5 @@ SELECT
     CASE
         WHEN count(*) > 0 THEN count(f.external_density_2010)::numeric / count(*)
     END AS value_share
-FROM capstone.v_external_feature AS f;
+FROM capstone.v_external_feature AS f
+JOIN capstone.v_feature_frame AS frame USING (order_id);
