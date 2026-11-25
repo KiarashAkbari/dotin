@@ -191,3 +191,23 @@ class ExperimentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FeatureHypothesisTableTest(unittest.TestCase):
+    """`04` asks for one hypothesis per feature: the table must name exactly what the model reads."""
+
+    def test_every_model_feature_has_one_hypothesis_row(self) -> None:
+        import csv
+        import json
+        from pathlib import Path
+
+        stage = Path(__file__).resolve().parents[1]
+        with (stage / "docs" / "feature_hypotheses.csv").open(encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        named = [row["feature"] for row in rows]
+        self.assertEqual(len(named), len(set(named)), "a feature listed twice")
+        for row in rows:
+            self.assertTrue(row["hypothesis"].strip(), f"{row['feature']} has no hypothesis")
+        run = json.loads((stage / "docs" / "evidence" / "model-run.json").read_text(encoding="utf-8"))
+        used = set(run["features"]["numeric"]) | set(run["features"]["categorical"])
+        self.assertEqual(set(named), used | {"external_density_2010"})

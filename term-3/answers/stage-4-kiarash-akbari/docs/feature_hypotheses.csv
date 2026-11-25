@@ -1,0 +1,31 @@
+feature,source_columns,available_at_approval_because,hypothesis
+prior_orders_by_customer,orders.order_approved_at; customers.customer_unique_id,window over the same customer's orders approved strictly before this one (RANGE ... 1 microsecond PRECEDING),a returning customer knows what to expect and complains less
+days_since_prior_order,orders.order_approved_at; customers.customer_unique_id,same strict window; NULL (=first order) gets a missing indicator,a customer who comes back soon was satisfied last time
+n_items,order_items.order_id,items are fixed when the order is placed (before approval),more items means more ways for one of them to go wrong
+price_sum,order_items.price,price fixed at purchase,expensive orders raise expectations
+price_spread,order_items.price,price fixed at purchase,a mixed basket (cheap + expensive) signals several shipments
+freight_sum,order_items.freight_value,freight quoted at purchase,high freight is a remote destination or a heavy parcel
+freight_share,order_items.price; order_items.freight_value,both fixed at purchase,paying a large share for shipping primes disappointment
+shipping_limit_days,order_items.shipping_limit_date; orders.order_approved_at,the seller's hand-over deadline is a promise set at purchase,a late hand-over deadline leaves less slack before the promised date
+n_sellers,order_items.seller_id,sellers fixed at purchase,several sellers means several parcels arriving at different times
+n_products,order_items.product_id,products fixed at purchase,more distinct products means more chances of a mismatch
+promise_days,orders.order_estimated_delivery_date; orders.order_purchase_timestamp,the estimate is shown to the customer at checkout,a long promised wait is itself a source of complaints
+approval_day_of_month,orders.order_approved_at,the decision moment itself,month-end volume peaks slow the logistics chain
+approval_hour,orders.order_approved_at,the decision moment itself,orders approved at night start their clock with a backlog
+n_payments,payments.order_id,payments are captured before approval,split payments signal a price-sensitive customer
+payment_sum,payments.payment_value,captured before approval,the money at stake scales expectations
+installments_max,payments.payment_installments,captured before approval,many instalments signal a stretched budget and less tolerance
+payment_parts,payments.payment_sequential,captured before approval,a voucher plus a card means a promotion-driven order
+pays_credit_card,payments.payment_type,captured before approval,boleto orders wait for bank clearance and start late
+pays_voucher,payments.payment_type,captured before approval,voucher buyers are bargain hunters with different expectations
+customer_state,customers.customer_state,customer registry at purchase,distant states (north/north-east) get slower deliveries
+customer_zip_region,customers.customer_zip_code_prefix,customer registry at purchase,finer geography than the state
+customer_seller_span_sq,geolocation lat/lng of both zip prefixes,reference table with no time dimension,distance between seller and customer drives delivery time
+seller_state,sellers.seller_state,seller registry (assumed unchanged over 2016-2018),some seller hubs ship faster than others
+product_category_name_english,products.product_category_name; product_category_name_translation,catalog (assumed unchanged over 2016-2018),categories differ in fragility and expectations (furniture vs books)
+product_weight_g,products.product_weight_g,catalog,heavy items are delivered by slower carriers
+product_photos_qty,products.product_photos_qty,catalog,few photos means the product may not look like what arrives
+payments_unavailable,payments.order_id,absence known at approval,an order without a payment row is anomalous
+geography_unavailable,geolocation zip prefixes,absence known at approval,an address the geo table cannot place is a delivery risk
+category_unavailable,products.product_category_name,absence known at approval,an uncategorised product is a poorly maintained listing
+external_density_2010,IBGE agregado 1301 variable 616 (2010 census) joined on customer city|state,published in 2011-2012; six years before the first order,dense cities get faster deliveries; sparse ones longer waits and more complaints

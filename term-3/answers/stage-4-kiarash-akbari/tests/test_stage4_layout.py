@@ -42,7 +42,19 @@ LATER_DOCS = ("report.md", "decisions.md", "manager_summary.md", "requirements.t
 #: it -- so the no-data rule names this path instead of pretending it does not exist. The
 #: size ceiling is what keeps the exemption from becoming a data drop: 53 audited columns
 #: is a few tens of kilobytes, and a load of `orders.csv` in here is a defect.
-TRACKED_TABLE_EXCEPTIONS = {"term-3/answers/stage-4-kiarash-akbari/docs/evidence/column_audit.csv": 65_536}
+#: The feature-hypothesis table is the second one: `04` asks for one sentence per feature naming the
+#: hypothesis it tests, and 02_system.ipynb reads it as a table. Each entry is pinned by its header,
+#: so neither slot can quietly hold a data file.
+TRACKED_TABLE_EXCEPTIONS = {
+    "term-3/answers/stage-4-kiarash-akbari/docs/evidence/column_audit.csv": (
+        65_536,
+        "table,column,available_at,at_approval,source,verdict",
+    ),
+    "term-3/answers/stage-4-kiarash-akbari/docs/feature_hypotheses.csv": (
+        16_384,
+        "feature,source_columns,available_at_approval_because,hypothesis",
+    ),
+}
 #: extensions that mean "the data itself", whatever the file is called
 DATA_SUFFIXES = (".csv", ".ipynb", ".zip", ".parquet", ".joblib")
 #: the only two ``.ipynb`` paths this tree may ever track, named by the delivery guide's "this
@@ -186,7 +198,7 @@ class NoRawDataTest(unittest.TestCase):
         tracked = tracked_data_files()
         offenders = [line for line in tracked if line not in allowed]
         self.assertEqual(offenders, [])
-        for path, ceiling in TRACKED_TABLE_EXCEPTIONS.items():
+        for path, (ceiling, expected_header) in TRACKED_TABLE_EXCEPTIONS.items():
             with self.subTest(path=path):
                 self.assertIn(path, tracked, f"{path} is whitelisted but not tracked")
                 size = (helpers.REPO_ROOT / path).stat().st_size
@@ -199,8 +211,8 @@ class NoRawDataTest(unittest.TestCase):
                 header = (helpers.REPO_ROOT / path).read_text(encoding="utf-8").splitlines()[0]
                 self.assertEqual(
                     header,
-                    "table,column,available_at,at_approval,source,verdict",
-                    "the exempt CSV must be the audit table, header included",
+                    expected_header,
+                    "an exempt CSV must be the table it was exempted for, header included",
                 )
 
     def test_the_notebook_exception_slots_match_the_brief(self) -> None:
