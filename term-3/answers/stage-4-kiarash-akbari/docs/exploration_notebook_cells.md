@@ -221,6 +221,15 @@ print(tests.sort_values(['verdict', 'strength'], ascending=[False, False]).drop(
 
 چیزی که این نوتبوک باید نشان دهد فقط توزیع‌ها نیستند؛ فرضیه‌هایی که مردند هم بخشی از تحویل‌اند (بند ۹.۱: «کشف، EDA، ممیزی زمانی، فرضیه‌ها، شکست‌ها»). سلول آخر عمداً یک چیزِ محاسبه‌شدهٔ بی‌ادعا می‌نویسد تا ادعای بزرگ، عددِ کوچکِ خودش را داشته باشد.
 
+مسیرهایی که امتحان شدند و کنار رفتند (شرح کامل در `report.md` بخش ۷ و `decisions.md`):
+
+- **چگالی جمعیت به‌عنوان سیگنال بیرونی:** در جدول بالا اثرش نزدیک ۰٫۵ است و «not supported» خورده؛ در مدل هم بازهٔ اطمینانِ اثرش صفر را در بر دارد (`docs/evidence/model-ablation-run.txt`). فرضیه رد شد و مدل تحویلی بدون آن است.
+- **سرشماری ۲۰۲۲** اول به‌جای ۲۰۱۰ آمده بود: عددی که در لحظهٔ تأیید سفارش‌های ۲۰۱۶–۲۰۱۸ وجود نداشت، یعنی نشت از راه منبع بیرونی.
+- **فرضیهٔ «درآمد»** برای منبع بیرونی: جدول IBGE اصلاً متغیر درآمد نداشت.
+- **چند فرضیهٔ ویژگی** (مثلاً `shipping_limit_days`، `n_products`، `product_weight_g`) روی آموزش اثری نزدیک به صفر دارند؛ در مدل مانده‌اند چون مدل درختی خودش وزنشان را کم می‌کند، ولی در گزارش «حمایت‌نشده» خوانده می‌شوند.
+
+سلول آخر نرخ منفی هر ماه را می‌دهد؛ ماه‌هایی با کمتر از ۱۰۰ سفارش برچسب‌دار در دامنه حساب نمی‌شوند (۲۰۱۶-۰۹، ۲۰۱۶-۱۲ و ۲۰۱۸-۰۹ یک سفارش دارند).
+
 <!--section:failures-->
 
 %% code
@@ -237,9 +246,9 @@ print(f'months with labelled rows: {len(by_month)}')
 for month in sorted(by_month):
     rows, negative = by_month[month]
     print(f'  {month}  rows {rows:>6}  negatives {negative:>6}  rate {negative / max(rows, 1):.4f}')
-rates = [negative / max(rows, 1) for rows, negative in by_month.values()]
+rates = [negative / rows for rows, negative in by_month.values() if rows >= 100]
 if rates:
-    print(f'spread across months: {min(rates):.4f} .. {max(rates):.4f}  '
+    print(f'spread across months with >= 100 labelled orders: {min(rates):.4f} .. {max(rates):.4f}  '
           f'(a range of {max(rates) - min(rates):.4f})')
     print('a wide range is the hypothesis that the feature window drifts; the report')
     print('section that quotes it has to carry the number, not this cell.')
