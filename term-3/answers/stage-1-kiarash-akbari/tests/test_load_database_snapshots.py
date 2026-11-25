@@ -1,14 +1,18 @@
-"""When the snapshot views are refreshed, relative to when their data is visible.
+"""When the snapshot views see the rows a load wrote, relative to its transaction.
 
 Phase 0 found that a fresh `load-database --reset` left every olist materialized
 view committed but empty (`pg_matviews.ispopulated = t`, zero rows), while a run
-without `--reset` filled the same views. Both are explained by one ordering fact:
-the refresh ran before the views existed, and 005-008 then created them from a
-schema whose rows were still invisible to their own connection. This file pins the
-ordering in two ways, and both fail on the pre-fix code:
+without `--reset` filled the same views. The cause was an ordering fact: the
+refresh ran before the views existed, and 005-008 then created them on a second
+connection, from a schema whose rows were still invisible to it.
 
-* a ledger test, where the fake records when loaded rows become visible to other
-  connections, so the refresh must see them or the views come out empty;
+The load now runs reset, migrations, load, refresh and sink on one connection in
+one transaction, so a view created after the load reads the load's own rows, and a
+view that already existed is refreshed from them before the single commit. This
+file pins that in two ways:
+
+* a ledger test, where the fake records which rows each connection can see, so a
+  view built or refreshed anywhere but on the load's own connection comes out empty;
 * a real-PostgreSQL test, run against an empty disposable database, which is where
   the defect was first observed.
 
@@ -19,8 +23,10 @@ Like the rest of stage 1 this is unittest, not pytest: the suite runs through
 import contextlib
 import csv
 import dataclasses
+import io
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -36,6 +42,7 @@ from data_factory.database import (
     OLIST_SCHEMA,
     sql_migration_files,
 )
+from data_factory.errors import DataError
 
 ANSWERS_ROOT = Path(__file__).resolve().parents[2]
 # `__name__`, not a literal: the module is `test_load_database_snapshots` under
@@ -76,24 +83,21 @@ class Ledger:
     """The one property the fix is about: visibility, not execution order.
 
     `stage` holds rows written by the run, `visible` holds rows that are durable.
-    A commit makes staged rows visible, but only while the connection is not back in
-    an open transaction: SQLAlchemy discards whatever is uncommitted when it closes,
-    and a refresh inside such a transaction is discarded with it. A view built by a
-    migration therefore reads `visible_rows` at creation time, and a refresh reads it
-    at its own time -- which is why the refresh has to follow a commit *and* be
-    followed by one.
+    The load's own connection always sees `stage`; any other connection sees only
+    `visible`, and only once the load's transaction is closed. A commit makes the
+    staged rows durable. A view built by a migration, or rebuilt by a refresh,
+    reads whatever its connection can see at that moment.
     """
 
     def __init__(self):
         self.stage = 0
         self.visible = 0
-        self.publish = True
         self.rows = {}
         self.log = []
         self.connection = None
 
     def load(self, cfg, connection=None):
-        self.stage += 150
+        self.stage = 150
         self.log.append(("load_olist", id(connection)))
         return {}
 
@@ -104,14 +108,19 @@ class Ledger:
             return 0
         return self.visible
 
-    def apply(self, engine, sql_dir, include=None):
+    def seen_by(self, bind):
+        return self.stage if bind is self.connection else self.visible_rows
+
+    def apply(self, bind, sql_dir, include=None):
         path = Path("sql") / SNAPSHOT_MIGRATION
         if include is not None and not include(path):
             return []
-        rows = self.rows.get(SNAPSHOT_MIGRATION, self.visible_rows)
+        self.log.append(("create_view", id(bind)))
+        if SNAPSHOT_MIGRATION in self.rows:
+            return []
+        self.rows[SNAPSHOT_MIGRATION] = True
         for view in OLIST_MATERIALIZED_VIEWS:
-            self.rows[view] = rows
-        self.log.append(("create_view", id(engine)))
+            self.rows[view] = self.seen_by(bind)
         return [SNAPSHOT_MIGRATION]
 
     def commit(self, connection):
@@ -120,15 +129,10 @@ class Ledger:
         self.log.append(("commit", id(connection)))
 
     def refresh(self, connection):
-        """Refresh the views that exist, from what is durable at this very moment.
-
-        `visible_rows` is zero unless the rows are durable at this very moment,
-        which is exactly the state a view is rebuilt from.
-        """
+        """Refresh the views that exist, from what this connection sees right now."""
         self.log.append(("refresh", id(connection)))
-        # pg_matviews is read first, and reading on a closed connection reopens it
         connection.execute("SELECT matviewname FROM pg_matviews")
-        rows = self.visible_rows
+        rows = self.seen_by(connection)
         for view in OLIST_MATERIALIZED_VIEWS:
             if view in self.rows:
                 self.rows[view] = rows
@@ -160,8 +164,7 @@ class FakeLockConnection:
 
     def rollback(self):
         self.ledger.log.append(("rollback", id(self)))
-        self.ledger.stage = 0
-        self.ledger.rows.pop(SNAPSHOT_MIGRATION, None)
+        self.ledger.stage = self.ledger.visible
         self.open = False
 
     def close(self):
@@ -218,8 +221,8 @@ class SnapshotRefreshOrderTests(unittest.TestCase):
             mock.patch("data_factory.cli.load_olist", side_effect=self.ledger.load),
             mock.patch("data_factory.cli.refresh_olist_snapshots", side_effect=self.ledger.refresh),
             mock.patch("data_factory.cli.apply_sql_migrations", side_effect=self.ledger.apply),
-            mock.patch("data_factory.cli.reset_olist_schema", side_effect=lambda engine: None),
-            mock.patch("data_factory.cli.reset_factory_schema", side_effect=lambda engine: None),
+            mock.patch("data_factory.cli.reset_olist_schema", side_effect=lambda connection: None),
+            mock.patch("data_factory.cli.reset_factory_schema", side_effect=lambda connection: None),
             mock.patch(
                 "data_factory.cli.load_stage1_sink", side_effect=lambda cfg, connection=None: {}
             ),
@@ -244,40 +247,51 @@ class SnapshotRefreshOrderTests(unittest.TestCase):
             "a view committed empty is a wrong answer, not an early one",
         )
 
-    def test_the_refresh_follows_the_commit_that_publishes_the_load(self):
+    def test_one_commit_publishes_the_load_and_its_views_together(self):
         from data_factory.cli import _load_database
 
         _load_database(self.cfg, reset=True, with_sink=False)
         log = self._events()
         self.assertEqual(log.count("load_olist"), 1)
-        self.assertEqual(log.count("commit"), 2, "one for the load, one for the refresh")
         self.assertEqual(
-            log[log.index("create_view") + 1 :],
-            ["commit", "refresh", "commit"],
-            "the refresh must sit between the two commits that make it durable",
+            log,
+            ["load_olist", "refresh", "create_view", "commit"],
+            "refresh what exists, create the rest, then publish everything at once",
         )
         self.assertFalse(self.ledger.connection.open, "the run must not close an open transaction")
 
-    def test_every_refresh_runs_on_the_connection_that_loaded_the_data(self):
+    def test_every_step_runs_on_the_connection_that_loaded_the_data(self):
         from data_factory.cli import _load_database
 
         _load_database(self.cfg, reset=True, with_sink=False)
         loaded = self.ledger.log[self._events().index("load_olist")][1]
         self.assertIn("refresh", self._events())
+        self.assertIn("create_view", self._events())
         for event, ident in self.ledger.log:
-            if event == "refresh":
-                self.assertEqual(ident, loaded, "the refresh needs the load's transaction")
+            self.assertEqual(ident, loaded, f"{event} needs the load's transaction")
 
-    def test_a_run_without_migrations_still_refreshes_after_its_commit(self):
+    def test_a_second_run_refreshes_the_views_that_already_exist(self):
+        from data_factory.cli import _load_database
+
+        _load_database(self.cfg, with_sink=False)
+        self.ledger.log.clear()
+        self.ledger.load = lambda cfg, connection=None: (
+            setattr(self.ledger, "stage", 275) or self.ledger.log.append(("load_olist", id(connection))) or {}
+        )
+        with mock.patch("data_factory.cli.load_olist", side_effect=self.ledger.load):
+            _load_database(self.cfg, with_sink=False)
+        self.assertEqual(self.ledger.visible_rows, 275)
+        self.assertEqual(
+            {view: self.ledger.rows[view] for view in OLIST_MATERIALIZED_VIEWS},
+            dict.fromkeys(OLIST_MATERIALIZED_VIEWS, 275),
+            "an existing view must not keep the previous load's rows",
+        )
+
+    def test_a_run_without_migrations_refreshes_before_its_commit(self):
         from data_factory.cli import _load_database
 
         _load_database(self.cfg, apply_migrations=False)
-        log = self._events()
-        self.assertEqual(
-            log[log.index("commit") :],
-            ["commit", "refresh", "commit"],
-            "the return path that applies no snapshots still publishes, refreshes, publishes again",
-        )
+        self.assertEqual(self._events(), ["load_olist", "refresh", "commit"])
 
     def test_the_stage2_sql_directory_requirement_fails_rather_than_skips(self):
         # No database needed: a broken layout is a failure with the counts in it,
@@ -480,6 +494,71 @@ class EmptyDatabaseSnapshotTests(unittest.TestCase):
             )
             actual = connection.scalar(sa.text(f"SELECT count(*) FROM {OLIST_SCHEMA}.{view}"))
         self.assertEqual(actual, expected, f"{view} disagrees with its tables")
+
+    def _run_with_lock_timeout(self, **kwargs):
+        """Run a load where any lock wait fails after 5 s instead of hanging.
+
+        PGOPTIONS reaches every libpq connection the run opens. A step that ran on
+        a second connection while the load holds its table locks would wait on the
+        load forever; here it fails with lock_timeout instead, and the thread guard
+        turns a hang that lock_timeout cannot see into a failure as well.
+        """
+        from data_factory.cli import _load_database
+
+        outcome = {}
+
+        def target():
+            try:
+                _load_database(self.cfg, **kwargs)
+                outcome["ok"] = True
+            except Exception as exc:  # noqa: BLE001 - re-raised in the test thread below
+                outcome["error"] = exc
+
+        with mock.patch.dict(os.environ, {"PGOPTIONS": "-c lock_timeout=5000"}):
+            probe = sa.create_engine(self.engine.url)
+            try:
+                with probe.connect() as connection:
+                    self.assertEqual(connection.scalar(sa.text("SHOW lock_timeout")), "5s")
+            finally:
+                probe.dispose()
+            worker = threading.Thread(target=target, daemon=True)
+            worker.start()
+            worker.join(timeout=120)
+        self.assertFalse(worker.is_alive(), "load-database is still waiting after 120 s")
+        if "error" in outcome:
+            raise outcome["error"]
+        self.assertTrue(outcome.get("ok"))
+
+    def test_a_run_with_pending_migrations_never_waits_on_itself(self):
+        # Fresh: every migration is pending and 005-008 read the tables the load
+        # has just emptied and filled. Second: the views exist and are refreshed.
+        with contextlib.redirect_stdout(io.StringIO()):
+            self._run_with_lock_timeout(reset=True, with_sink=False)
+            self._run_with_lock_timeout(with_sink=False)
+        state = self._view_state()
+        self.assertEqual(sorted(state), sorted(OLIST_MATERIALIZED_VIEWS))
+        self.assertEqual([name for name, (_p, rows) in state.items() if rows == 0], [])
+
+    def test_a_failed_reset_run_keeps_the_previous_data(self):
+        from data_factory.cli import _load_database
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            _load_database(self.cfg, reset=True, with_sink=False)
+        before = self._view_state()
+        # Break the last file the load reads, so the reset, the migrations and
+        # the earlier tables have all run when the error arrives.
+        reviews = self.csv_dir / OLIST_CSV_FILES["order_reviews"]
+        lines = reviews.read_text(encoding="utf-8").splitlines()
+        lines[1] = lines[1].replace(",1,", ",not-a-score,", 1)
+        reviews.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(DataError):
+            _load_database(self.cfg, reset=True, with_sink=False)
+        with self.engine.connect() as connection:
+            orders = connection.scalar(sa.text(f"SELECT count(*) FROM {OLIST_SCHEMA}.orders"))
+            ledger = connection.scalar(sa.text("SELECT count(*) FROM public.data_factory_migrations"))
+        self.assertEqual(orders, 1, "the rolled back reset must leave the old rows in place")
+        self.assertGreater(ledger, 0, "the rolled back reset must leave the ledger in place")
+        self.assertEqual(self._view_state(), before)
 
 
 if __name__ == "__main__":

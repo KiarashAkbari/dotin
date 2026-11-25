@@ -387,105 +387,106 @@ def _ensure_migration_history(connection: sa.Connection) -> None:
 
 
 
-def reset_migration_history(engine: sa.Engine) -> None:
-    """Clear migration history after a full schema reset."""
-    with engine.begin() as connection:
-        connection.execute(
-            sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}")
-        )
+def reset_olist_schema(connection: sa.Connection) -> None:
+    """Drop the complete Olist schema so a rebuild starts from an empty database.
 
-
-
-def reset_olist_schema(engine: sa.Engine) -> None:
-    """Drop the complete Olist schema so a rebuild starts from an empty database."""
-    with engine.begin() as connection:
-        connection.execute(sa.text("DROP SCHEMA IF EXISTS olist CASCADE"))
-        connection.execute(
-            sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}")
-        )
+    It runs in the caller's transaction, so a load that fails after the reset
+    rolls the drop back too and the previous data survives.
+    """
+    connection.execute(sa.text("DROP SCHEMA IF EXISTS olist CASCADE"))
+    connection.execute(sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}"))
 
 
 
 def apply_sql_migrations(
-    engine: sa.Engine,
+    bind: sa.Engine | sa.Connection,
     sql_dir: Path,
     include=None,
 ) -> list[str]:
     """Apply selected SQL migrations once, safely under an advisory lock.
 
-
-
     Each file is identified by name and content checksum. A previously applied
     file with the same checksum is skipped; a changed file fails explicitly.
     The advisory lock serializes concurrent CLI runs so two processes cannot
     create the same schema or table at the same time.
+
+    `bind` is an Engine or a Connection. An Engine gets a transaction of its own
+    that commits here. A Connection is used as it is: the files run inside the
+    caller's transaction, the transaction-level advisory lock lasts until the
+    caller commits or rolls back, and nothing is committed here. That is what
+    `load-database` needs: its load holds locks on the olist tables, and a
+    migration that reads them from a second connection would wait on the first
+    one forever.
     """
     files = sql_migration_files(sql_dir)
     if include is not None:
         files = [path for path in files if include(path)]
 
+    if isinstance(bind, sa.Connection):
+        return _apply_migration_files(bind, files)
+    with bind.begin() as connection:
+        return _apply_migration_files(connection, files)
 
+
+def _apply_migration_files(connection: sa.Connection, files: list[Path]) -> list[str]:
     applied: list[str] = []
+    connection.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": MIGRATION_LOCK_KEY},
+    )
+    _ensure_migration_history(connection)
 
+    raw_connection = connection.connection.driver_connection
+    for path in files:
+        sql = path.read_text(encoding="utf-8")
+        checksum = _migration_checksum(sql)
 
-    with engine.begin() as connection:
-        connection.execute(
-            sa.text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-            {"lock_key": MIGRATION_LOCK_KEY},
-        )
-        _ensure_migration_history(connection)
+        existing_checksum = connection.execute(
+            sa.text(
+                f"""
+                SELECT checksum
+                FROM {MIGRATION_HISTORY_TABLE}
+                WHERE migration_name = :name
+                """
+            ),
+            {"name": path.name},
+        ).scalar()
 
-        raw_connection = connection.connection.driver_connection
-        for path in files:
-            sql = path.read_text(encoding="utf-8")
-            checksum = _migration_checksum(sql)
-
-            existing_checksum = connection.execute(
-                sa.text(
-                    f"""
-                    SELECT checksum
-                    FROM {MIGRATION_HISTORY_TABLE}
-                    WHERE migration_name = :name
-                    """
-                ),
-                {"name": path.name},
-            ).scalar()
-
-            if existing_checksum is not None:
-                if existing_checksum != checksum:
-                    raise DataError(
-                        "SQL migration checksum mismatch",
-                        context={
-                            "file": str(path),
-                            "expected": existing_checksum,
-                            "actual": checksum,
-                        },
-                    )
-                continue
-
-            try:
-                with raw_connection.cursor() as cursor:
-                    cursor.execute(sql)
-            except Exception as exc:
+        if existing_checksum is not None:
+            if existing_checksum != checksum:
                 raise DataError(
-                    "SQL migration failed",
+                    "SQL migration checksum mismatch",
                     context={
                         "file": str(path),
-                        "error": str(exc),
+                        "expected": existing_checksum,
+                        "actual": checksum,
                     },
-                ) from exc
+                )
+            continue
 
-            connection.execute(
-                sa.text(
-                    f"""
-                    INSERT INTO {MIGRATION_HISTORY_TABLE}
-                        (migration_name, checksum)
-                    VALUES (:name, :checksum)
-                    """
-                ),
-                {"name": path.name, "checksum": checksum},
-            )
-            applied.append(path.name)
+        try:
+            with raw_connection.cursor() as cursor:
+                cursor.execute(sql)
+        except Exception as exc:
+            raise DataError(
+                "SQL migration failed",
+                context={
+                    "file": str(path),
+                    "error": str(exc),
+                },
+            ) from exc
+
+        connection.execute(
+            sa.text(
+                f"""
+                INSERT INTO {MIGRATION_HISTORY_TABLE}
+                    (migration_name, checksum)
+                VALUES (:name, :checksum)
+                """
+            ),
+            {"name": path.name, "checksum": checksum},
+        )
+        applied.append(path.name)
 
     return applied
 
@@ -959,7 +960,6 @@ def load_stage1_sink(
 
 
 
-def reset_factory_schema(engine: sa.Engine) -> None:
-    """Drop the sink schema; the counterpart of reset_olist_schema."""
-    with engine.begin() as connection:
-        connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {FACTORY_SCHEMA} CASCADE"))
+def reset_factory_schema(connection: sa.Connection) -> None:
+    """Drop the sink schema in the caller's transaction; the counterpart of reset_olist_schema."""
+    connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {FACTORY_SCHEMA} CASCADE"))

@@ -220,6 +220,9 @@ def _is_snapshot_migration(path: Path) -> bool:
     return path.name[:3] in {"005", "006", "007", "008"}
 
 
+SINK_MIGRATION_FILE = "009_factory_sink_schema.sql"
+
+
 def _is_sink_migration(path: Path) -> bool:
     """The factory sink schema is its own group, applied right before its data.
 
@@ -229,30 +232,26 @@ def _is_sink_migration(path: Path) -> bool:
     return path.name[:3] in {"009"}
 
 
-def _refresh_after_commit(connection: sa.Connection) -> None:
-    """Repopulate the snapshot views once the load they read from is durable.
-
-    The refresh before the commits cannot do this on a fresh database: the
-    views do not exist yet there, because 005-008 create them after it, and
-    this function only knows views already listed in pg_matviews. A view
-    created from a reset, still-uncommitted olist schema is committed empty,
-    so each exit path refreshes again after its last commit.
-
-    The refresh needs a commit of its own: executing it opens a new
-    transaction on this connection, and closing a connection whose
-    transaction is still open rolls the refresh back. That is how the first
-    version of this fix undid itself on a real database.
-    """
-    refresh_olist_snapshots(connection)
-    connection.commit()
-
-
 def _load_database(
     cfg: Config,
     apply_migrations: bool = True,
     reset: bool = False,
     with_sink: bool = True,
 ) -> None:
+    """Rebuild the database in one transaction on one connection.
+
+    Reset, migrations, the Olist load, the view refresh and the factory sink all
+    run on the connection that holds the load lock, and commit once at the end:
+
+    * a failure anywhere rolls everything back, the reset included, so the
+      previous data survives a failed rebuild;
+    * the load holds ACCESS EXCLUSIVE locks on the olist tables until it
+      commits, so a migration that reads them (005-008 build views from them)
+      has to run on this connection or it would wait on it forever;
+    * a view created after the load in the same transaction already reads the
+      loaded rows, and a view that already existed is refreshed right after the
+      load, so no reader ever sees new tables beside stale or empty views.
+    """
     if cfg.database is None:
         raise ConfigError("Missing config section: [database]")
     if reset and not apply_migrations:
@@ -260,118 +259,77 @@ def _load_database(
             "--reset drops the schema and --skip-sql-migrations would not recreate it; "
             "use one of them"
         )
+    sql_dir = cfg.database.sql_migrations_dir
+    if apply_migrations and with_sink and not (sql_dir / SINK_MIGRATION_FILE).is_file():
+        raise DataError(
+            "Factory sink migration is missing",
+            context={"dir": str(sql_dir), "expected": SINK_MIGRATION_FILE},
+        )
 
-    lock_engine = sa.create_engine(build_database_url(cfg))
-    lock_connection = lock_engine.connect()
-    lock_connection.execute(
-        sa.text("SELECT pg_advisory_lock(hashtext(:lock_key))"),
-        {"lock_key": LOAD_LOCK_KEY},
-    )
-
+    engine = sa.create_engine(build_database_url(cfg))
+    connection = engine.connect()
     try:
+        # A session lock: it serializes whole runs, and it is released below
+        # (or with the session) whatever happens to the transaction.
+        connection.execute(
+            sa.text("SELECT pg_advisory_lock(hashtext(:lock_key))"),
+            {"lock_key": LOAD_LOCK_KEY},
+        )
         try:
-            engine = sa.create_engine(build_database_url(cfg))
-            try:
-                if reset:
-                    reset_olist_schema(engine)
-                    print("schema=reset")
-                    if with_sink:
-                        reset_factory_schema(engine)
-                        print("factory_schema=reset")
+            if reset:
+                reset_olist_schema(connection)
+                print("schema=reset")
+                if with_sink:
+                    reset_factory_schema(connection)
+                    print("factory_schema=reset")
 
-                if apply_migrations:
-                    base_files = apply_sql_migrations(
-                        engine,
-                        cfg.database.sql_migrations_dir,
-                        include=_is_base_migration,
-                    )
-                    print(
-                        f"sql_migrations={len(base_files)} "
-                        f"files={','.join(base_files)}"
-                    )
-            finally:
-                engine.dispose()
+            if apply_migrations:
+                base_files = apply_sql_migrations(
+                    connection, sql_dir, include=_is_base_migration
+                )
+                print(f"sql_migrations={len(base_files)} files={','.join(base_files)}")
 
-            results = load_olist(cfg, connection=lock_connection)
+            results = load_olist(cfg, connection=connection)
             for table, result in results.items():
                 print(f"table={table} loaded={result['loaded']}")
 
-            # A no-op on a database where the views do not exist yet; it stays
-            # here so a run that only replaces data refreshes what it replaced.
-            refresh_olist_snapshots(lock_connection)
+            # Views that already exist are rebuilt from the rows just loaded; a
+            # no-op on a fresh database, where 005-008 create them below.
+            refresh_olist_snapshots(connection)
 
             if not apply_migrations:
                 print("sql_migrations=skipped")
                 if with_sink:
-                    print(
-                        "factory_sink=skipped "
-                        "(the sink needs 009 to be applied)"
-                    )
-                lock_connection.commit()
-                _refresh_after_commit(lock_connection)
+                    print("factory_sink=skipped (the sink needs 009 to be applied)")
+                connection.commit()
                 return
 
-            engine = sa.create_engine(build_database_url(cfg))
-            try:
-                sink_files = (
-                    apply_sql_migrations(
-                        engine,
-                        cfg.database.sql_migrations_dir,
-                        include=_is_sink_migration,
-                    )
-                    if with_sink
-                    else []
-                )
-                snapshot_files = apply_sql_migrations(
-                    engine,
-                    cfg.database.sql_migrations_dir,
-                    include=_is_snapshot_migration,
-                )
-            finally:
-                engine.dispose()
-
+            sink_files = (
+                apply_sql_migrations(connection, sql_dir, include=_is_sink_migration)
+                if with_sink
+                else []
+            )
+            snapshot_files = apply_sql_migrations(
+                connection, sql_dir, include=_is_snapshot_migration
+            )
             if with_sink:
-                print(
-                    f"factory_migrations={len(sink_files)} "
-                    f"files={','.join(sink_files)}"
-                )
+                print(f"factory_migrations={len(sink_files)} files={','.join(sink_files)}")
             else:
                 print("factory_sink=skipped")
-            print(
-                f"sql_snapshots={len(snapshot_files)} "
-                f"files={','.join(snapshot_files)}"
-            )
+            print(f"sql_snapshots={len(snapshot_files)} files={','.join(snapshot_files)}")
 
-            if not with_sink:
-                lock_connection.commit()
-                _refresh_after_commit(lock_connection)
-                return
+            if with_sink:
+                sink = load_stage1_sink(cfg, connection=connection)
+                for table, result in sink.items():
+                    print(f"factory_table={table} loaded={result['loaded']}")
 
-            sink_migration_exists = (
-                cfg.database.sql_migrations_dir
-                / "009_factory_sink_schema.sql"
-            ).is_file()
-            if not sink_migration_exists:
-                raise DataError(
-                    "Factory sink migration is missing",
-                    context={
-                        "dir": str(cfg.database.sql_migrations_dir),
-                        "expected": "009_factory_sink_schema.sql",
-                    },
-                )
-
-            sink = load_stage1_sink(cfg, connection=lock_connection)
-            for table, result in sink.items():
-                print(f"factory_table={table} loaded={result['loaded']}")
-
-            lock_connection.commit()
-            _refresh_after_commit(lock_connection)
+            connection.commit()
         except Exception:
-            lock_connection.rollback()
+            connection.rollback()
             raise
     finally:
         try:
-            lock_connection.execute(
+            connection.execute(
                 sa.text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
                 {"lock_key": LOAD_LOCK_KEY},
             )
@@ -380,8 +338,8 @@ def _load_database(
             # lock ends with its session. Re-raising here would hide the error
             # that actually stopped the run.
             pass
-        lock_connection.close()
-        lock_engine.dispose()
+        connection.close()
+        engine.dispose()
 
 
 def main(argv: list[str] | None = None) -> int:

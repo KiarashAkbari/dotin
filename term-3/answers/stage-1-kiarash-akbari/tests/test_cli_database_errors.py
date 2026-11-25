@@ -50,6 +50,10 @@ class CliDatabaseErrorTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
+        # The sink migration is checked before connecting, so give the run one
+        # and let it get as far as the connection under test.
+        (self.root / "sql").mkdir()
+        (self.root / "sql" / "009_factory_sink_schema.sql").write_text("SELECT 1;\n")
 
     def _main(self, *args):
         out, err = io.StringIO(), io.StringIO()
