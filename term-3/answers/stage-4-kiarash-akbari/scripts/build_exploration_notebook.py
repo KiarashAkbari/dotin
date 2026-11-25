@@ -277,7 +277,9 @@ def run_in_kernel(document: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     import nbformat
     from nbclient import NotebookClient
 
-    notebook = nbformat.from_dict(document)
+    # reads(), not from_dict(): the builder stores ``source`` as a list of lines (the on-disk form),
+    # and only the reader joins them into the strings nbclient expects
+    notebook = nbformat.reads(json.dumps(document), as_version=4)
     NotebookClient(
         notebook, timeout=1200, kernel_name="python3", allow_errors=True,
         resources={"metadata": {"path": str(STAGE)}},
