@@ -12,6 +12,9 @@ from .database import (
     MIGRATION_LOCK_KEY,
     apply_sql_migrations,
     build_database_url,
+    is_base_migration,
+    is_sink_migration,
+    is_snapshot_migration,
     load_olist,
     load_stage1_sink,
     refresh_olist_snapshots,
@@ -212,30 +215,14 @@ def _run(
     _build(cfg, client.request_count, started_at, mark, rolling, latest_manifest_path)
 
 
-def _is_base_migration(path: Path) -> bool:
-    """001-003 build the schema, views and functions the load writes into.
-
-    004 is stage 2's index migration (the dashboard-query indexes). It belongs to
-    the base group so the indexes exist before the load, the same way on a fresh
-    and on a repeated run; the load and the index build share one transaction.
-    """
-    return path.name[:3] in {"001", "002", "003", "004"}
-
-
-def _is_snapshot_migration(path: Path) -> bool:
-    return path.name[:3] in {"005", "006", "007", "008"}
+# The group predicates live with the ledger in database.py; these names stay
+# because stage 2 and stage 3 tests import them from here.
+_is_base_migration = is_base_migration
+_is_snapshot_migration = is_snapshot_migration
+_is_sink_migration = is_sink_migration
 
 
 SINK_MIGRATION_FILE = "009_factory_sink_schema.sql"
-
-
-def _is_sink_migration(path: Path) -> bool:
-    """The factory sink schema is its own group, applied right before its data.
-
-    It is deliberately not folded into the base group: the sink is a separate
-    destination, and a run that only rebuilds Olist must not need it.
-    """
-    return path.name[:3] in {"009"}
 
 
 def _load_database(
@@ -283,11 +270,12 @@ def _load_database(
         )
         try:
             if reset:
-                reset_olist_schema(connection)
+                forgotten = list(reset_olist_schema(connection) or [])
                 print("schema=reset")
                 if with_sink:
-                    reset_factory_schema(connection)
+                    forgotten += reset_factory_schema(connection) or []
                     print("factory_schema=reset")
+                print(f"ledger_forgotten={len(forgotten)} files={','.join(forgotten)}")
 
             if apply_migrations:
                 base_files = apply_sql_migrations(

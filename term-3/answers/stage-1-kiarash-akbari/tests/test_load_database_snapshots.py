@@ -564,6 +564,49 @@ class EmptyDatabaseSnapshotTests(unittest.TestCase):
         self.assertGreater(ledger, 0, "the rolled back reset must leave the ledger in place")
         self.assertEqual(self._view_state(), before)
 
+    def _ledger(self):
+        with self.engine.connect() as connection:
+            return dict(
+                connection.execute(
+                    sa.text("SELECT migration_name, checksum FROM public.data_factory_migrations")
+                ).all()
+            )
+
+    def test_a_reset_forgets_only_the_olist_ledger_rows(self):
+        from data_factory.cli import _load_database
+        from data_factory.database import reset_factory_schema
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            _load_database(self.cfg, reset=True, with_sink=False)
+        others = {"009_factory_sink_schema.sql": "sink-history", "010_credit_schema.sql": "credit"}
+        with self.engine.begin() as connection:
+            for name, checksum in others.items():
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO public.data_factory_migrations (migration_name, checksum)"
+                        " VALUES (:name, :checksum)"
+                    ),
+                    {"name": name, "checksum": checksum},
+                )
+        olist = {n: c for n, c in self._ledger().items() if n not in others}
+        self.assertIn("001_create_olist_schema.sql", olist)
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _load_database(self.cfg, reset=True, with_sink=False)
+        ledger = self._ledger()
+        self.assertEqual({n: ledger[n] for n in others}, others, "other stages keep their history")
+        self.assertEqual({n: c for n, c in ledger.items() if n not in others}, olist)
+        self.assertIn(f"ledger_forgotten={len(olist)} ", out.getvalue())
+
+        with self.engine.connect() as connection:
+            self.assertEqual(reset_factory_schema(connection), ["009_factory_sink_schema.sql"])
+            remaining = connection.execute(
+                sa.text("SELECT migration_name FROM public.data_factory_migrations")
+            ).scalars()
+            self.assertIn("010_credit_schema.sql", set(remaining))
+            connection.rollback()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -393,14 +393,76 @@ def _ensure_migration_history(connection: sa.Connection) -> None:
 
 
 
-def reset_olist_schema(connection: sa.Connection) -> None:
+# Which numbered migration builds what. load-database applies the groups in its
+# own order; a reset forgets exactly the ledger rows of the schema it drops.
+BASE_MIGRATIONS = frozenset({"001", "002", "003", "004"})
+SNAPSHOT_MIGRATIONS = frozenset({"005", "006", "007", "008"})
+SINK_MIGRATIONS = frozenset({"009"})
+
+
+def is_base_migration(path: Path) -> bool:
+    """001-003 build the schema, views and functions the load writes into.
+
+    004 is stage 2's index migration (the dashboard-query indexes). It belongs to
+    the base group so the indexes exist before the load, the same way on a fresh
+    and on a repeated run; the load and the index build share one transaction.
+    """
+    return Path(path).name[:3] in BASE_MIGRATIONS
+
+
+def is_snapshot_migration(path: Path) -> bool:
+    return Path(path).name[:3] in SNAPSHOT_MIGRATIONS
+
+
+def is_sink_migration(path: Path) -> bool:
+    """The factory sink schema is its own group, applied right before its data.
+
+    It is deliberately not folded into the base group: the sink is a separate
+    destination, and a run that only rebuilds Olist must not need it.
+    """
+    return Path(path).name[:3] in SINK_MIGRATIONS
+
+
+def is_olist_migration(path: Path) -> bool:
+    """Everything that lives in the olist schema: the base and snapshot groups."""
+    return is_base_migration(path) or is_snapshot_migration(path)
+
+
+def forget_migrations(connection: sa.Connection, include) -> list[str]:
+    """Delete the ledger rows of the migrations `include` selects, and only those.
+
+    The ledger is shared: stage 3 records its own 010/011 in it, and the sink
+    records 009. Dropping the whole table on an Olist reset erased their history
+    too. Names are matched in Python with the same predicates load-database
+    applies, then deleted with one bound parameter.
+    """
+    exists = connection.scalar(
+        sa.text("SELECT to_regclass(:name) IS NOT NULL"), {"name": MIGRATION_HISTORY_TABLE}
+    )
+    if not exists:
+        return []
+    names = connection.execute(
+        sa.text(f"SELECT migration_name FROM {MIGRATION_HISTORY_TABLE} ORDER BY migration_name")
+    ).scalars()
+    forgotten = [name for name in names if include(Path(name))]
+    if forgotten:
+        connection.execute(
+            sa.text(f"DELETE FROM {MIGRATION_HISTORY_TABLE} WHERE migration_name = ANY(:names)"),
+            {"names": forgotten},
+        )
+    return forgotten
+
+
+def reset_olist_schema(connection: sa.Connection) -> list[str]:
     """Drop the complete Olist schema so a rebuild starts from an empty database.
 
-    It runs in the caller's transaction, so a load that fails after the reset
-    rolls the drop back too and the previous data survives.
+    Only the ledger rows of the olist migrations (base and snapshot groups) are
+    forgotten, so 001-008 run again and every other stage keeps its history. It
+    runs in the caller's transaction, so a load that fails after the reset rolls
+    the drop back too and the previous data survives. Returns the forgotten names.
     """
-    connection.execute(sa.text("DROP SCHEMA IF EXISTS olist CASCADE"))
-    connection.execute(sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}"))
+    connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {OLIST_SCHEMA} CASCADE"))
+    return forget_migrations(connection, is_olist_migration)
 
 
 
@@ -966,6 +1028,11 @@ def load_stage1_sink(
 
 
 
-def reset_factory_schema(connection: sa.Connection) -> None:
-    """Drop the sink schema in the caller's transaction; the counterpart of reset_olist_schema."""
+def reset_factory_schema(connection: sa.Connection) -> list[str]:
+    """Drop the sink schema and forget 009, in the caller's transaction.
+
+    The counterpart of reset_olist_schema: without forgetting 009 the next run
+    would skip the migration and load into a schema that no longer exists.
+    """
     connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {FACTORY_SCHEMA} CASCADE"))
+    return forget_migrations(connection, is_sink_migration)
