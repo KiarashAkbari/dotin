@@ -1,0 +1,148 @@
+========================================================================
+feature frame performance -- timing, plan, and what the plan says about the ceiling
+========================================================================
+tree: KiarashAkbari/dotin @ HEAD 5d6f11e, 1 tracked file(s) differ -- the plan below is that tree's plan
+
+database: dotin_s4
+server:   PostgreSQL 16.4 on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu/Linaro 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit
+source tables (the frame's inputs, so a small number here means a small measurement):
+      olist.customers                        99441 rows
+      olist.geolocation                     738332 rows
+      olist.monthly_category_snapshot            0 rows
+      olist.order_items                     112650 rows
+      olist.order_reviews                    99224 rows
+      olist.orders                           99441 rows
+      olist.payments                        103886 rows
+      olist.product_category_name_translation        71 rows
+      olist.products                         32951 rows
+      olist.sellers                           3095 rows
+      olist.v_delivered_orders               96470 rows
+      olist.v_order_item_sales              112101 rows
+
+frame: 99281 rows, 32 columns, 29 feature columns (the brief asks for at least 10)
+
+timing, 3 runs, cold first (the ceiling in config is 500 ms)
+      timed (what capstone features judges)    mean 433.3 ms | cold 423.2 ms | warm 438.4 ms | min 422.8 | max 453.9
+      read (with transfer)                     mean 1127.1 ms | cold 1202.4 ms | warm 1089.5 ms | min 1088.2 | max 1202.4
+
+------------------------------------------------------------------------
+1. EXPLAIN (ANALYZE, BUFFERS) -- the statement the ceiling is measured on
+------------------------------------------------------------------------
+  Gather  (cost=18056.60..35374.04 rows=99272 width=261) (actual time=177.442..818.414 rows=99281 loops=1)
+    Workers Planned: 1
+    Workers Launched: 1
+    Buffers: shared hit=12137
+    ->  Hash Left Join  (cost=17056.60..24446.84 rows=58395 width=261) (actual time=176.858..647.739 rows=49640 loops=2)
+          Hash Cond: (pr.product_category_name = t.product_category_name)
+          Buffers: shared hit=12137
+          ->  Hash Left Join  (cost=17054.00..21508.46 rows=58395 width=297) (actual time=176.767..526.880 rows=49640 loops=2)
+                Hash Cond: ((i.primary_product_id)::text = (pr.product_id)::text)
+                Buffers: shared hit=12135
+                ->  Hash Left Join  (cost=15875.60..20176.75 rows=58395 width=307) (actual time=157.416..467.752 rows=49640 loops=2)
+                      Hash Cond: ((s.seller_zip_code_prefix)::text = (seller_geo.geolocation_zip_code_prefix)::text)
+                      Buffers: shared hit=11261
+                      ->  Hash Left Join  (cost=15307.76..19455.59 rows=58395 width=297) (actual time=149.441..424.774 rows=49640 loops=2)
+                            Hash Cond: ((c.customer_zip_code_prefix)::text = (cust_geo.geolocation_zip_code_prefix)::text)
+                            Buffers: shared hit=10981
+                            ->  Parallel Hash Left Join  (cost=14739.93..18734.43 rows=58395 width=281) (actual time=140.910..378.886 rows=49640 loops=2)
+                                  Hash Cond: ((o_1.customer_id)::text = (c.customer_id)::text)
+                                  Buffers: shared hit=10701
+                                  ->  Parallel Hash Left Join  (cost=11973.79..15815.00 rows=58395 width=272) (actual time=115.008..315.063 rows=49640 loops=2)
+                                        Hash Cond: ((o_1.order_id)::text = (p.order_id)::text)
+                                        Buffers: shared hit=9172
+                                        ->  Parallel Hash Left Join  (cost=9377.68..13065.59 rows=58395 width=215) (actual time=87.031..255.068 rows=49640 loops=2)
+                                              Hash Cond: ((o_1.order_id)::text = (h.order_id)::text)
+                                              Buffers: shared hit=7892
+                                              ->  Parallel Hash Join  (cost=6591.66..10126.27 rows=58395 width=199) (actual time=63.717..197.158 rows=49640 loops=2)
+                                                    Hash Cond: ((o_1.order_id)::text = (o.order_id)::text)
+                                                    Buffers: shared hit=6420
+                                                    ->  Parallel Hash Right Join  (cost=3346.52..6727.84 rows=58395 width=175) (actual time=33.893..126.280 rows=49640 loops=2)
+                                                          Hash Cond: ((i.order_id)::text = (o_1.order_id)::text)
+                                                          Buffers: shared hit=4491
+                                                          ->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=134) (actual time=0.862..44.450 rows=49333 loops=2)
+                                                                Hash Cond: ((i.primary_seller_id)::text = (s.seller_id)::text)
+                                                                Buffers: shared hit=2562
+                                                                ->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158) (actual time=0.006..12.236 rows=49333 loops=2)
+                                                                      Buffers: shared hit=2496
+                                                                ->  Hash  (cost=63.95..63.95 rows=3095 width=42) (actual time=0.820..0.821 rows=3095 loops=2)
+                                                                      Buckets: 4096  Batches: 1  Memory Usage: 256kB
+                                                                      Buffers: shared hit=66
+                                                                      ->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=42) (actual time=0.029..0.354 rows=3095 loops=2)
+                                                                            Buffers: shared hit=66
+                                                          ->  Parallel Hash  (cost=2513.95..2513.95 rows=58395 width=74) (actual time=31.042..31.042 rows=49640 loops=2)
+                                                                Buckets: 131072  Batches: 1  Memory Usage: 11936kB
+                                                                Buffers: shared hit=1929
+                                                                ->  Parallel Seq Scan on orders o_1  (cost=0.00..2513.95 rows=58395 width=74) (actual time=0.008..11.194 rows=49640 loops=2)
+                                                                      Filter: (order_approved_at IS NOT NULL)
+                                                                      Rows Removed by Filter: 80
+                                                                      Buffers: shared hit=1929
+                                                    ->  Parallel Hash  (cost=2513.95..2513.95 rows=58495 width=57) (actual time=26.816..26.817 rows=49720 loops=2)
+                                                          Buckets: 131072  Batches: 1  Memory Usage: 10400kB
+                                                          Buffers: shared hit=1929
+                                                          ->  Parallel Seq Scan on orders o  (cost=0.00..2513.95 rows=58495 width=57) (actual time=0.009..11.721 rows=49720 loops=2)
+                                                                Buffers: shared hit=1929
+                                              ->  Parallel Hash  (cost=2056.01..2056.01 rows=58401 width=49) (actual time=23.154..23.154 rows=49640 loops=2)
+                                                    Buckets: 131072  Batches: 1  Memory Usage: 8864kB
+                                                    Buffers: shared hit=1472
+                                                    ->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49) (actual time=0.009..5.733 rows=49640 loops=2)
+                                                          Buffers: shared hit=1472
+                                        ->  Parallel Hash  (cost=1864.94..1864.94 rows=58494 width=57) (actual time=27.596..27.597 rows=49720 loops=2)
+                                              Buckets: 131072  Batches: 1  Memory Usage: 10400kB
+                                              Buffers: shared hit=1280
+                                              ->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57) (actual time=0.010..6.594 rows=49720 loops=2)
+                                                    Buffers: shared hit=1280
+                                  ->  Parallel Hash  (cost=2034.95..2034.95 rows=58495 width=42) (actual time=25.370..25.370 rows=49720 loops=2)
+                                        Buckets: 131072  Batches: 1  Memory Usage: 8864kB
+                                        Buffers: shared hit=1450
+                                        ->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42) (actual time=0.009..6.263 rows=49720 loops=2)
+                                              Buffers: shared hit=1450
+                            ->  Hash  (cost=330.15..330.15 rows=19015 width=22) (actual time=8.471..8.472 rows=19015 loops=2)
+                                  Buckets: 32768  Batches: 1  Memory Usage: 1296kB
+                                  Buffers: shared hit=280
+                                  ->  Seq Scan on mv_zip_centroid cust_geo  (cost=0.00..330.15 rows=19015 width=22) (actual time=0.009..3.859 rows=19015 loops=2)
+                                        Buffers: shared hit=280
+                      ->  Hash  (cost=330.15..330.15 rows=19015 width=22) (actual time=7.918..7.919 rows=19015 loops=2)
+                            Buckets: 32768  Batches: 1  Memory Usage: 1296kB
+                            Buffers: shared hit=280
+                            ->  Seq Scan on mv_zip_centroid seller_geo  (cost=0.00..330.15 rows=19015 width=22) (actual time=0.007..3.830 rows=19015 loops=2)
+                                  Buffers: shared hit=280
+                ->  Hash  (cost=766.51..766.51 rows=32951 width=56) (actual time=16.639..16.640 rows=32951 loops=2)
+                      Buckets: 65536  Batches: 1  Memory Usage: 3363kB
+                      Buffers: shared hit=874
+                      ->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56) (actual time=0.026..9.737 rows=32951 loops=2)
+                            Buffers: shared hit=874
+          ->  Hash  (cost=1.71..1.71 rows=71 width=34) (actual time=0.045..0.045 rows=71 loops=2)
+                Buckets: 1024  Batches: 1  Memory Usage: 13kB
+                Buffers: shared hit=2
+                ->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34) (actual time=0.026..0.032 rows=71 loops=2)
+                      Buffers: shared hit=2
+  Planning:
+    Buffers: shared hit=128
+  Planning Time: 2.313 ms
+  Execution Time: 822.787 ms
+   spill: none -- no temp blocks were read or written
+
+   hottest nodes by self time (a parent is not the work when its child is):
+      Gather: 129.718 ms (16% of the query), 99281 rows x 1 loops, buffers 12137 hit / 0 read
+      Hash Join: 121.73 ms (15% of the query), 49640 rows x 2 loops, buffers 12137 hit / 0 read
+      Hash Join: 78.613 ms (10% of the query), 49640 rows x 2 loops, buffers 10701 hit / 0 read
+
+------------------------------------------------------------------------
+2. the same frame read whole, which is what a person waits for
+------------------------------------------------------------------------
+   spill: none -- no temp blocks were read or written
+      Gather: 171.529 ms self time, 99281 rows
+      Hash Join: 113.618 ms self time, 49640 rows
+      Hash Join: 83.514 ms self time, 49640 rows
+
+------------------------------------------------------------------------
+verdict
+------------------------------------------------------------------------
+within the ceiling: the timed mean is 433.3 ms against 500 ms. The whole-frame read is 1127.1 ms, which the ceiling does not cover and the brief does not ask about -- recorded so nobody has to guess it later.
+
+numbers, machine-readable: {"ceiling_ms": 500, "database": "dotin_s4", "frame_columns": 32, "frame_features": 29, "frame_rows": 99281, "over_ceiling_ms": null, "read_mean_ms": 1127.1, "timed_mean_ms": 433.3}
+
+statistics: 3 of 14 olist tables have never been ANALYZEd, so their row estimates are guesses -- the timings are still real, the plan beside them is partly not
+protocol note: no cache clearing was attempted -- a script that cannot write
+/proc/sys/vm/drop_caches reports warm timings, and says so, rather than implying a cold
+run it did not perform.

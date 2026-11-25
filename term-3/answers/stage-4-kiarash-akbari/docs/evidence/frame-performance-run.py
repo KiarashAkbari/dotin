@@ -213,6 +213,10 @@ def explain(cursor: Any, sql: str, *, fmt: str) -> Any:
     the root node and nothing else -- a log that shows ``Aggregate 483 ms`` with no children is worse
     than no plan, because it looks like evidence.
     """
+    # FRAME_TIMING_SQL is itself an EXPLAIN (ANALYZE, TIMING OFF) of the real SELECT *; the plan is
+    # taken of that SELECT, not of an EXPLAIN of an EXPLAIN
+    if sql.lstrip().upper().startswith("EXPLAIN"):
+        sql = sql[sql.index(")") + 1 :].strip()
     cursor.execute(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT {fmt}) {sql}")
     if fmt == "json":
         payload = cursor.fetchone()[0]
