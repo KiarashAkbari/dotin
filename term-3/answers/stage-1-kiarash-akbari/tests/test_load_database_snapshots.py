@@ -538,6 +538,10 @@ class EmptyDatabaseSnapshotTests(unittest.TestCase):
         state = self._view_state()
         self.assertEqual(sorted(state), sorted(OLIST_MATERIALIZED_VIEWS))
         self.assertEqual([name for name, (_p, rows) in state.items() if rows == 0], [])
+        with self.engine.connect() as connection:
+            for table, rows in self._fixture_rows().items():
+                count = connection.scalar(sa.text(f"SELECT count(*) FROM {OLIST_SCHEMA}.{table}"))
+                self.assertEqual(count, len(rows), f"{table} after a reload")
 
     def test_a_failed_reset_run_keeps_the_previous_data(self):
         from data_factory.cli import _load_database

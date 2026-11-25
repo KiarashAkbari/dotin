@@ -59,16 +59,17 @@ OLIST_CSV_FILES = {
     "order_reviews": "olist_order_reviews_dataset.csv",
 }
 OLIST_TABLES = tuple(OLIST_CSV_FILES)
-OLIST_DELETE_ORDER = (
-    "order_reviews",
-    "payments",
-    "order_items",
-    "orders",
-    "products",
-    "sellers",
-    "customers",
-    "geolocation",
-    "product_category_name_translation",
+# Built once from the module constants above, never from config or file content.
+# One TRUNCATE over the whole set checks the foreign keys between these tables as
+# a set, so no row-by-row referential check runs. A row-by-row DELETE fires one RI
+# check per parent row, and none of the referencing columns is indexed, so it
+# scanned the child table once per deleted parent row (quadratic on a reload).
+# A table outside this list that references one of them makes TRUNCATE fail
+# loudly instead of silently cascading into another stage's data.
+OLIST_TRUNCATE_SQL = (
+    "TRUNCATE TABLE "
+    + ", ".join(f"{OLIST_SCHEMA}.{table}" for table in OLIST_TABLES)
+    + " RESTART IDENTITY"
 )
 
 OLIST_MATERIALIZED_VIEWS = (
@@ -80,9 +81,14 @@ OLIST_MATERIALIZED_VIEWS = (
 
 
 def clear_olist_tables(connection: sa.Connection) -> None:
-    """Remove existing Olist rows in foreign-key-safe order."""
-    for table in OLIST_DELETE_ORDER:
-        connection.execute(sa.text(f"DELETE FROM {OLIST_SCHEMA}.{table}"))
+    """Empty every Olist table in one set-based statement, inside the caller's transaction.
+
+    TRUNCATE takes an ACCESS EXCLUSIVE lock on each table until the transaction
+    ends, so everything else the load does with these tables (migrations, view
+    refreshes) has to run on this same connection; a second connection would wait
+    on this one forever.
+    """
+    connection.execute(sa.text(OLIST_TRUNCATE_SQL))
 
 
 def refresh_olist_snapshots(connection: sa.Connection) -> None:
