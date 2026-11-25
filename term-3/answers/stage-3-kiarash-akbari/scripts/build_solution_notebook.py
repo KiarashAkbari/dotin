@@ -497,7 +497,7 @@ else:
     (
         "code",
         """evidence = measure.collect(engine, sql_dir=Path("sql"), schema=credit_cfg.schema, extra={
-    "splits": splits.sizes,
+    "splits": splits.sizes, "missing_income_test": test, "baselines": {name: entry["cost_per_1000"] for name, entry in entries.items()},
     "threshold": {"value": choice.threshold, "grid_size": choice.grid_size, "ties": choice.ties, "cost_per_1000": choice.cost_per_1000},
     "grid": [r.as_dict() for r in grid], "cv": {family: r.as_dict() for family, r in families.items()},
     "selected": {"family": best.family, "plan": best.plan, "kept": kept_cv.as_dict()},
