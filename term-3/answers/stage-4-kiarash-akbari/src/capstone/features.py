@@ -155,6 +155,31 @@ def check_query_cost(measured_ms: float, config: CapstoneConfig) -> float:
     return float(measured_ms)
 
 
+#: read before the directory is applied: `006` refuses a mixture of indicator-period pairs, but it
+#: refreshes `capstone.mv_external_density` first, so applying it file by file (the procedure in
+#: `sql/README.md`) leaves the snapshot -- and the model's view of it -- rebuilt over the mixture.
+BRIDGE_PAIRS_STATEMENT = (
+    "SELECT coalesce(count(DISTINCT (indicator, period)), 0) FROM capstone.external_municipio"
+)
+
+#: where `006`'s contract is stated, and the only sanctioned way out of a mixture
+BRIDGE_HELP = (
+    "one value per joinable place is the bridge's contract: either narrow the table to the registered "
+    "source with `SELECT capstone.refresh_external_municipio('<source>')` and re-fetch, or give the "
+    "second indicator its own column and view. Do not let the view decide by sorting"
+)
+
+
+def bridge_pairs_error(pair_count: int) -> str | None:
+    """A sentence when the stored fetch cannot satisfy `006_external_bridge.sql`."""
+    if pair_count < 2:
+        return None
+    return (
+        f"capstone.external_municipio holds {pair_count} indicator-period pairs, so "
+        f"`sql/006_external_bridge.sql` would refuse the apply halfway through: {BRIDGE_HELP}"
+    )
+
+
 def sql_migrations(directory: Path) -> list[Path]:
     """The versioned files, in the order they are applied. A stray ``.sql`` is not a migration."""
     return sorted(path for path in directory.glob("*.sql") if path.parent == directory)
@@ -439,6 +464,14 @@ def build(
     connection = connect(database_uri(config, uri))
     try:
         with connection.cursor() as cursor:
+            # asked before *any* migration, so a mixture is reported by this project's sentence and a
+            # file-by-file apply never leaves the snapshot rebuilt over it
+            cursor.execute("SELECT to_regclass('capstone.external_municipio') IS NOT NULL")
+            if cursor.fetchone()[0]:
+                cursor.execute(BRIDGE_PAIRS_STATEMENT)
+                clash = bridge_pairs_error(int(cursor.fetchone()[0] or 0))
+                if clash:
+                    raise InputError(clash)
             for path in migrations:
                 cursor.execute(path.read_text(encoding="utf-8"))
             connection.commit()

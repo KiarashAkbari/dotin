@@ -56,6 +56,7 @@ class RecordingConnection:
         rows: int = 99_281,
         clock: object = None,
         audit_rows: int = 53,
+        bridge_pairs: int = 0,
     ) -> None:
         self.statements: list[str] = []
         #: how many rows ``capstone.column_audit`` holds; 0 is the fresh-database case the
@@ -68,6 +69,9 @@ class RecordingConnection:
         self.source_columns = (
             source_columns if source_columns is not None else [f"orders.{name}" for name in COLUMN_SEEDS]
         )
+        #: how many indicator-period pairs `capstone.external_municipio` holds; 0 is the fresh
+        #: database the preflight must not complain about, 2 is the mixture 006 refuses
+        self.bridge_pairs = bridge_pairs
         self._clock = clock
 
     def cursor(self) -> "RecordingCursor":
@@ -87,7 +91,11 @@ class RecordingCursor:
 
     def execute(self, sql: str, params=None) -> None:
         self.connection.statements.append(sql)
-        if "count(*) FROM capstone.column_audit" in sql:
+        if "to_regclass('capstone.external_municipio')" in sql:
+            self._rows = [(self.connection.bridge_pairs > 0,)]
+        elif "coalesce(count(DISTINCT (indicator, period))" in sql:
+            self._rows = [(self.connection.bridge_pairs,)]
+        elif "count(*) FROM capstone.column_audit" in sql:
             self._rows = [(self.connection.audit_rows,)]
         elif "information_schema.columns" in sql:
             self._rows = [(name,) for name in self.connection.columns]
@@ -139,7 +147,13 @@ def stage_config(root: Path, *, migrations: Path | None = None):
     return dataclasses.replace(config, root=root, features=features_section)
 
 
-class BuildSequencingTests(unittest.TestCase):
+class _SqlFixtureMixin:
+    """The temporary SQL directory, the manifest that matches it, and a stubbed `build` call.
+
+    Two classes need it: the sequencing tests, and the bridge-preflight tests below. Sharing the
+    fixture rather than subclassing the tests keeps the count of what runs honest.
+    """
+
     def setUp(self) -> None:
         self.temp = TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -170,23 +184,34 @@ class BuildSequencingTests(unittest.TestCase):
             manifest=manifest_path(self.root),
         )
 
+
+class BuildSequencingTests(_SqlFixtureMixin, unittest.TestCase):
     def test_the_migrations_are_applied_in_file_order_before_anything_is_counted(self):
-        """The order is the versioning: 001 then 002, whole files, before any query reads them."""
+        """The order is the versioning: 001 then 002, whole files, before anything reads or counts.
+
+        One class of statement may sit above the DDL and nothing else: a read-only probe. The bridge's
+        `indicator-period` count is exactly that -- `006` refuses a mixture only *after* refreshing the
+        snapshot, so the question has to be asked first, and a bare `SELECT` is the only thing that can
+        be asked without changing what the migrations will find.
+        """
         connection = RecordingConnection()
         self.build(connection)
-        self.assertEqual(
-            connection.statements[:2],
-            [
-                (self.root / "sql" / "001_first.sql").read_text(),
-                (self.root / "sql" / "002_second.sql").read_text(),
-            ],
-        )
+        # both fixture migrations carry the same body on purpose, so the sequence is pinned by
+        # *positions*, not by comparing two identical strings
+        ddl = (self.root / "sql" / "001_first.sql").read_text()
+        statements = list(connection.statements)
+        positions = [i for i, sql in enumerate(statements) if sql == ddl]
+        self.assertEqual(len(positions), 2, msg="each migration file, whole, exactly once")
+        first, second = positions
+        for sql in statements[:first]:
+            self.assertTrue(
+                sql.strip().upper().startswith(("SELECT", "WITH")),
+                msg=f"only a read may precede the DDL, not: {sql[:120]}",
+            )
         counted = next(
-            i
-            for i, sql in enumerate(connection.statements)
-            if "FROM capstone.v_feature_frame AS f" in sql
+            i for i, sql in enumerate(statements) if "FROM capstone.v_feature_frame AS f" in sql
         )
-        self.assertLess(1, counted, msg="a count read before the migrations would describe the old view")
+        self.assertLess(second, counted, msg="a count read before the migrations would describe the old view")
         # one commit after the DDL, so a guard that looks up a view sees the committed definition
         self.assertGreaterEqual(connection.commits, 1)
 
@@ -955,6 +980,73 @@ def features_not_ready_code() -> int:
     from capstone.exit_codes import ExitCode
 
     return int(ExitCode.NOT_READY)
+
+
+class BridgePreflightBuildTests(_SqlFixtureMixin, unittest.TestCase):
+    """The same fixture, the mixture dialled in: `build` must refuse before it sends a migration.
+
+    Added after measuring that ignoring `bridge_pairs_error`'s return value left every other test in
+    this file green -- the preflight had become a query that asked a question and dropped the answer.
+    """
+
+    def test_the_fixture_runs_with_a_clean_bridge(self) -> None:
+        """Zero pairs (the stub's default) is the fresh-database case, and it must pass untouched."""
+        connection = RecordingConnection()
+        self.build(connection)
+        self.assertIn("001_first", "".join(p.name for p in (self.root / "sql").iterdir()))
+
+    def test_a_mixture_is_refused_before_a_migration_is_sent(self) -> None:
+        connection = RecordingConnection(bridge_pairs=2)
+        with self.assertRaises(InputError) as caught:
+            self.build(connection)
+        self.assertIn("refresh_external_municipio", str(caught.exception))
+        self.assertEqual(
+            [sql for sql in connection.statements if sql.strip().startswith("CREATE")],
+            [],
+            msg="a refused build applies nothing at all, so the database keeps its previous frame",
+        )
+
+
+class BridgePreflightTests(unittest.TestCase):
+    """`006` refuses a mixture one step too late; the feature step now refuses it first.
+
+    The refusal itself was never the bug -- `006`'s guard is the thing that stops two censuses from
+    sharing one column name. The bug is *where* `006` is written: it refreshes
+    ``capstone.mv_external_density`` before its own DO block, so the file-by-file apply that
+    ``sql/README.md`` documents leaves the snapshot rebuilt over the mixture and the model reading it.
+    `006` is under ``docs/evidence/sql-checksums.txt`` and cannot be reordered, so the check moved up.
+    """
+
+    def test_zero_and_one_pair_are_no_obstacle(self) -> None:
+        self.assertIsNone(features.bridge_pairs_error(0))
+        self.assertIsNone(features.bridge_pairs_error(1))
+
+    def test_two_pairs_says_what_to_run(self) -> None:
+        sentence = features.bridge_pairs_error(2)
+        assert sentence is not None
+        self.assertIn("006_external_bridge.sql", sentence)
+        self.assertIn("refresh_external_municipio", sentence, "and it names the sanctioned way out")
+        self.assertIn("do not let the view decide", sentence.lower(), "006's own rule, repeated")
+
+    def test_the_question_precedes_the_first_migration(self) -> None:
+        """The order inside ``build`` is the fix: after the loop, the damage is already done."""
+        text = _build_source()
+        self.assertLess(text.index("BRIDGE_PAIRS_STATEMENT"), text.index("for path in migrations"))
+        self.assertIn("to_regclass('capstone.external_municipio')", text)
+
+    def test_a_missing_table_is_not_a_reason_to_stop(self) -> None:
+        """A fresh database has no external table at all, and `006` copes with that by itself."""
+        text = _build_source()
+        guard = text[text.index("def build(") :]
+        self.assertLess(guard.index("IS NOT NULL"), guard.index("BRIDGE_PAIRS_STATEMENT"))
+
+
+
+def _build_source() -> str:
+    from capstone import features as module
+    from pathlib import Path as _P
+
+    return _P(module.__file__).read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

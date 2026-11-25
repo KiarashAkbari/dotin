@@ -20,6 +20,12 @@ is what this module is shaped for:
 * **no SQL of its own.** Rows are stored by calling ``capstone.upsert_external_municipio``, the same
   rule ``sql/005_external_signal.sql`` states for every loader: a module that writes its own ``INSERT``
   bypasses the idempotency the re-apply guard tests.
+* **``upsert`` cannot replace an old fetch**, because it is keyed on ``(ibge_code, indicator, period)``:
+  pointing the config at another period or another variable *adds* rows beside the stored ones, and
+  ``005`` refuses to delete what a fetch it cannot see has written. So ``load`` compares the pairs and
+  refuses the mixture (``load_collision``) rather than leaving ``sql/006``'s ``max()`` to choose a
+  census by sorting -- which is what a live database did for one whole round, in silence, under the
+  column name ``external_density_2010``.
 * **an empty table is a result, not an error.** ``load`` and ``report`` both answer with the match rate
   they found, including ``0 of 4310 keys`` -- the count ``capstone.v_external_match_rate`` takes over
   the distinct ``(customer_city, customer_state)`` pairs of ``olist.customers``, which is the same
@@ -796,13 +802,61 @@ def fetch(
         return normalize(payload, source=config.external.name, municipality_by_code=reference_map())
 
 
-def load(cursor: Any, rows: Iterable[SignalRow], *, source: str) -> int:
+#: what a colliding load is told; `006`'s guard is the thing that would otherwise catch this, one
+#: step later and after the materialised snapshot had already been refreshed over the mixture.
+LOAD_COLLIDE_HELP = (
+    "one value per joinable place is `006`'s contract; `capstone.mv_external_density` takes a "
+    "`max()` over every stored pair, so a second indicator or period silently becomes the number "
+    "the model reads under the first one's name"
+)
+
+
+def load_collision(
+    stored: Iterable[tuple[str, str]], arriving: Iterable[tuple[str, str]]
+) -> str | None:
+    """A sentence when a load would put a second (indicator, period) pair on the same source.
+
+    `capstone.upsert_external_municipio` is keyed on (code, indicator, period), which is exactly why
+    it cannot stop this: switching the configured endpoint adds rows instead of replacing them, and
+    `005` refuses to delete what another fetch stored. Nothing downstream notices -- the frame's
+    JSON pivot grows, and the bridge's `max()` picks the newest year under the oldest year's name.
+    """
+    stored_pairs = {(str(indicator), str(period)) for indicator, period in stored}
+    arriving_pairs = {(str(indicator), str(period)) for indicator, period in arriving}
+    if not stored_pairs or not arriving_pairs:
+        return None
+    extra = stored_pairs - arriving_pairs
+    if not extra:
+        return None
+    def describe(pairs: set[tuple[str, str]]) -> str:
+        return ", ".join(sorted(f"{i!r}@{y}" for i, y in pairs))
+
+    return (
+        f"the source already holds {len(stored_pairs)} indicator-period pair(s) "
+        f"({describe(stored_pairs)}) and this load brings {describe(arriving_pairs)}; "
+        f"the extra {len(extra)} would land beside them, not instead of them. "
+        f"{LOAD_COLLIDE_HELP}. To reload one source cleanly: SELECT capstone.refresh_external_municipio"
+        "(<source>) -- the delete half of 005's two legal mutators, which exists for exactly this -- "
+        "then run the load again with the config whose endpoint is the registered one"
+    )
+
+
+def load(cursor: Any, rows: Iterable[SignalRow], *, source: str,
+         arriving: Iterable[tuple[str, str]] | None = None) -> int:
     """Store through the SQL function that owns this table, and report how many rows went in.
 
     Refuses an empty list: zero rows through ``upsert`` is a no-op that *looks* like a success, which
     is how a silently empty external table survives a whole project.
     """
     materialised = list(rows)
+    if arriving is not None:
+        table = CONTRACTS[IBGE_AREGADOS]["table"]
+        cursor.execute(
+            f"SELECT DISTINCT indicator, period FROM {table} WHERE source = %s", (source,)
+        )
+        clash = load_collision(cursor.fetchall(), arriving)
+        if clash:
+            raise InputError(clash)
     if not materialised:
         raise InputError(
             "load was given no rows; run the fetch or pass a fixture, and let an empty external"
@@ -942,7 +996,11 @@ def refresh(
     try:
         cursor = connection.cursor()
         if store:
-            out["stored"] = load(cursor, rows, source=config.external.name)
+            # the collision check gets the pairs this run actually fetched, so a fetch-and-store after
+            # a config change is refused before a single row is written -- and before the REFRESH
+            # below re-materialises the snapshot the model reads
+            incoming = {(row.indicator, row.period) for row in rows}
+            out["stored"] = load(cursor, rows, source=config.external.name, arriving=incoming)
             # sql/006 keeps a per-key snapshot of the density; a load that did not refresh it would
             # leave the model reading the previous fetch (or nothing, on a fresh database)
             cursor.execute("SELECT to_regclass('capstone.mv_external_density') IS NOT NULL")

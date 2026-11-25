@@ -97,6 +97,81 @@ class FakeCursor:
         return list(self._rows[1:])
 
 
+class LoadCollisionTests(unittest.TestCase):
+    """A second indicator-period pair on the same source is refused before it is written.
+
+    Found on a live machine, not offline: a fetch of the 2022 agregado, then a config pointing at the
+    2010 one, and `upsert` (keyed on code-indicator-period) *added* rows instead of replacing them.
+    The frame's JSON pivot grew, `006`'s `max()` picked the newer year under the older year's column
+    name, and the model's "with external" column was a different census than its own header claimed --
+    until the next `features` step hit `006`'s guard and stopped the chain. `005` deliberately will not
+    delete another fetch's rows, so the refusal had to come to the loader.
+    """
+
+    DENSITY_2010 = ("População residente, Densidade demográfica (hab/km²)", "2010")
+    DENSITY_2022 = ("População residente, Densidade demográfica (hab/km²)", "2022")
+    OTHER_2010 = ("Área territorial", "2010")
+
+    def test_one_clean_pair_on_one_side_is_no_collision(self) -> None:
+        self.assertIsNone(external.load_collision([], [self.DENSITY_2010]))
+        self.assertIsNone(external.load_collision([self.DENSITY_2010], [self.DENSITY_2010]))
+
+    def test_a_second_period_is_named_with_both_sides(self) -> None:
+        sentence = external.load_collision([self.DENSITY_2022], [self.DENSITY_2010])
+        assert sentence is not None
+        self.assertIn("2022", sentence)
+        self.assertIn("2010", sentence)
+        self.assertIn("refresh_external_municipio", sentence, "and it names the sanctioned reload")
+        self.assertIn("006", sentence, "the reader learns which guard would otherwise have caught it")
+
+    def test_a_second_indicator_for_the_same_period_is_equally_fatal(self) -> None:
+        """`mv_external_density` groups by place, not by indicator, so two indicators are one row too."""
+        self.assertIsNotNone(external.load_collision([self.OTHER_2010], [self.DENSITY_2010]))
+
+    def test_load_refuses_before_a_single_row_is_written(self) -> None:
+        cursor = _RecordingCursor([self.DENSITY_2022])
+        rows = external.normalize(GOOD_PAYLOAD)
+        with self.assertRaises(external.InputError) as caught:
+            external.load(
+                cursor, rows, source=external.IBGE_AREGADOS, arriving={self.DENSITY_2010}
+            )
+        self.assertIn("already holds", str(caught.exception))
+        self.assertEqual(
+            [s for s, _ in cursor.statements if "upsert" in s],
+            [],
+            "a refused load writes nothing at all, so the table stays re-loadable",
+        )
+
+    def test_a_clean_source_still_loads_and_refreshes(self) -> None:
+        cursor = _RecordingCursor([self.DENSITY_2010])
+        rows = external.normalize(GOOD_PAYLOAD)
+        stored = external.load(
+            cursor, rows, source=external.IBGE_AREGADOS, arriving={self.DENSITY_2010}
+        )
+        self.assertEqual(stored, 3)
+        self.assertEqual(len([s for s, _ in cursor.statements if "upsert" in s]), 3)
+
+    def test_the_store_path_passes_what_it_fetched(self) -> None:
+        """The guard next to `load` would be decoration if the caller never handed it a pair."""
+        source = Path(external.__file__).read_text(encoding="utf-8")
+        self.assertIn("arriving=incoming", source)
+        self.assertIn("incoming = {(row.indicator, row.period) for row in rows}", source)
+
+
+class _RecordingCursor:
+    """The `load` half of a session: it answers the collision read and remembers everything else."""
+
+    def __init__(self, stored_pairs: list[tuple[str, str]]) -> None:
+        self._stored = list(stored_pairs)
+        self.statements: list[tuple[str, tuple | None]] = []
+
+    def execute(self, sql: str, params: tuple | None = None) -> None:
+        self.statements.append((" ".join(sql.split()), params))
+
+    def fetchall(self) -> list[tuple]:
+        return list(self._stored)
+
+
 class NormalizeTests(unittest.TestCase):
     def test_a_good_response_becomes_one_row_per_locality_and_indicator(self) -> None:
         rows = external.normalize(GOOD_PAYLOAD)
