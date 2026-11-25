@@ -81,3 +81,29 @@ CAPSTONE_DATABASE_URI="$DATABASE_URI" python3 -m unittest discover -s stage-4/te
    (`capstone.require_allowed(…)`, در `002`) که وابستگی واقعی view را از کاتالوگ
    می‌خواند. `capstone.column_audit` تا بارگذاری شدنش خالی است و خالی یعنی «رد»،
    نه «قبول»: دروازه‌ای که داده ندارد باید ببندد، نه باز کند.
+
+
+## ۰۰۶ روی دیتابیسِ از قبل پرشده: چه انتظاری داشته باشیم
+
+`006_external_bridge.sql` دو چیز هم‌زمان است: نگهبانِ دورهٔ ذخیره‌شده، و جایگزینِ
+`capstone.v_external_feature`. ترتیبشان در فایل **قابل تغییر نیست** — `006` زیر
+`docs/evidence/sql-checksums.txt` است (`scripts/write_sql_checksums.py` فقط `*.sql` را
+هش می‌کند) و یک وصلهٔ بازبینی نباید مهاجرتی را که روی دیتابیسِ کسی اعمال شده ویرایش کند؛
+`test_no_shipped_migration_is_edited_in_place` و `features.build` همان را نگهبانی می‌کنند.
+
+پس روی دیتابیسِ کهنه چه می‌بینید: `CREATE OR REPLACE VIEW` ستون را **بازنامش نمی‌دهد**، پس اگر
+ viewِ فعلی `external_density_2022` دارد و فایل `external_density_2010` می‌سازد، خطا از
+ خودِ PostgreSQL می‌آید (`cannot change name of view column …`) — و `REFRESH MATERIALIZED VIEW`
+ِ همان فایل قبلی‌اش اجرا شده، یعنی نیمه‌اعمال‌شده می‌مانید. دو راهِ درست، به ترتیبِ ترجیح:
+
+1. **داده را به قرارداد برسانید، نه نام را.** `capstone.external_municipio` را به همان دوره‌ای
+   که نامِ ستون ادعا می‌کند محدود کنید (بخوانید: `select period, count(*) … group by 1`، بعد
+   `delete from capstone.external_municipio where period <> '<دورهٔ پیکربندی>'` در یک
+   `begin; … commit;`) و دوباره اعمال کنید. اندازه‌گیری‌شده: ۵٬۵۷۰ ردیف ۲۰۲۲ با ۵٬۵۶۵ ردیف ۲۰۱۰
+   قاطی شده بود؛ پس از محدود کردن، `test_reapplying_the_directory_changes_nothing` سبز شد.
+2. **ستون به ازای هر دوره، با دیدِ خودش.** همان چیزی که پیامِ نگهبان پیشنهاد می‌کند؛ کارش
+   ویرایشِ `005`/`006` و `model.py` است، پس یک دورِ جدا می‌خواهد نه یک وصلهٔمتنی.
+
+`ALTER VIEW … RENAME COLUMN` راه‌حل **نیست**: نام را درست می‌کند وقتی داده هنوز دورهٔ دیگر است، و
+آن‌گاه نگهبانِ سال سکوت می‌کند — یعنی شهادتِ غلط در `report.md`. اگر روزی این سه‌سطر را خواندید و
+خطایِ PostgreSQL را دیدید، یعنی همان مسیرِ اول لازم است.

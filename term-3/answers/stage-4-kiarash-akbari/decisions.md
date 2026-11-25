@@ -690,6 +690,43 @@
   `tests/test_capstone_capacity.py`؛ `docs/evidence/chain-run-log.jsonl`؛
   `docs/evidence/frame-performance-real-run.txt`؛ `docs/REQUIREMENTS_CHECKLIST.md` بند ۵.۳.
 
+## ۲۱. دو عدد که با هم نمی‌خواندند، و نگهبانی که از جلوی من را گرفت
+
+- **زمینه:** اجرایِ زندهٔ دانشجو روی PostgreSQL ۱۶٫۱۵ دو شکافِ واقعی را نشان داد که هیچ درختِ آفلاینی
+  نمی‌دید. (۱) `docs/evidence/cheating-model-gap.txt` می‌گفت فاصله `+0.1865` و `report.md` برای گامِ مدل
+  recall ۰٫۲۲۲۹ را می‌برد؛ اجرایِ دوباره همان اسکریپت عددِ ۰٫۲۰۵۷ و فاصلۀ `+0.2610` چاپ کرد. علتِ اول
+  این بود که `default_config_path` (`src/capstone/cli.py:42`) سه نام را به ترتیب می‌آزماید و
+  `config/capstone.toml`ِ *محلی* بر `capstone.default.toml` می‌چربد — و در آن فایل `boundary = "2018-07-31"`
+  نشسته بود در حالی که همهٔ شاهدِ commit‌شده روی `2018-05-31` ساخته شده. (۲) `sql/006_external_bridge.sql`
+  روی دیتابیسی که دورهٔ ذخیره‌شده‌اش ۲۰۲۲ بود با `cannot change name of view column` می‌افتاد، چون
+  `CREATE OR REPLACE VIEW` ستون را بازنامش نمی‌دهد.
+- **تصمیم:** سه چیز در کد اصلاح شد و یک چیز *نشد*. شد: اسکریپتِ گاپ پیش از هر کاری هدرِ فایلِ شاهد را
+  می‌خواند و اگر `split boundary`ِ آن با اجرای فعلی فرق داشت با `exit 2` می‌ایستد (`--force` تنها راهِ
+  عبور است) و سطرِ گزارشِ خودش حالا `config <name>` را هم می‌نویسد؛ `sealed_cut_rehearsal.py`
+  `CAPSTONE_OLIST_DIR` را مثلِ بقیۀ زنجیره می‌خواند و نبودِ CSV را با جمله جواب می‌دهد نه با
+  `FileNotFoundError` از pandas؛ و `advice()` در `frame-performance-run.py` دیگر به کوئری‌ای که
+  `spill: none` دارد `work_mem` توصیه نمی‌کند و یک جمله را سه‌بار تکرار نمی‌کند. نشد: جابه‌جاییِ نگهبانِ
+  `006` به بالای `CREATE OR REPLACE VIEW` — که اول انجامش دادم و `docs/evidence/sql-checksums.txt` با
+  پیامِ خودشان جلویش را گرفت («Fix the SQL or regenerate the manifest»)، و همان لحظه فهمیدم نگهبان
+  راست می‌گوید: مهاجرتی که روی دیتابیسِ کسی اجرا شده را نمی‌شود زیرِ پایشان ویرایش کرد. به‌جایش در
+  `sql/README.md` نوشته شد چه انتظاری باشد و دو راهِ درست کدام‌اند.
+- **گزینه‌ها (برای همان `006`):** (الف) بازگردانیِ ترتیب + `write_sql_checksums.py --check`ِ دوباره؛
+  (ب) نوشتنِ رویه در `sql/README.md` و نگه‌داشتنِ فایل؛ (پ) مهاجرتِ `007` که نگهبان را دوباره تکرار
+  کند. (الف) همان کاری است که `006` دربارهٔ *نامِ ستون* رد می‌کند — شاهدِ عددی را بی‌صدا عوض می‌کند؛
+  (پ) یک فایلِ جدید است که هیچ‌کس لازم ندارد چون خطا پیش از آن رخ می‌دهد. (ب) ماند، با یک تستِ صلب که
+  ترتیبِ فریز‌شده را pin می‌کند تا کسی دوباره وسوسه نشود.
+- **خطایِ من، نوشته‌شده:** من در پاسخِ زنده به دانشجو `ALTER VIEW … RENAME COLUMN` را پیشنهاد دادم تا
+  «اعمالِ دوباره پاک شود». نگهبانِ خودِ فایل جلویِ همان را گرفت: داده ۲۰۲۲ بود و نام ۲۰۱۰، و بازنامیدن
+  یعنی نام را مستقل از داده راست کردن — دقیقاً همان دروغی که `006` برای آن RAISE می‌کند. راهِ درست،
+  همان‌جا نوشته شد: `delete from capstone.external_municipio where period <> \'2010\'` در یک
+  transaction (دانشجو زد؛ `test_reapplying_the_directory_changes_nothing` سبز شد و پوششِ کلیدها از
+  `0 of 4310` به `4014 of 4310` = ۰٫۹۳۱۳ رسید).
+- **شاهد:** `scripts/cheating_model_gap.py` (ردِ پیشِ‌نوشتِ شاهد)؛ `scripts/sealed_cut_rehearsal.py`؛
+  `docs/evidence/frame-performance-run.py` (`advice`)؛ `sql/README.md`؛ `tests/test_evidence_provenance.py`؛
+  `docs/evidence/sql-checksums.txt` (همان که جلوی ویرایشِ `006` را گرفت)؛ اعدادِ اجرایِ زندهٔ دانشجو:
+  `Ran 1 … OK` برای نگهبانِ idempotency، `488.6 → 687.1 → 582.8 ms` پیش/پس از `ANALYZE`، و
+  `timed_min_ms 464.8 / mean 582.8 / over_ceiling_ms null / mean_over_ceiling_ms 82.8`.
+
 ## چیزی که این فایل ثابت نمی‌کند
 
 همهٔ عددهای بالا روی ماشینِ سندباکس و دادهٔ عمومیِ Olist گرفته شده‌اند؛ روی ماشینِ دانشجو باید با همان یک فرمان

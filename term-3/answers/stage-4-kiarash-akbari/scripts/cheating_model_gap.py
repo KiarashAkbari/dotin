@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -60,10 +61,32 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", type=Path, default=default_config_path(STAGE))
     parser.add_argument("--evidence", type=Path, default=STAGE / "docs/evidence/cheating-model-gap.txt")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an evidence file that was measured on a different split",
+    )
     args = parser.parse_args(argv)
     config = load_config(args.config)
+
+    # An evidence file is a claim about a split, and `default_config_path` prefers a local
+    # ``config/capstone.toml`` that a reader may have edited days ago. A measured gap on the
+    # boundary in that file replaces the tracked witness with a number nobody can attribute, so the
+    # header of the file being overwritten is read first: if it names a different boundary, stop.
+    # (The notebook builder has refused to overwrite what it did not write for the same reason.)
+    if args.evidence.exists() and not args.force:
+        previous = re.search(r"split boundary (\S+);", args.evidence.read_text(encoding="utf-8"))
+        if previous and previous.group(1) != f"{config.split.boundary}":
+            print(
+                f"refusing to overwrite {args.evidence.name}: it records split boundary "
+                f"{previous.group(1)} and this run uses {config.split.boundary}, from {args.config}.\n"
+                "the gap is only comparable to the model step if both read the same [split].boundary "
+                "-- pass --config the model step used, or --force if the new split is the decision"
+            )
+            return 2
     share = float(config.capacity.share)
     seed = int(config.model.random_seed or 0)
+
 
     metrics_path = config.features.curated_dir / system.METRICS_NAME
     chosen = json.loads(metrics_path.read_text(encoding="utf-8"))["chosen_model"]
@@ -107,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     lines = [
         "# cheating-model gap (scripts/cheating_model_gap.py)",
-        f"model family: {chosen}; split boundary {config.split.boundary}; evaluation window "
+        f"model family: {chosen}; split boundary {config.split.boundary} (config {args.config.name}); evaluation window "
         f"{split.describe(frame)['evaluation']['months']}; quota {share:.0%}",
         "tempting columns added: order_status, order_delivered_customer_date (as delivery_days and "
         "late_days), order_delivered_carrier_date (as carrier_days)",

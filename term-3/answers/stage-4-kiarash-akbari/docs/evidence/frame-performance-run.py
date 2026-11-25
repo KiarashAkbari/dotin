@@ -359,15 +359,30 @@ def ceiling_verdict(timing: dict, read: dict, ceiling: float) -> dict:
     }
 
 
-def advice(hot: list[dict], over_ms: float | None) -> list[str]:
+def advice(
+    hot: list[dict], over_ms: float | None, spill_info: dict | None = None
+) -> list[str]:
     """What the plan says to do, or the one line that says the plan is fine.
 
     A closed table keyed on node types, and only consulted when the measurement is over the ceiling:
     an optimization proposal for a query that already passes is how a delivery grows an index
     nobody needed.
+
+    The table is keyed on node *types*, which is how it came to recommend ``work_mem`` three times to
+    a query whose own counters say nothing spilled -- every hash join in the plan reported
+    ``Batches: 1`` and ``0 read``, so the advice contradicted the section printed eight lines above
+    it. A suggestion that the plan rules out is worse than no suggestion: it is the sentence a reader
+    pastes into a report. So ``spill_info`` (from :func:`spill`) vetoes the memory advice when nothing
+    went to disk, and the surviving lines are deduplicated -- three identical sentences are one
+    sentence printed three times.
     """
     if over_ms is None:
         return []
+    clean = (
+        spill_info is not None
+        and not spill_info["temp_read"]
+        and not spill_info["temp_written"]
+    )
     lines = [
         f"the feature query is {over_ms:.1f} ms over the ceiling ({TIMING_BASIS});"
         " the plan names where that goes:"
@@ -377,8 +392,17 @@ def advice(hot: list[dict], over_ms: float | None) -> list[str]:
         text = ADVICE.get(key)
         if text is None:
             continue
+        if clean and "work_mem" in text:
+            continue
         where = f" on {item['relation']}" if item["relation"] else ""
-        lines.append(f"  {key}{where}: {text}")
+        sentence = f"  {key}{where}: {text}"
+        if sentence not in lines:
+            lines.append(sentence)
+    if clean and len(lines) == 1:
+        lines.append(
+            "  no spill anywhere in the plan, so this is rows through the join, not memory: the hot"
+            " nodes are the joins themselves -- count the rows they emit before touching work_mem"
+        )
     if len(lines) == 1:
         lines.append("  no node type in the advice table dominates; read the text plan below")
     return lines
@@ -520,7 +544,7 @@ def main(argv: list[str]) -> int:
                 " nobody has to guess it later."
             )
         else:
-            for line in advice(hotspots(plans["timing"]), over):
+            for line in advice(hotspots(plans["timing"]), over, spill(plans["timing"])):
                 print(f"      {line}" if line.startswith("  ") else line)
         print(
             "\nnumbers, machine-readable: "

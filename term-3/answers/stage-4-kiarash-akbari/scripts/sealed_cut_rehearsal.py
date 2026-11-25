@@ -86,12 +86,33 @@ def main(argv: list[str] | None = None) -> int:
     from capstone.features import connect, database_uri
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--olist", type=Path, default=STAGE / "data" / "raw" / "olist")
+    raw_dir = Path(os.environ.get("CAPSTONE_OLIST_DIR") or (STAGE / "data" / "raw" / "olist"))
+    parser.add_argument(
+        "--olist",
+        type=Path,
+        default=raw_dir,
+        help="the folder of raw Olist CSVs (default: CAPSTONE_OLIST_DIR, else data/raw/olist)",
+    )
     parser.add_argument("--month", default="2018-08")
     parser.add_argument("--config", type=Path, default=default_config_path(STAGE))
     parser.add_argument("--evidence", type=Path, default=STAGE / "docs/evidence/sealed-cut-rehearsal.txt")
     args = parser.parse_args(argv)
     config = load_config(args.config)
+
+    # This rehearsal reads the CSVs, not the database: a checkout that has loaded Olist into
+    # PostgreSQL still has nothing to carve, and a traceback out of pandas says less than one
+    # sentence naming both places the corpus can be pointed at. Exit 0 for the reason the performance
+    # probe gives for a missing database -- an input that is not on this machine is not a failed
+    # measurement, and the difference matters to whoever reads the log afterwards.
+    missing = [name for name in NAMES.values() if not (args.olist / name).is_file()]
+    if missing:
+        others = f", and {len(missing) - 3} more" if len(missing) > 3 else ""
+        print(f"not carved: {args.olist} has no {', '.join(missing[:3])}{others}")
+        print(
+            "the sealed cut is built from the raw Olist CSVs, so a loaded database is not enough: "
+            "pass --olist (or CAPSTONE_OLIST_DIR) at the folder holding them. Nothing was written."
+        )
+        return 0
 
     bundle = STAGE / "data" / "raw" / f"sealed_cut_{args.month}"
     ids = carve(args.olist, args.month, bundle)
