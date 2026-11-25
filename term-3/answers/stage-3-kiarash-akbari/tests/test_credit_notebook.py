@@ -461,6 +461,14 @@ class ReportEvidenceTests(unittest.TestCase):
             [],
         )
 
+    def test_a_text_slot_takes_the_name_the_run_stored(self):
+        evidence = {"importance": {"top5": [{"feature": "age", "importance_mean": 1.5}]}}
+        filled = self.report.fill_placeholders(
+            "{{importance.top5[0].feature}} ({{importance.top5[0].importance_mean}})",
+            evidence,
+        )
+        self.assertEqual(filled, "age (1.5)")
+
     def test_an_unknown_slot_stays_visible(self):
         filled = self.report.fill_placeholders("{{does.not.exist}}", self.evidence)
         self.assertIn("missing(does.not.exist)", filled)
