@@ -171,7 +171,13 @@ def _run(cfg: Config, mark=None) -> None:
 
 
 def _is_base_migration(path: Path) -> bool:
-    return path.name[:3] in {"001", "002", "003"}
+    """001-003 build the schema, views and functions the load writes into.
+
+    004 is stage 2's index migration (the dashboard-query indexes). It belongs to
+    the base group so the indexes exist before the load, the same way on a fresh
+    and on a repeated run; the load and the index build share one transaction.
+    """
+    return path.name[:3] in {"001", "002", "003", "004"}
 
 
 def _is_snapshot_migration(path: Path) -> bool:
