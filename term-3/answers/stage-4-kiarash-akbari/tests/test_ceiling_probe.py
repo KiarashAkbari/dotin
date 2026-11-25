@@ -443,7 +443,16 @@ class AttributionTests(unittest.TestCase):
         ):
             self.assertLess(body.index(state), body.index(read), msg=f"{state} then its own read")
         head = self.source[self.source.index("def main(") :]
-        self.assertIn('kind_setting in ("credited", "conditional")', head)
+        self.assertIn("code, note = exit_note(before, after, kind_setting, control)", head)
+        self.assertLess(
+            head.index("code, note = exit_note("),
+            head.index("witness.write_text"),
+            msg="the note has to be in the file, so the check reads the order",
+        )
+        rule = self.source[self.source.index("def exit_note(") : self.source.index("def ordering_sentence(")]
+        self.assertIn('kind_setting in ("credited", "conditional")', rule)
+        self.assertIn('not straddles_ceiling(state)', rule, msg="the exit rule is the prose rule")
+
 
 class ControlTests(unittest.TestCase):
     """The order a state is measured in is a condition too, so it gets measured, not argued about."""
@@ -861,7 +870,8 @@ class ControlTests(unittest.TestCase):
             self.assertLess(head.index(earlier), head.index(later), msg=f"{earlier} then {later}")
         self.assertIn('"control": control', head)
         self.assertIn('"gain_split": split', head)
-        self.assertIn('kind_setting in ("credited", "conditional")', head)
+        self.assertIn("code, note = exit_note(before, after, kind_setting, control)", head)
+        self.assertIn('"exit": {"code": code, "note": note}', head)
         self.assertIn("if tuned is not None and control is not None", head)
         self.assertLess(
             head.index("control_runs = measure("), head.index("finally:"), msg="inside the connection"
@@ -876,6 +886,109 @@ class ControlTests(unittest.TestCase):
         )
         self.assertIn("state_line(\"control (ANALYZE, no setting, measured last)\", control)", head)
         self.assertIn("gain split:", head)
+
+    def test_the_setting_verdict_is_not_a_copy_of_the_analyze_verdict(self) -> None:
+        """His `--control` run printed the same sentence twice, because the first state owned the branch.
+
+        `with the setting applied:` is `describe(before, tuned)`; `before` there is the *untuned* state, and
+        it both met and missed 500 ms, so the straddle refusal fired and the tuned state's own `0/9` -- plus
+        the 100% ordering the control had just bought -- never reached a sentence. The pair has to be
+        described by the numbers of the state it was about, and the price quoted when it exists.
+        """
+        v = self.script.verdict
+        v = self.script.verdict
+        before = v([830.23, 728.441, 736.218, 719.765, 693.183, 636.947, 547.974, 471.879, 476.166], 500)
+        after = v([622.326, 576.355, 582.924, 722.45, 598.457, 576.468, 583.849, 570.534, 564.06], 500)
+        tuned = v([638.315, 623.592, 550.806, 585.499, 598.837, 555.188, 542.311, 567.065, 609.728], 500)
+        control = v([541.983, 540.242, 536.956, 653.44, 583.703, 557.223, 523.016, 561.638, 525.526], 500)
+        split = self.script.gain_split(
+            naive_ms=after["best_ms"] - tuned["best_ms"], drift_ms=after["best_ms"] - control["best_ms"]
+        )
+        self.assertAlmostEqual(split["ordering_share"], 1.0)
+        self.assertAlmostEqual(split["attributed_ms"], 0.0)
+        setting = self.script.describe(
+            before,
+            tuned,
+            state="ANALYZE + SET max_parallel_workers_per_gather=2",
+            plans_changed=False,
+            split=split,
+            gap=self.script.gap_pair(
+                after, tuned, first_name="the ANALYZE state", second_name="the tuned state"
+            ),
+        )
+        analyze = self.script.describe(before, after, plans_changed=False)
+        self.assertNotEqual(setting, analyze, msg="two comparisons, two sentences")
+        for expected in (
+            "query finding: ANALYZE + SET max_parallel_workers_per_gather=2 moves the fastest repeat from "
+            "471.9 ms to 542.3 ms",
+            "21.7 ms that `ANALYZE + SET max_parallel_workers_per_gather=2` appears to recover is 100% "
+            "ordering (0.0 ms left for the condition)",
+            "2/9 of the untuned state and 0/9 of the state under test met the ceiling",
+            "this run says neither `meets` nor `breaches`",
+        ):
+            self.assertIn(expected, setting, msg=expected[:48])
+        self.assertIn("query finding: ANALYZE moves the fastest repeat from 471.9 ms to 564.1 ms", analyze)
+        self.assertNotIn("control arm", analyze, msg="this comparison has no price to quote")
+
+    def test_a_priced_ordering_outranks_the_straddle_refusal(self) -> None:
+        """When the control explains the pair, it speaks first -- the straddle sentence is about state one.
+
+        Same untuned state as above (best 471.9, straddling), but this time the tuned state is a majority
+        pass, so the verdict is `ordering` rather than `refuted` -- and it must still not be replaced by the
+        refusal that used to sit above it.
+        """
+        before = self.script.verdict(
+            [830.23, 728.441, 736.218, 719.765, 693.183, 636.947, 547.974, 471.879, 476.166], 500
+        )
+        after = self.script.verdict([622.326, 600.0, 610.0, 615.0, 612.0], 500)
+        tuned = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        control = self.script.verdict([460.983, 462.242, 461.956], 500)
+        split = self.script.gain_split(
+            naive_ms=after["best_ms"] - tuned["best_ms"], drift_ms=after["best_ms"] - control["best_ms"]
+        )
+        self.assertTrue(before["passes"] and self.script.straddles_ceiling(before))
+        text = self.script.describe(
+            before,
+            tuned,
+            state="ANALYZE + SET max_parallel_workers_per_gather=2",
+            plans_changed=True,
+            split=split,
+            gap=self.script.gap_pair(after, tuned, first_name="a", second_name="b"),
+        )
+        self.assertTrue(text.startswith("ordering"), msg=text[:70])
+        self.assertIn("5 of 5 of its own repeats under 500 ms", text)
+        self.assertIn("came to within 8.8 ms of the tuned one", text)
+        self.assertNotIn("both met and missed", text)
+
+    def test_a_straddling_pass_does_not_exit_green(self) -> None:
+        """The exit code and the prose have to be refused by the same test.
+
+        `0041` fixed the sentence and left `met = before["passes"] or after["passes"]` alone, so the run
+        whose own words were "the line is unresolved on this machine" returned 0 -- and an exit code is what
+        a harness, a Makefile and a green tick all read. A state counts here only when it met the ceiling
+        *outside* its own interval, and the reason goes into the witness beside the numbers.
+        """
+        v = self.script.verdict
+        before = v([830.23, 728.441, 736.218, 719.765, 693.183, 636.947, 547.974, 471.879, 476.166], 500)
+        after = v([622.326, 576.355, 582.924, 722.45, 598.457, 576.468, 583.849, 570.534, 564.06], 500)
+        control = v([541.983, 540.242, 536.956, 653.44, 583.703, 557.223, 523.016, 561.638, 525.526], 500)
+        self.assertTrue(before["passes"], msg="the minimum alone used to be enough")
+        self.assertTrue(self.script.straddles_ceiling(before))
+        code, note = self.script.exit_note(before, after, "refuted", control)
+        self.assertEqual(code, 1)
+        self.assertIn("red: no state met 500 ms outside its own interval", note)
+        self.assertIn("the control arm is what priced the gap", note)
+        self.assertIn("--repeats 15", note, msg="a refusal has to end in something to type")
+        self.assertIn("as the unresolved line the witness already spells out", note)
+        self.assertIn("section 8 of `report.md`", note)
+        bare = self.script.exit_note(before, after, "refuted", None)
+        self.assertEqual(bare[0], 1)
+        self.assertNotIn("control arm", bare[1], msg="no arm was taken; do not describe one")
+        tight = v([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        self.assertEqual(self.script.exit_note(tight, after, "refuted", None), (0, ""))
+        self.assertEqual(self.script.exit_note(before, after, "conditional", None)[0], 0)
+        failing = v([600.0, 610.0, 605.0], 500)
+        self.assertEqual(self.script.exit_note(failing, after, "uncredited", None)[0], 1)
 
     def test_the_plan_comparison_ignores_the_clock(self) -> None:
         """A summary a reader cannot check is a claim; a JSON key that lies about its content is worse.
