@@ -213,6 +213,11 @@ class FeatureHypothesisTableTest(unittest.TestCase):
         self.assertEqual(set(named), used | {"external_density_2010"})
 
 
+# ``drift_explains`` lives in ``capstone.system``, which the guarded import above only binds when the
+# scientific stack is present. Without the decorator this class was the one place in the file that
+# broke its own promise -- "the suite says so instead of erroring" -- and a bare interpreter got a
+# ``NameError`` that reads like a broken model layer rather than a missing dependency.
+@unittest.skipUnless(HAVE_STACK, "numpy/pandas/scikit-learn are not installed")
 class SecondMetricTest(unittest.TestCase):
     """The brief's second metric is the last evaluation month; a one-order tail month is not one."""
 
