@@ -7,22 +7,29 @@ output was a sentence in an error message and nothing else. This script is the m
 the plan, twice, around the one intervention that costs nothing to try.
 
 Why *around*: the bridge (`sql/006`) rebuilds ``capstone.mv_external_density`` on every apply, and a
-refreshed materialised view starts with **no** statistics. The join then picks its shape from a table
-the planner believes to be empty -- which is a measurement artefact, not a property of the query, and
-it looks exactly like a slow frame. Measured on a live database: 477 ms on a table holding two censuses,
-663.4 ms after narrowing it to the registered one, with no change to the frame's definition.
+refreshed materialised view starts with **no** statistics. The join could then pick its shape from a
+table the planner believes to be empty -- a measurement artefact wearing a query's clothes. Measured on
+a live database: 477 ms on a table holding two censuses, 663.4 ms after narrowing it to the registered
+one, with no change to the frame's definition.
 
 So the script measures the frame, runs ``ANALYZE`` on the three relations the bridge owns, measures
 again, and prints the verdict twice -- once per state. If the failure survives the ANALYZE, it is a
 query finding and `report.md` has to say so; if it does not, the number in the manifest was an artefact
 and the fix is to keep statistics warm, not to raise the ceiling.
 
-Run from the stage folder, after the chain reached `features` once::
+It can also measure a *tuning* hypothesis the same way, on a session only. A plan that launches one
+parallel worker for 99,281 rows is a configurable cost, and that is worth knowing before a ceiling is
+called a defect::
 
     python scripts/analyze_ceiling_feature.py --config config/capstone.default.toml
+    python scripts/analyze_ceiling_feature.py --set "max_parallel_workers_per_gather=4"
+
+`--set` runs `SET` on this connection and nothing else: no `ALTER SYSTEM`, no `postgresql.conf`, no
+config key. A witness produced with it says so in its own header, and a witness measured *without* the
+setting it already claims is refused -- so a pass nobody can reproduce cannot be committed by accident.
 
 Writes ``docs/evidence/ceiling-feature-analysis.txt`` (+ ``.json``) and refuses to overwrite a witness
-whose header names a different ceiling or a different frame row count, for the same reason
+whose header names a different ceiling, frame row count or tuning, for the same reason
 `scripts/cheating_model_gap.py` refuses a witness from another split.
 """
 
@@ -45,6 +52,32 @@ ANALYZE_TARGETS = ("capstone.external_municipio", "capstone.mv_external_density"
 
 PLAN_SQL = "EXPLAIN (ANALYZE, BUFFERS, TIMING OFF) SELECT * FROM {frame}"
 TIMING_SQL = "EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM {frame}"
+
+#: a `SET` name is one identifier, and that is the whole allowlist: the value is quoted separately, so
+#: a semicolon inside `--set` cannot smuggle a second statement into the session
+SETTING_NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def parse_settings(pairs: list[str] | None) -> dict[str, str]:
+    """`--set key=value` arguments, validated -- and refused before a connection exists."""
+    settings: dict[str, str] = {}
+    for pair in pairs or []:
+        key, sep, value = str(pair).partition("=")
+        key = key.strip().lower()
+        if not sep or not SETTING_NAME.match(key):
+            raise ValueError(
+                f"--set wants key=value with a plain setting name, got {pair!r}; a session setting is "
+                "a measurement condition, not a place to run SQL"
+            )
+        if not value.strip():
+            raise ValueError(f"--set {key}= is empty; pass a value, or drop the flag")
+        settings[key] = value.strip()
+    return settings
+
+
+def setting_lines(settings: dict[str, str]) -> list[str]:
+    """The statements, one per setting, with the value quoted in exactly one place."""
+    return [f"SET {key} = '{value.replace(chr(39), chr(39) * 2)}'" for key, value in settings.items()]
 
 
 def measure(cursor, frame: str, *, repeat: int, clock) -> list[float]:
@@ -76,21 +109,31 @@ def verdict(durations: list[float], ceiling_ms: float) -> dict:
     }
 
 
-def describe(before: dict, after: dict) -> str:
-    """The sentence the report needs, in the shape of a decision rather than a number."""
+def describe(before: dict, after: dict, *, state: str = "ANALYZE") -> str:
+    """The sentence the report needs, in the shape of a decision rather than a number.
+
+    `state` names what changed between the two measurements, because the remedy differs entirely: warm
+    statistics, a session setting, or nothing at all.
+    """
     if before["passes"]:
         return (
             f"finding: the frame already meets the ceiling ({before['best_ms']:.1f} ms over "
             f"{len(before['runs_ms'])} repeats); this run is context, not a fix"
         )
+    remedy = (
+        "so the breach was a stale plan on the rebuilt snapshot, not a cost of the frame -- the remedy "
+        "is to keep those statistics warm"
+        if state == "ANALYZE"
+        else "so the breach is a session condition rather than the frame itself -- carry the setting "
+        "into the report as the condition the number was measured under"
+    )
     if after["passes"]:
         return (
-            f"artefact: {before['best_ms']:.1f} ms becomes {after['best_ms']:.1f} ms after ANALYZE on "
-            f"{len(ANALYZE_TARGETS)} relations, so the breach was a stale plan on the rebuilt "
-            "snapshot, not a cost of the frame -- the remedy is to keep those statistics warm"
+            f"artefact: {before['best_ms']:.1f} ms becomes {after['best_ms']:.1f} ms after {state}, "
+            f"{remedy}"
         )
     return (
-        f"query finding: ANALYZE moves the fastest repeat from {before['best_ms']:.1f} ms to "
+        f"query finding: {state} moves the fastest repeat from {before['best_ms']:.1f} ms to "
         f"{after['best_ms']:.1f} ms and the ceiling still fails, so `report.md` has to carry this as a "
         "measured shortfall and the plan below is the starting point"
     )
@@ -115,35 +158,53 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="overwrite a witness measured at a different ceiling or row count",
+        help="overwrite a witness measured at a different ceiling, row count or tuning",
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        metavar="KEY=VALUE",
+        help="measure a third time with this session SET applied (repeatable); nothing is persisted",
     )
     args = parser.parse_args(argv)
     if args.repeats < 2:
         print("error: --repeats needs at least 2; one number cannot show a worst case", file=sys.stderr)
         return 2
+    try:
+        settings = parse_settings(args.set)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
     config = load_config(args.config)
     ceiling = float(config.features.feature_query_ms)
     frame = features.FRAME_VIEW
+    tuning = ", ".join(f"{key}={value}" for key, value in settings.items())
 
     previous = None
     if args.evidence.exists():
-        # the guard is about *what the file claims*; `--force` is consulted below it, so it stays the
+        # the guard is about *what the file claims*; `--force` is consulted inside it, so it stays the
         # only way past
         head = args.evidence.read_text(encoding="utf-8")[:2000]
-        previous = re.search(r"ceiling (\d+) ms; frame rows (\d+)", head)
+        previous = re.search(r"ceiling (\d+) ms; frame rows (\d+)(?:; tuned by ([^\n]*))?", head)
+
     connection = connect(database_uri(config), purpose="measure the frame across an ANALYZE")
     try:
         cursor = connection.cursor()
         cursor.execute(f"SELECT count(*) FROM {frame}")
         rows = int(cursor.fetchone()[0])
         if previous and not args.force and (
-            int(previous.group(1)) != int(ceiling) or int(previous.group(2)) != rows
+            int(previous.group(1)) != int(ceiling)
+            or int(previous.group(2)) != rows
+            or (previous.group(3) or "").strip() != tuning
         ):
             print(
                 f"refusing to overwrite {args.evidence.name}: it records ceiling {previous.group(1)} ms "
-                f"on {previous.group(2)} rows, and this run uses {int(ceiling)} ms on {rows} rows.\n"
-                "the two are different measurements of a different frame -- pass --force if the new "
+                f"on {previous.group(2)} rows"
+                + (f" tuned by {previous.group(3)}" if previous.group(3) else "")
+                + f", and this run uses {int(ceiling)} ms on {rows} rows"
+                + (f" tuned by {tuning}" if tuning else "")
+                + "\nthese are different measurements of a different state -- pass --force if the new "
                 "state is the decision"
             )
             return 2
@@ -158,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
             cursor.execute(f"ANALYZE {target}")
         connection.commit()
         after_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
+        tuned_runs = None
+        if settings:
+            for statement in setting_lines(settings):
+                cursor.execute(statement)
+            tuned_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
         cursor.execute(PLAN_SQL.format(frame=frame))
         plan = "\n".join(str(row[0]) for row in cursor.fetchall())
     finally:
@@ -165,9 +231,11 @@ def main(argv: list[str] | None = None) -> int:
 
     before = verdict(before_runs, ceiling)
     after = verdict(after_runs, ceiling)
+    tuned = verdict(tuned_runs, ceiling) if tuned_runs else None
     lines = [
         "# ceiling on the feature frame, measured across one ANALYZE (scripts/analyze_ceiling_feature.py)",
-        f"config {args.config.name}; frame {frame}; ceiling {int(ceiling)} ms; frame rows {rows}",
+        f"config {args.config.name}; frame {frame}; ceiling {int(ceiling)} ms; frame rows {rows}"
+        + (f"; tuned by {tuning}" if tuning else ""),
         f"basis: {features.TIMING_BASIS}, the same statistic the feature step judges on",
         "",
         f"before ANALYZE: best {before['best_ms']:.1f} ms, mean {before['mean_ms']:.1f} ms, "
@@ -177,8 +245,16 @@ def main(argv: list[str] | None = None) -> int:
         f"analyzed: {', '.join(ANALYZE_TARGETS)}",
         "",
         describe(before, after),
+    ]
+    if tuned is not None:
+        lines += [
+            f"after  ANALYZE + SET {tuning}: best {tuned['best_ms']:.1f} ms, "
+            f"mean {tuned['mean_ms']:.1f} ms, worst {tuned['worst_ms']:.1f} ms, runs {tuned['runs_ms']}",
+            f"with the setting applied: {describe(before, tuned, state='ANALYZE + SET ' + tuning)}",
+        ]
+    lines += [
         "",
-        "## the plan the error line asked for, read after the ANALYZE",
+        "## the plan the error line asked for, read after the last measurement",
         plan,
     ]
     args.evidence.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -188,16 +264,22 @@ def main(argv: list[str] | None = None) -> int:
                 "config": str(args.config),
                 "ceiling_ms": ceiling,
                 "frame_rows": rows,
+                "settings": settings,
                 "before": before,
                 "after": after,
+                "tuned": tuned,
                 "verdict": describe(before, after),
+                "verdict_tuned": describe(before, tuned, state="ANALYZE + SET " + tuning)
+                if tuned
+                else None,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
     print("\n".join(lines))
-    return 0 if after["passes"] or before["passes"] else 1
+    states = [before, after] + ([tuned] if tuned else [])
+    return 0 if any(state["passes"] for state in states) else 1
 
 
 if __name__ == "__main__":

@@ -50,6 +50,17 @@ class VerdictTests(unittest.TestCase):
         script = load_script()
         self.assertFalse(script.verdict([663.4, 700.0, 690.0, 710.0, 680.0], 500.0)["passes"])
 
+    def test_a_setting_that_fixes_it_is_named_as_a_condition_not_a_cure(self) -> None:
+        script = load_script()
+        failing = script.verdict([664.8, 670.0], 500.0)
+        tuned = script.verdict([431.0, 440.0], 500.0)
+        sentence = script.describe(failing, tuned, state="ANALYZE + SET max_parallel_workers_per_gather=4")
+        self.assertIn("artefact", sentence)
+        self.assertIn("session condition", sentence)
+        self.assertIn("condition the number was measured under", sentence)
+        still_failing = script.verdict([660.0, 665.0], 500.0)
+        self.assertIn("query finding", script.describe(failing, still_failing, state="ANALYZE + SET x=1"))
+
     def test_the_three_readings_of_one_run_say_different_things(self) -> None:
         """The sentence is the deliverable, and each shape has a different consequence for the report."""
         script = load_script()
@@ -66,6 +77,40 @@ class VerdictTests(unittest.TestCase):
         still = script.verdict([663.4, 670.0], 500.0)
         self.assertIn("query finding", script.describe(still, still))
         self.assertIn("measured shortfall", script.describe(still, still))
+
+
+class SettingsTests(unittest.TestCase):
+    """`--set` is a measurement condition, so it is validated and it is written into the witness."""
+
+    def setUp(self) -> None:
+        self.script = load_script()
+
+    def test_a_plain_pair_is_accepted(self) -> None:
+        self.assertEqual(
+            self.script.parse_settings(["max_parallel_workers_per_gather=4"]),
+            {"max_parallel_workers_per_gather": "4"},
+        )
+
+    def test_a_second_statement_in_the_value_is_refused(self) -> None:
+        for bad in ("", "noequals", "work_mem=", "drop table x=1", "a.b=1", "work_mem=1; select 2 =x"):
+            with self.subTest(pair=bad):
+                if bad == "work_mem=1; select 2 =x":
+                    # the name is legal here; the value is what must stay inert
+                    self.assertEqual(
+                        self.script.setting_lines(self.script.parse_settings([bad])),
+                        ["SET work_mem = '1; select 2 =x'"],
+                        msg="the value is quoted and single quotes are doubled, never executed twice",
+                    )
+                    continue
+                with self.assertRaises(ValueError):
+                    self.script.parse_settings([bad])
+
+    def test_the_tuning_is_part_of_what_a_witness_claims(self) -> None:
+        source = Path(STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
+        self.assertIn("tuned by ", source)
+        body = source[source.index("def main(") :]
+        self.assertLess(body.index("setting_lines(settings)"), body.index("tuned_runs = measure"))
+        self.assertLess(body.index("after_runs = measure"), body.index("setting_lines(settings)"))
 
 
 class ScriptShapeTests(unittest.TestCase):
@@ -104,7 +149,7 @@ class ScriptShapeTests(unittest.TestCase):
 
     def test_a_witness_from_another_measurement_is_not_overwritten_in_silence(self) -> None:
         body = self.source[self.source.index("if args.evidence.exists()") :]
-        self.assertIn("ceiling (\\d+) ms; frame rows (\\d+)", body)
+        self.assertIn("ceiling (\\d+) ms; frame rows (\\d+)(?:; tuned by ([^\\n]*))?", body)
         self.assertIn("return 2", body)
         self.assertIn("not args.force", body[: body.index("print(") + 400])
 
