@@ -1,0 +1,12 @@
+# external-signal ablation on the time split (docs/evidence/model-ablation-run.py)
+boundary 2018-05-31; train 80320 rows, evaluation 18961 rows; quota 10%; seed 20181
+external column: external_density_2010; coverage over all approved orders 0.9926 (NULL stays NULL)
+
+| family | recall@10% without | recall@10% with | delta | 95% bootstrap of delta | AUC without | AUC with |
+|---|---:|---:|---:|---|---:|---:|
+| logreg.c0_1 | 0.2081 | 0.2126 | +0.0044 | -0.0014 .. +0.0121 | 0.5972 | 0.6007 |
+| logreg.c1 | 0.2062 | 0.2101 | +0.0039 | -0.0014 .. +0.0107 | 0.5971 | 0.6001 |
+| hgb.d3 | 0.2229 | 0.2278 | +0.0049 | -0.0020 .. +0.0119 | 0.6030 | 0.6063 |
+| hgb.d6 | 0.2126 | 0.2214 | +0.0088 | +0.0010 .. +0.0186 | 0.6053 | 0.6084 |
+
+reading: an interval that contains 0 means the external signal did not measurably change how many negative reviews the 10% list catches on the evaluation months.
