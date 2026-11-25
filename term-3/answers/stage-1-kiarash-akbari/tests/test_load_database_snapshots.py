@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 import sqlalchemy as sa
 from config_helpers import make_config
 
-from data_factory.config import DatabaseConfig
+from data_factory.config import DatabaseConfig, load_config
 from data_factory.database import (
     OLIST_CSV_FILES,
     OLIST_MATERIALIZED_VIEWS,
@@ -44,33 +44,47 @@ from data_factory.database import (
 )
 from data_factory.errors import DataError
 
-ANSWERS_ROOT = Path(__file__).resolve().parents[2]
+STAGE_ROOT = Path(__file__).resolve().parents[1]
 # `__name__`, not a literal: the module is `test_load_database_snapshots` under
 # `discover -s tests` and `tests.test_load_database_snapshots` when named directly, and
 # a hard-coded target silently patches nothing in one of the two.
 MODULE = __name__
+SQL_DIR_ENV = "DATA_FACTORY_SQL_DIR"
+REQUIRED_SQL = ("001_create_olist_schema.sql", "009_factory_sink_schema.sql")
 
 
-def stage2_sql_dir():
-    """Locate the stage-2 `sql` directory, which sits beside stage-1 here and beside
-    the answers in `dotin`, under two different names.
+def configured_sql_dir() -> Path:
+    """The SQL directory load-database itself would use.
 
-    Exactly one match is required. Zero means the layout or this helper is broken, and
-    several mean the choice would be alphabetical luck -- both are worth a failure with
-    the searched root and the sorted matches in the message, and neither is worth a
-    skip, because a skip is how a real check quietly stops checking.
+    DATA_FACTORY_SQL_DIR wins when set; otherwise it is `[database]
+    sql_migrations_dir` of the shipped config/default.toml, resolved the way the
+    CLI resolves it (relative to the config's root). No folder-name guessing: the
+    test reads the same setting the program reads.
     """
-    return sorted(path for path in ANSWERS_ROOT.glob("stage-2*/sql") if path.is_dir())
+    override = os.environ.get(SQL_DIR_ENV)
+    if override:
+        return Path(override).resolve()
+    return load_config(STAGE_ROOT / "config" / "default.toml").database.sql_migrations_dir
 
 
-def require_stage2_sql_dir(test):
-    found = stage2_sql_dir()
-    if len(found) != 1:
-        test.fail(
-            f"expected exactly one stage-2*/sql directory under {ANSWERS_ROOT}, found "
-            f"{len(found)}: {found or 'none'}; the fixtures need the real 001-009 scripts"
+def require_sql_dir(test) -> Path:
+    """Skip, with the path and the setting in the message, when stage 2 is not there.
+
+    Stage 1 checked out on its own has no stage-2 scripts, and that is a layout,
+    not a defect, so these real-database tests skip by name instead of failing. A
+    directory that exists but lacks the scripts the fixtures need is a broken
+    layout, and fails.
+    """
+    sql_dir = configured_sql_dir()
+    if not sql_dir.is_dir():
+        test.skipTest(
+            f"stage-2 SQL scripts not found at {sql_dir} ([database] sql_migrations_dir in "
+            f"config/default.toml); check stage 2 out beside stage 1 or set {SQL_DIR_ENV}"
         )
-    return found[0]
+    missing = [name for name in REQUIRED_SQL if not (sql_dir / name).is_file()]
+    if missing:
+        test.fail(f"{sql_dir} is missing {missing}; the fixtures need the real 001-009 scripts")
+    return sql_dir
 
 
 SNAPSHOT_MIGRATION = "005_snap.sql"
@@ -293,27 +307,31 @@ class SnapshotRefreshOrderTests(unittest.TestCase):
         _load_database(self.cfg, apply_migrations=False)
         self.assertEqual(self._events(), ["load_olist", "refresh", "commit"])
 
-    def test_the_stage2_sql_directory_requirement_fails_rather_than_skips(self):
-        # No database needed: a broken layout is a failure with the counts in it,
-        # in both directions, because "0 matches" and "2 matches" mean different things.
+    def test_the_sql_directory_comes_from_the_config_the_cli_reads(self):
+        with mock.patch.dict(os.environ, {SQL_DIR_ENV: ""}):
+            expected = load_config(STAGE_ROOT / "config" / "default.toml")
+            self.assertEqual(configured_sql_dir(), expected.database.sql_migrations_dir)
+        with mock.patch.dict(os.environ, {SQL_DIR_ENV: str(self.cfg.database.sql_migrations_dir)}):
+            self.assertEqual(configured_sql_dir(), self.cfg.database.sql_migrations_dir.resolve())
+
+    def test_a_missing_sql_directory_skips_with_the_path_in_the_message(self):
+        absent = self.cfg.database.sql_migrations_dir.parent / "no-stage-2" / "sql"
         with (
-            mock.patch(f"{MODULE}.stage2_sql_dir", list),
-            self.assertRaises(AssertionError) as zero,
+            mock.patch.dict(os.environ, {SQL_DIR_ENV: str(absent)}),
+            self.assertRaises(unittest.SkipTest) as skip,
         ):
-            require_stage2_sql_dir(FakeTest())
-        self.assertIn("found 0:", str(zero.exception))
-        matches = [ANSWERS_ROOT / "stage-2/sql", ANSWERS_ROOT / "stage-2-x/sql"]
+            require_sql_dir(self)
+        self.assertIn(str(absent), str(skip.exception))
+        self.assertIn(SQL_DIR_ENV, str(skip.exception))
+
+    def test_a_sql_directory_without_the_scripts_fails(self):
+        # setUp's directory holds stand-in files, not 001_create_olist_schema.sql
         with (
-            mock.patch(f"{MODULE}.stage2_sql_dir", lambda: matches),
-            self.assertRaises(AssertionError) as two,
+            mock.patch.dict(os.environ, {SQL_DIR_ENV: str(self.cfg.database.sql_migrations_dir)}),
+            self.assertRaises(AssertionError) as failure,
         ):
-            require_stage2_sql_dir(FakeTest())
-        self.assertIn("found 2:", str(two.exception))
-        self.assertIn(str(ANSWERS_ROOT), str(two.exception))
-        # outside every patch: this checkout must satisfy its own requirement
-        one = require_stage2_sql_dir(self)
-        self.assertEqual([one], stage2_sql_dir())
-        self.assertTrue(one.is_dir(), "the real stage-2 sql directory should be a directory")
+            require_sql_dir(FakeTest())
+        self.assertIn("001_create_olist_schema.sql", str(failure.exception))
 
     def test_a_failed_run_does_not_refresh_after_its_rollback(self):
         from data_factory.cli import _load_database
@@ -366,7 +384,7 @@ class EmptyDatabaseSnapshotTests(unittest.TestCase):
 
         self.sql_dir = root / "sql"
         self.sql_dir.mkdir()
-        source = require_stage2_sql_dir(self)
+        source = require_sql_dir(self)
         for path in sql_migration_files(source):
             (self.sql_dir / path.name).write_text(
                 path.read_text(encoding="utf-8"), encoding="utf-8"
