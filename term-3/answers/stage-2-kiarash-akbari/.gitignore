@@ -30,3 +30,12 @@ solution.before-fix.ipynb
 !data/curated/q2-cte-comparison-20261028-202722-343310.json
 !data/curated/benchmark-final-20261028-201509-296380.json
 !data/curated/benchmark-final-20261028-202305-063575.json
+
+# Evidence written by solution.ipynb (small JSON summaries, no raw data).
+# The notebook overwrites these fixed names on every Restart & Run All.
+!data/curated/evidence/
+data/curated/evidence/*
+!data/curated/evidence/*.json
+
+# Local, uncommitted configuration (holds a database name; never a password)
+config/local*.toml

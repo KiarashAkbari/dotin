@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "olist-perf"
+version = "0.1.0"
+description = "Stage 2 evidence helpers: query timing, plans, index cost, Python/SQL bridge"
+requires-python = ">=3.12"
+# Exact versions are pinned in requirements.txt (Delivery Guide rule 9);
+# data-factory comes from ../stage-1-kiarash-akbari via that file.
+dependencies = ["data-factory", "pandas", "SQLAlchemy", "psycopg"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

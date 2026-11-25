@@ -10,6 +10,11 @@
 -- index-cost.json. The one index that was built and dropped is documented in
 -- sql/rejected/004_rejected_orders_delivered_partial.sql.
 
+-- Schema for DataFrames the notebook writes back with pandas.to_sql and an
+-- explicit dtype map (olist_perf.bridge.write_typed). Kept out of olist so a
+-- --reset of the Olist schema and a notebook export never touch each other.
+CREATE SCHEMA IF NOT EXISTS reporting;
+
 -- Q1 (hybrid): the live part reads only the months after the snapshot. Without
 -- this index the range predicate is a Seq Scan over all 99k orders; with it
 -- PostgreSQL reads the tail months through a Bitmap Index Scan.
