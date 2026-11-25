@@ -23,7 +23,10 @@ Five rules, all testable without a database:
 * a state that met the ceiling is called `credited`, `conditional` or `uncredited` by `attribution()`,
   from whether the plan moved and how many of its own repeats met it -- and only the first two exit 0;
 * the plan comparison uses the plan's *shape* (estimates, workers, spill) and never its clock, and the
-  transfer price comes from `features.FRAME_READ_SQL`, pinned, because `EXPLAIN` discards the rows.
+  transfer price comes from `features.FRAME_READ_SQL`, pinned, because `EXPLAIN` discards the rows;
+* every state carries its own interval, and neither a pass nor a gap is believed until it clears it --
+  `straddles_ceiling()` for a state against the ceiling, `gap_pair()` for a pair of states against each
+  other. Both numbers are in the witness, because the reader who disagrees has to be able to check them.
 """
 
 from __future__ import annotations
@@ -225,8 +228,14 @@ class AttributionTests(unittest.TestCase):
         self.assertIn("execution 452.304 ms", self.script.plan_summary(PLAN_ONE_WORKER))
 
     def test_a_pass_with_an_unchanged_plan_is_an_outlier_not_a_verdict(self) -> None:
-        before = self.script.verdict([903.347, 719.423, 682.384, 668.676, 668.552], 500)
-        tuned = self.script.verdict([673.286, 677.286, 673.792, 584.003, 481.231], 500)
+        """One repeat under the ceiling, in a pair that *could* have settled something: `uncredited`.
+
+        The tuned state's spread is kept just under the 187.3 ms gap between the two bests, or the pair is
+        `noise` before anyone gets to ask which repeat won -- `uncredited` is the narrower claim, so it is
+        the one that has to clear the bound. That ordering is pinned in the last assertion below.
+        """
+        before = self.script.verdict([671.347, 670.423, 669.384, 668.676, 668.552], 500)
+        tuned = self.script.verdict([660.0, 655.0, 658.0, 662.0, 481.231], 500)
         self.assertEqual((before["best_ms"], before["below_ceiling"]), (668.552, 0))
         self.assertEqual((tuned["best_ms"], tuned["below_ceiling"], tuned["best_repeat"]), (481.231, 1, 5))
         text = self.script.describe(
@@ -236,11 +245,23 @@ class AttributionTests(unittest.TestCase):
         self.assertIn("1 of 5 repeats", text)
         self.assertIn("fastest as repeat 5 of 5", text)
         self.assertNotIn("session condition", text)
+        self.assertLess(
+            self.script.interval_ms(tuned),
+            self.script.gap_pair(before, tuned, first_name="a", second_name="b")["observed_ms"],
+            msg="this pair has to clear the noise bound before `uncredited` is reachable at all",
+        )
         credited = self.script.describe(
             before, tuned, state="ANALYZE + SET max_parallel_workers_per_gather=4", plans_changed=True
         )
         self.assertTrue(credited.startswith("credited"))
         self.assertIn("session condition", credited)
+        wide = self.script.verdict([903.347, 719.423, 682.384, 668.676, 668.552], 500)
+        loose = self.script.verdict([673.286, 677.286, 673.792, 584.003, 481.231], 500)
+        self.assertEqual(
+            self.script.describe(wide, loose, state="SET x", plans_changed=True).split(":")[0],
+            "noise",
+            msg="a 234.8 ms interval beats a 187.3 ms difference, whatever won",
+        )
 
     def test_the_sentence_opens_with_the_kind_the_json_records(self) -> None:
         """The witness prints `(conditional)` beside a prose verdict, so the two words have to agree.
@@ -460,22 +481,162 @@ class ControlTests(unittest.TestCase):
         )
         self.assertTrue(self.script.TUNED_NAME.search(armed.stem), msg=armed.name)
 
-    def test_a_state_whose_fastest_repeat_was_its_last_one_has_not_converged(self) -> None:
-        """His `after ANALYZE` line, verbatim: still falling when the timer ran out.
+    def test_a_straddling_state_refuses_the_finding_sentence_too(self) -> None:
+        """The `finding:` line is the one the report copies, so it has to be the one that refuses.
 
-        Six-digit precision off his witness. The best repeat was number 5 of 5 and first-to-last was
-        138.9 ms -- larger than the 80.6 ms the same run then credited to `--set`. A statistic that
-        reads a descending sequence's last element as its "best of" is reading the clock, not the state.
+        `0039` and `0040` both let a state whose best repeat beat the ceiling print "the frame already
+        meets the ceiling", and his nine-repeat run then printed it for a state whose own samples spread
+        467.3 to 599.8 ms around that very line. Decorating the sentence would have left the verb in
+        place, so the branch returns a different kind word instead -- `noise`, the same one the gap
+        between two states gets -- and names what to write instead.
         """
-        warming = self.script.verdict([671.709, 672.355, 651.033, 567.871, 532.816], 500)
-        self.assertTrue(self.script.still_warming(warming))
-        self.assertAlmostEqual(self.script.warmth_ms(warming), 138.893)
-        converged = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
-        self.assertFalse(self.script.still_warming(converged))
-        self.assertAlmostEqual(self.script.warmth_ms(converged), 0.167)
-        armed_state = {**warming, "warmth_ms": 138.893, "still_warming": True}
-        self.assertIn("still warming", self.script.state_line("after  ANALYZE", armed_state))
-        self.assertNotIn("warming", self.script.state_line("plain", warming))
+        straddling = self.script.verdict(
+            [599.817, 506.688, 479.025, 478.786, 467.323, 473.393, 469.518, 500.936, 483.275], 500
+        )
+        text = self.script.describe(straddling, straddling)
+        self.assertTrue(text.startswith("noise"), msg=text[:80])
+        self.assertIn("467.3", text)
+        self.assertIn("599.8", text)
+        self.assertIn("6 of 9 repeats under", text)
+        self.assertNotIn("already meets the ceiling", text)
+        self.assertIn("The line is unresolved", text)
+        tight = self.script.verdict([460.0, 470.0], 500.0)
+        self.assertIn("context, not a fix", self.script.describe(tight, tight))
+
+    def test_the_noise_bound_is_strict_and_says_which_way_it_fell(self) -> None:
+        """A gap equal to the interval is not noise, and both outcomes are printed.
+
+        The bound is `abs(gap) < spread`, not `<=`: two states 40 ms apart whose own repeats also spread
+        40 ms are at the edge, and the edge has to be readable in the file rather than inferred from a
+        sign someone chose. `attribution()` is judged on its own arguments here, because `gap_pair()`
+        computes the same comparison a second time for the witness and the two must be pinned together.
+        """
+        wide = self.script.verdict([500.0, 520.0, 540.0], 500)
+        edge = self.script.verdict([540.0, 560.0, 580.0], 500)
+        pair = self.script.gap_pair(wide, edge, first_name="the untuned state", second_name="the next state")
+        self.assertAlmostEqual(pair["observed_ms"], -40.0)
+        self.assertAlmostEqual(pair["spread_ms"], 40.0)
+        self.assertFalse(pair["inside_noise"], msg="40 against 40 is the edge, not inside")
+        self.assertIn("the gap clears it", self.script.noise_line("the ANALYZE", pair))
+        for delta, word in ((0.0, "conditional"), (-0.1, "noise")):
+            with self.subTest(delta=delta):
+                self.assertEqual(
+                    self.script.attribution(
+                        plans_changed=False,
+                        below_ceiling=2,
+                        repeats=3,
+                        gap_ms=40.0 + delta,
+                        spread_ms=40.0,
+                    ),
+                    word,
+                )
+        inside = self.script.gap_pair(
+            wide, self.script.verdict([505.0, 520.0, 535.0], 500), first_name="a", second_name="b"
+        )
+        self.assertTrue(inside["inside_noise"])
+        self.assertIn("the gap is inside the noise", self.script.noise_line("the setting", inside))
+        self.assertIn(
+            "no second state to compare against",
+            self.script.noise_line("the setting", None),
+            msg="a run without `--set` has no second state, and says so instead of printing zeros",
+        )
+
+    def test_the_bound_is_written_before_the_witness_is(self) -> None:
+        """The lines exist to be *stored*, so the ordering inside `main()` is the thing worth pinning.
+
+        `bounds_lines()` is pure and its output is checked above; what no unit test can reach is the one
+        call site, which sits inside `main()` behind a database connection. Deleting it there leaves every
+        other assertion green and turns the bound back into something a reader has to re-measure, so this
+        is the one place where reading the source is the honest test -- and the ordering matters as much as
+        the presence: a line appended after `witness.write_text` is a line printed and not stored.
+        """
+        body = (STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
+        body = body[body.index("def main(") :]
+        self.assertIn("lines += bounds_lines(gap_analyze, gap_setting)", body)
+        self.assertLess(
+            body.index("lines += bounds_lines(gap_analyze, gap_setting)"),
+            body.index("witness.write_text"),
+            msg="the bound has to be in the file, not only on the terminal",
+        )
+
+    def test_both_bound_lines_are_in_the_witness(self) -> None:
+        """The bound is only evidence if it is on disk next to the number it bounds.
+
+        `0040` printed its plan comparison into a file; a reader who has to re-run to learn the noise the
+        number had to clear has been told nothing. The second line is conditional on there being a second
+        comparison at all -- a run without `--set` has an ANALYZE gap and no setting gap, and printing
+        "no second state to compare against" under a heading that never mentioned one is noise of a
+        different kind.
+        """
+        wide = self.script.verdict([500.0, 520.0, 540.0, 560.0], 500)
+        near = self.script.verdict([505.0, 525.0, 545.0], 500)
+        far = self.script.verdict([700.0, 705.0, 710.0], 500)
+        analyze = self.script.gap_pair(wide, near, first_name="a", second_name="b")
+        setting = self.script.gap_pair(near, far, first_name="a", second_name="b")
+        self.assertTrue(analyze["inside_noise"], msg="the first pair is the wide one")
+        self.assertFalse(setting["inside_noise"])
+        lines = self.script.bounds_lines(analyze, setting)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all("noise bound" in line for line in lines), msg=lines)
+        self.assertIn("inside the noise", lines[0])
+        self.assertIn("clears it", lines[1])
+        self.assertEqual(len(self.script.bounds_lines(analyze, None)), 1)
+
+    def test_a_states_own_interval_is_what_a_verdict_has_to_clear(self) -> None:
+        """The replacement for "is it still falling?", and his run is why.
+
+        First attempt said: a state is unmeasured when its fastest repeat is its last one. His warm
+        session then read ``[599.8, 506.7, 479.0, 478.8, 467.3, 473.4, 469.5, 500.9, 483.3]`` for the
+        *untuned* frame -- best at repeat 5 of 9, so "converged" by that rule -- while its best of 467.3 ms
+        already beat a 500 ms ceiling that the same nine samples also missed twice. Whether the state had
+        settled is the wrong question; whether the ceiling sits inside the state's own interval is the
+        right one, and it needs no threshold.
+        """
+        straddling = self.script.verdict(
+            [599.817, 506.688, 479.025, 478.786, 467.323, 473.393, 469.518, 500.936, 483.275], 500
+        )
+        self.assertAlmostEqual(straddling["spread_ms"], 132.494)
+        self.assertAlmostEqual(straddling["ceiling_margin_ms"], 32.677)
+        self.assertTrue(self.script.straddles_ceiling(straddling), msg="it both met and missed 500 ms")
+        self.assertTrue(straddling["passes"], msg="and it still passed on the judged statistic")
+        tight = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        self.assertFalse(self.script.straddles_ceiling(tight))
+        missed = self.script.verdict([671.709, 672.355, 651.033, 567.871, 532.816], 500)
+        self.assertFalse(self.script.straddles_ceiling(missed), msg="0/5 under, and the interval says so")
+
+    def test_drift_is_halves_because_a_run_need_not_be_monotone(self) -> None:
+        """`first to last` was the first attempt at drift and his after-ANALYZE state broke it.
+
+        That state read ``[472.9, 474.4, 473.6, 476.1, 641.1, 657.7, 584.1, 515.6, 521.0]``: endpoints say
+        a 48 ms *improvement*, while the second half averaged 109.7 ms slower than the first. Averaging
+        each half is what makes an outlier at either end unable to pick the sign.
+        """
+        rising = self.script.verdict(
+            [472.862, 474.417, 473.553, 476.107, 641.069, 657.688, 584.05, 515.603, 521.037], 500
+        )
+        self.assertAlmostEqual(self.script.trend_ms(rising), 109.655)
+        endpoint = rising["runs_ms"][0] - rising["runs_ms"][-1]
+        self.assertLess(endpoint, 0.0, msg="first-minus-last reads a rising state as an improvement")
+        tight_state = settled = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        self.assertLess(abs(self.script.trend_ms(settled)), 5.0)
+        self.assertEqual(self.script.trend_ms(self.script.verdict([500.0], 500)), 0.0)
+        state = {
+            **rising,
+            "trend_ms": self.script.trend_ms(rising),
+            "straddles_ceiling": self.script.straddles_ceiling(rising),
+        }
+        line = self.script.state_line("after  ANALYZE", state)
+        self.assertIn("spread 184.8 ms, drift +109.7 ms", line)
+        self.assertIn("the ceiling is inside this state's own interval", line)
+        tight_line = self.script.state_line(
+            "tuned",
+            {
+                **tight_state,
+                "trend_ms": self.script.trend_ms(tight_state),
+                "straddles_ceiling": self.script.straddles_ceiling(tight_state),
+            },
+        )
+        self.assertIn("the ceiling is outside it", tight_line)
 
     def test_the_split_prices_the_order_instead_of_blaming_the_query(self) -> None:
         """`ordering` is what it sounds like: most of the gap was already on its way there.
@@ -501,6 +662,97 @@ class ControlTests(unittest.TestCase):
         capped = self.script.gain_split(naive_ms=30.0, drift_ms=200.0)
         self.assertEqual((capped["ordering_ms"], capped["ordering_share"]), (30.0, 1.0))
         self.assertEqual(self.script.gain_split(naive_ms=0.0, drift_ms=10.0)["ordering_share"], 0.0)
+
+    def test_a_gap_inside_the_states_own_spread_is_called_noise(self) -> None:
+        """The cheapest refusal there is: no control arm, no extra run, one subtraction.
+
+        His `--set max_parallel_workers_per_gather=2` pair: `after ANALYZE` best 532.8 ms with a spread of
+        139.6 ms, tuned best 452.2 ms with a spread of 2.4 ms. The 80.7 ms difference is smaller than the
+        interval the *first* state already covers, so the pair could not have settled whether the setting
+        did anything -- and `ordering`, which needed a control run to say so, never gets asked.
+        """
+        after = self.script.verdict([671.709, 672.355, 651.033, 567.871, 532.816], 500)
+        tuned = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        gap = self.script.gap_pair(
+            after, tuned, first_name="the ANALYZE state", second_name="the tuned state"
+        )
+        self.assertAlmostEqual(gap["observed_ms"], 80.656)
+        self.assertAlmostEqual(gap["spread_ms"], 139.539)
+        self.assertTrue(gap["inside_noise"])
+        self.assertEqual(gap["spread_of"], "the ANALYZE state")
+        self.assertEqual(
+            self.script.attribution(
+                plans_changed=True, below_ceiling=5, repeats=5, gap_ms=gap["observed_ms"],
+                spread_ms=gap["spread_ms"],
+            ),
+            "noise",
+            msg="a moved plan does not rescue a gap the spread already covers",
+        )
+        # and a wide enough gap is *not* noise: the rule is a bound, not a veto
+        wide = self.script.gap_pair(
+            self.script.verdict([700.0, 710.0, 705.0], 500),
+            tuned,
+            first_name="the untuned state",
+            second_name="the tuned state",
+        )
+        self.assertFalse(wide["inside_noise"])
+        exact = self.script.verdict([500.0, 520.0, 540.0], 500)  # spread 40.0
+        self.assertFalse(
+            self.script.gap_pair(
+                exact,
+                self.script.verdict([540.0, 560.0, 580.0], 500),
+                first_name="a",
+                second_name="b",
+            )["inside_noise"],
+            msg="a 40 ms gap against a 40 ms interval is the edge, and the edge is not noise",
+        )
+        self.assertEqual(
+            self.script.attribution(
+                plans_changed=True, below_ceiling=5, repeats=5, gap_ms=wide["observed_ms"],
+                spread_ms=wide["spread_ms"],
+            ),
+            "credited",
+        )
+
+    def test_noise_outranks_the_other_four_and_only_refuted_outranks_it(self) -> None:
+        """Ranking, in the order a reader should be told: is there a verdict at all, then whose it is."""
+        five = dict(below_ceiling=5, repeats=5)
+        for plans_changed, share, kind in (
+            (True, 0.94, "ordering"),
+            (False, 0.94, "ordering"),
+            (True, 0.2, "credited"),
+            (False, 0.2, "conditional"),
+            (False, None, "conditional"),
+            (True, None, "credited"),
+        ):
+            with self.subTest(plans_changed=plans_changed, share=share):
+                self.assertEqual(
+                    self.script.attribution(plans_changed=plans_changed, ordering_share=share, **five), kind
+                )
+        self.assertEqual(
+            self.script.attribution(plans_changed=True, ordering_share=0.9, below_ceiling=0, repeats=5),
+            "refuted",
+            msg="a state nobody met is not made interesting by a control",
+        )
+        for share in (None, 0.9):
+            for plans_changed in (True, False):
+                with self.subTest(share=share, plans_changed=plans_changed):
+                    self.assertEqual(
+                        self.script.attribution(
+                            plans_changed=plans_changed,
+                            ordering_share=share,
+                            gap_ms=20.0,
+                            spread_ms=60.0,
+                            **five,                        ),
+                        "noise",
+                    )
+        self.assertEqual(
+            self.script.attribution(
+                plans_changed=True, gap_ms=20.0, spread_ms=60.0, below_ceiling=0, repeats=5
+            ),
+            "refuted",
+            msg="nobody met the ceiling, so there is nothing to un-credit",
+        )
 
     def test_the_fifth_word_is_the_one_that_survives_a_moved_plan(self) -> None:
         """A plan that moved *and* a gap the control explains is still not a pass.
@@ -529,52 +781,76 @@ class ControlTests(unittest.TestCase):
         )
 
     def test_the_ordering_sentence_says_what_is_left(self) -> None:
-        """What the control buys: a number for the part of the drop that was already on its way there.
+        """The control arm still gets the last word when the states themselves are tight.
 
-        The sentence is `describe()`'s only chance to confuse two intervals. `naive_ms` here is the
-        after-ANALYZE -> tuned gap (80.7 ms), and his `before` state's best is a *different* 144.3 ms
-        away from it, so the sentence must quote the split and no state's own best.
+        Two states that each measure themselves to within a third of a millisecond, 80.7 ms apart, and a
+        control that lands 3.8 ms from the tuned one: the gap clears the noise bound, so the question is
+        still open -- and it is the control that closes it, at 95% ordering. His `=2` pair never reaches
+        this branch, because its `after ANALYZE` state is 139 ms wide; that is the `noise` case, pinned by
+        the test above.
         """
-        after_analyze = self.script.verdict([677.12, 671.709, 672.355, 651.033, 532.816], 500)
+        after_analyze = self.script.verdict([532.9, 532.8, 533.0, 532.85, 532.95], 500)
         tuned = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        control = self.script.verdict([456.0, 456.4, 455.9], 500)
+        gap = self.script.gap_pair(
+            after_analyze, tuned, first_name="the ANALYZE state", second_name="the tuned state"
+        )
+        self.assertFalse(gap["inside_noise"], msg="80.6 ms observed against 2.4 ms of spread")
         split = self.script.gain_split(
             naive_ms=after_analyze["best_ms"] - tuned["best_ms"],
-            drift_ms=after_analyze["best_ms"] - 456.0,
+            drift_ms=after_analyze["best_ms"] - control["best_ms"],
         )
-        self.assertAlmostEqual(
-            after_analyze["best_ms"], 532.816, msg="the split's pair, not the before state"
-        )
+        self.assertGreater(split["ordering_share"], 0.5)
         text = self.script.describe(
             after_analyze,
             tuned,
             state="ANALYZE + SET max_parallel_workers_per_gather=2",
             plans_changed=True,
             split=split,
+            gap=gap,
         )
         self.assertTrue(text.startswith("ordering"), msg=text[:60])
-        self.assertIn(f"the {split['naive_ms']:.1f} ms between the untuned state", text)
-        self.assertIn("came to within 3.8 ms of the tuned one", text)
+        self.assertIn("came to within 3.7 ms of the tuned one", text)
+        self.assertIn("So 76.9 ms (95%) of the gap is the tail of warming", text)
         self.assertIn("is not enough to write the ceiling off", text)
-        for quoted in (after_analyze["best_ms"], tuned["best_ms"]):
-            self.assertNotIn(f"{quoted:.1f}", text, msg="one sentence, one gap")
         self.assertNotIn("conditional", text)
 
-    def test_the_control_arm_runs_without_a_setting_and_invents_no_split(self) -> None:
-        """`--control` alone is a legitimate question, and it has no gap to price.
+    def test_the_noise_sentence_quotes_each_states_own_count(self) -> None:
+        """One sentence, one denominator per fraction.
 
-        With no `--set` there is nothing to `RESET` and no condition whose delta could be split, so the
-        arm still measures the last state again -- and the witness must not reach for a `gain split:` line
-        that would be quoting a `None`.
+        `describe()` used to print the untuned state's `below_ceiling` over the *tuned* state's repeat
+        count -- "1 of 5" for a nine-repeat state, which is the arithmetic this file keeps being written
+        to prevent. Both pairs are now quoted, and the gap is quoted without a sign, because a widening is
+        not a debt.
         """
-        self.assertEqual(self.script.reset_lines({}), [])
-        head = self.source[self.source.index("def main(") :]
-        self.assertLess(
-            head.index("if settings:"),
-            head.index("if args.control:"),
-            msg="the arm is not nested inside the setting branch, so it runs without one",
+        after_analyze = self.script.verdict([671.709, 672.355, 651.033, 567.871, 532.816], 500)
+        tuned = self.script.verdict([452.561, 452.16, 454.608, 454.153, 452.394], 500)
+        text = self.script.describe(
+            after_analyze,
+            tuned,
+            state="ANALYZE + SET max_parallel_workers_per_gather=2",
+            plans_changed=False,
         )
-        self.assertLess(head.index("if split is not None:"), head.index("gain split:"))
-        self.assertGreater(head.index("if split is not None:"), head.index("if control is not None:"))
+        self.assertTrue(text.startswith("noise"), msg=text[:60])
+        self.assertIn("0/5 of the untuned repeats and 5/5 of these ones met the ceiling", text)
+        self.assertIn("139.5 ms that the untuned state's own repeats spread", text)
+        self.assertIn("80.7 ms between the two states", text)
+        # seven repeats against five: the two fractions must not share a denominator
+        seven = self.script.verdict([505.0, 507.0, 509.0, 506.0, 508.0, 505.5, 507.5], 500)
+        uneven = self.script.describe(
+            seven,
+            self.script.verdict([498.0, 510.0, 520.0, 515.0, 512.0], 500),
+            state="ANALYZE",
+            plans_changed=False,
+        )
+        self.assertTrue(uneven.startswith("noise"), msg=uneven[:60])
+        self.assertIn("0/7 of the untuned repeats and 1/5 of these ones met the ceiling", uneven)
+        # a straddling *first* state never reaches that sentence: it is refused its own, earlier
+        nine = self.script.verdict(
+            [599.817, 506.688, 479.025, 478.786, 467.323, 473.393, 469.518, 500.936, 483.275], 500
+        )
+        self.assertIn("6 of 9 repeats under", self.script.describe(nine, tuned, state="ANALYZE"))
+        self.assertNotIn("+", text.split(".")[0], msg="no sign on a gap this sentence refuses to interpret")
 
     def test_the_control_is_measured_after_every_state_it_must_follow(self) -> None:
         head = self.source[self.source.index("def main(") :]
