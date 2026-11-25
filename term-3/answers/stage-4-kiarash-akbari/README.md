@@ -1,98 +1,90 @@
-# مرحلهٔ ۴ — سامانهٔ هشدار زودهنگام (اسکلت)
+# مرحلهٔ ۴ — سامانهٔ هشدار زودهنگام
 
-این پوشه فعلاً **اسکلت** است، نه سامانه. چیزی که اینجا هست را می‌توان اجرا کرد و چیزی
-که نیست را با نام فاز و شمارهٔ بند می‌گوید. دلیلش یک قاعدهٔ ساده است: اگر «یک فرمان» و
-مرزهای زمانی و شکل خطاها آخر کار ساخته شوند، فاز ۴ و ۵ کدشان را حول آن‌ها شکل نمی‌دهند
-و همان لحظه‌ای که همه‌چیز باید زیر ۴۵ دقیقه تمام شود، کشف می‌شود.
+سامانه‌ای که در لحظهٔ تأیید هر سفارش Olist می‌گوید کدام سفارش‌ها احتمالاً به نظر منفی (امتیاز ۱ یا ۲)
+می‌رسند، و ۱۰٪ بالای فهرست را برای پیگیری تیم پشتیبانی بیرون می‌دهد. یک فرمان، از دیتابیسِ خالی تا فهرست.
 
-وضعیت هر الزام در `docs/REQUIREMENTS_CHECKLIST.md` است. شناسه‌های بندها در کد و در این
-فایل با رقم ASCII نوشته می‌شوند (`4.1`) و خودِ فایل چک‌لیست با رقم فارسی (`۴.۱`)؛
-یکی‌اند.
+- گزارش «دلیل حل»: `report.md` — تصمیم‌های معماری: `decisions.md` — جمع‌بندی برای مدیر عملیات: `manager_summary.md`
+- نوتبوک‌ها: `01_exploration.ipynb` (کشف، ممیزی زمانی، فرضیه‌ها، شکست‌ها) و `02_system.ipynb` (روایت سامانه)
+- وضعیت هر الزام: `docs/REQUIREMENTS_CHECKLIST.md` — شاهدها: `docs/evidence/`. شناسهٔ بندها در کد با رقم ASCII
+  (`4.1`) و در چک‌لیست با رقم فارسی (`۴.۱`) نوشته می‌شود؛ یکی‌اند.
+- سقف‌ها: کل زنجیره زیر 45 دقیقه، کوئری ویژگی زیر 500 میلی‌ثانیه (`config` → `budget.chain_minutes`، `features.feature_query_ms`).
 
-## اجرا از صفر
+## پیش‌نیاز
+
+- Python 3.12 و PostgreSQL 16 (یک دیتابیس خالی و کاربری که بتواند در آن schema بسازد).
+- نه فایل CSVِ Olist (`olistbr/brazilian-ecommerce` از Kaggle) در `data/raw/olist/` — یا هر پوشه‌ای که
+  `CAPSTONE_OLIST_DIR` به آن اشاره کند. داده در Git نمی‌آید.
+- دسترسی به `servicodados.ibge.gov.br` (منبع بیرونی؛ رایگان و بی‌کلید).
+- پوشهٔ `../stage-1-kiarash-akbari` کنار همین پوشه (لایهٔ دریافت همان package مرحلهٔ ۱ است).
+
+## راه‌اندازی و اجرای کل زنجیره
 
 ```bash
-cd stage-4
-python3 -m venv .venv && source .venv/bin/activate
-cp config/capstone.example.toml config/capstone.toml     # نسخهٔ محلی؛ در Git نمی‌آید
-export PYTHONPATH="$PWD/src:$PWD/../stage-1/src"
-python3 -m unittest discover -s tests                     # آفلاین: بدون DB، بدون شبکه
-python3 -m capstone doctor                                # چه چیزی هنوز باز است
-python3 -m capstone chain --dry-run                       # ترتیب زنجیره و گره‌هایش
-python3 scripts/write_sql_checksums.py --check             # فایل‌های SQL هم‌checksum‌اند؟
+cd term-3/answers/stage-4-kiarash-akbari
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export PYTHONPATH="$PWD/src:$PWD/../stage-1-kiarash-akbari/src"
+export CAPSTONE_DATABASE_URI="postgresql://USER:PASSWORD@localhost:5432/DBNAME"   # رمز فقط در محیط
+export CAPSTONE_OLIST_DIR="/path/to/olist/csvs"        # اگر CSVها در data/raw/olist نیستند
+python scripts/run_chain.py                            # یک فرمان: ingest → load → audit → features → external → model → list
 ```
 
-`--config` را می‌شود هم قبل از فرمان داد و هم بعدش (`capstone doctor --config F` و
-`capstone --config F doctor`)؛ اگر فایلی که نام برده‌ای وجود نداشته باشد، خطا با کد `78`
-می‌آید و بی‌سروصدا سراغ پیش‌فرض نمی‌رویم — یک غلط تایپی نباید خودش را «قراردادِ
-تصمیم‌نگرفته» جا بزند. تست‌های زندهٔ SQL (آن‌ها که `olist` بارگذاری‌شده می‌خواهند) با
-`CAPSTONE_DATABASE_URI` فعال می‌شوند؛ بدون آن skip می‌شوند و پیامِ skip می‌گوید دقیقاً چه
-چیزی تأیید نشده. خود SQL را این‌طور روی یک دیتابیس می‌گذاری:
+خروجی‌ها در `data/curated/`: `followup_list.csv` (فهرست پیگیری)، `capacity_table.json` (جدول ۵/۱۰/۲۰٪)،
+`model_metrics.json`، `model.joblib`، و manifest زمان هر مرحله. کد خروج غیرصفر یعنی یک مرحله ایستاده و
+manifest می‌گوید کدام. روی ماشین سندباکس کل زنجیره روی دیتابیسِ تازه‌ساخته ۱۱۹ ثانیه طول کشید
+(`docs/evidence/chain-run-manifest.json`؛ بودجه ۴۵ دقیقه).
+
+`config/capstone.default.toml` قرارداد تصمیم‌گرفته و بی‌رمز است و همه‌چیز از آن خوانده می‌شود؛ اگر روی ماشین
+خودتان چیزی متفاوت لازم است، `config/capstone.toml` بسازید (در Git نمی‌آید).
+
+## پیش‌بینی برای سفارش‌های تازه
 
 ```bash
-for f in sql/0*.sql; do psql "$CAPSTONE_DATABASE_URI" -v ON_ERROR_STOP=1 -f "$f"; done
+python -m capstone predict --input path/to/fresh_orders/        # پوشه‌ای با CSVهای هم‌نام و هم‌schemaِ Olist
 ```
 
-خروجی `doctor` یک خط به هر بررسی است و کد خروجش از همان جدول مرحلهٔ ۱ می‌آید: `78`
-یعنی یک تصمیم دانشجو نوشته نشده، `65` یعنی جدول ممیزی مشکل دارد، `67` یعنی فاز
-پشتِ یک مرحله هنوز کدنویسی نشده. هیچ‌کدام «صفر» نیستند و هیچ‌کدام خطای غیرمنتظره نیست.
+پوشه باید `olist_orders_dataset.csv`، `olist_customers_dataset.csv`، `olist_order_items_dataset.csv` و
+`olist_order_payments_dataset.csv` داشته باشد (محصولات و فروشندگان اختیاری). سرستون‌ها با DDLِ مرحلهٔ ۲ سنجیده
+می‌شوند و فایل غلط با پیامی که نام فایل و ستون را می‌گوید رد می‌شود. ردیف‌ها با loaderِ مرحلهٔ ۱ در یک schemaِ
+موقت بار می‌شوند، همان Viewها ویژگی را می‌سازند، مدلِ ذخیره‌شده رتبه می‌دهد، و تراکنش rollback می‌شود؛ دیتابیس
+دست‌نخورده می‌ماند. پیش‌نیاز: زنجیره یک بار اجرا شده باشد. تمرین همین مسیر روی یک ماه:
+`python scripts/sealed_cut_rehearsal.py --olist "$CAPSTONE_OLIST_DIR"`.
 
-## فرمان‌ها
+## فرمان‌های دیگر
 
-| فرمان | امروز چه می‌کند | چه زمانی کامل می‌شود |
-|---|---|---|
-| `python -m capstone doctor [--json]` | config، جدول ممیزی، `sql/`، فایل‌های تحویل و پل‌های زنجیره را می‌خواند و می‌گوید کدام بند باز است | همین حالا کار می‌کند |
-| `python -m capstone audit --print-header` | سرستون دقیق `column_audit.csv` را چاپ می‌کند | همین حالا |
-| `python -m capstone audit --template-out <path>` | برای هر ستونِ DDL یک سطر `unverified` می‌نویسد؛ هیچ ستونی با این فایل مجاز نمی‌شود | فاز ۲ |
-| `python -m capstone audit --coverage --require-complete` | می‌گوید کدام ستون‌ها هنوز ممیزی نشده‌اند و با کد `65` می‌ایستد | فاز ۲ |
-| `python -m capstone external [--fetch] [--report] [--load]` | لایهٔ منبع بیرونی، سه حالت جدا: بدون آرگومان فقط می‌گوید چه تنظیم شده و به دیتابیس نیازی ندارد؛ `--fetch` **یک** درخواست می‌زند (بی retry، بی pagination — سقف درخواستِ IBGE مستند نیست) و تعداد سطری که از قراردادِ پاسخ رد نشده‌اند را چاپ می‌کند؛ `--report` نرخ تطابق را از `capstone.v_external_match_rate` برمی‌دارد؛ `--load` اول می‌گیرد بعد می‌ریزد، و ریختن فقط از `capstone.upsert_external_municipio` است. منبعِ تنظیم‌نشده کد `67` می‌دهد نه traceback، نبودِ دیتابیس `78`، و مسیرِ شبکه اگر بست بود پیام می‌دهد نه استثنا | همین حالا؛ خودِ API از این محیط سنجیده نشده (`decisions.md` §۸) |
-| `python -m capstone chain --dry-run [--json]` | پنج گام زنجیره را با دلیلِ بلوکه‌شدن چاپ می‌کند | فاز ۶ |
-| `python -m capstone chain` | هر گام را با زمان‌گیر جدا اجرا می‌کند و manifest می‌نویسد | فاز ۶ |
-| `python -m capstone predict --input <csv>` | schema فایل تازه را می‌سنجد؛ اگر درست بود، جلوی مدلِ نوشته‌نشده می‌ایستد | فاز ۶ |
+| فرمان | کار |
+|---|---|
+| `python -m capstone doctor` | پیش‌نیازها، config، جدول ممیزی و فایل‌های تحویل را می‌سنجد و می‌گوید چه چیزی کم است |
+| `python -m capstone audit --coverage --require-complete` | هر ستونی که به مدل می‌رسد در `docs/evidence/column_audit.csv` حکم و منبع دارد؟ |
+| `python -m capstone chain` | همان زنجیرهٔ `scripts/run_chain.py`؛ با `--dry-run` فقط برنامه را چاپ می‌کند |
+| `python -m capstone predict --input <folder>` | مسیر پیش‌بینی (بالا) |
+| `python -m capstone external --fetch --report` | یک درخواست به IBGE و نرخ تطابق شهرها |
 
-دو اسکریپت هم همان کاری را می‌کنند که فاز ۲ و ۶ باید در خود SQL و در زنجیره ببندند:
+## تست‌ها
 
 ```bash
-python3 scripts/audit_columns.py --only shipping_limit | psql -f -     # سه شاهد بند 4.3
-python3 scripts/run_chain.py --dry-run                                 # همان برنامه، JSON
+python -m unittest discover -s tests          # بدون CAPSTONE_DATABASE_URI تست‌های زنده skip می‌شوند
+```
+
+با `CAPSTONE_DATABASE_URI` تست‌های SQL و تست سرتاسری (زنجیره روی دادهٔ ساختگی تا پیش‌بینی) هم اجرا می‌شوند.
+تست ضدنشت در `tests/test_capstone_sql_guards.py` و `tests/test_capstone_features.py` است.
+
+## ساختن نوتبوک‌ها و شاهدها (بعد از زنجیره)
+
+```bash
+python scripts/build_exploration_notebook.py --execute --kernel --force   # 01_exploration.ipynb در kernel تازه
+python scripts/build_system_notebook.py                                    # 02_system.ipynb در kernel تازه
+python scripts/cheating_model_gap.py                                       # مدل تقلبی ← docs/evidence/
+python docs/evidence/model-ablation-run.py                                 # با/بدون منبع بیرونی، همهٔ خانواده‌ها
 ```
 
 ## ساختار
 
 ```
-stage-4/
-├── src/capstone/     config، audit، timing، chain، predict، cli و doctor
-├── tests/            ۱۱۱ آزمون آفلاین (stdlib؛ بدون pandas، بدون PostgreSQL)
-├── sql/              قرارداد فایل‌های نسخه‌دار -- هنوز بدون .sql، با دلیل
-├── scripts/          audit_columns.py و run_chain.py
-├── config/           capstone.example.toml (قرارداد ردیابی‌شده) و capstone.toml (محلی)
-├── data/             raw / curated / quarantine -- هیچ‌کدام در Git نمی‌آیند
-└── docs/             ROADMAP، چک‌لیست، گزارش فاز ۰، شواهد
+src/capstone/   ingest، features، external، system (مدل)، capacity، predict، chain، cli
+sql/            001–006: schema، نگهبان زمانی، Viewهای ویژگی، توابع as-of، منبع بیرونی، پل
+scripts/        run_chain، notebook builders، cheating/sealed-cut harnessها، checksums
+config/         capstone.default.toml (تصمیم‌ها) و capstone.example.toml
+docs/           evidence/، feature_hypotheses.csv، سلول‌های دو نوتبوک، چک‌لیست
+tests/          تست‌های مرحله (آفلاین + زنده با DB)
 ```
-
-## چیزی که این اسکلت *انجام نمی‌دهد*
-
-- هیچ عددی اندازه نمی‌گیرد. سقف‌ها (`45` دقیقه برای زنجیره، `500` میلی‌ثانیه برای کوئری
-  ویژگی) از config خوانده می‌شوند و مقایسه‌شان در `capstone.features.check_query_cost`
-  است؛ عدد اجرا هنوز وجود ندارد و در گزارش هم عددِ بی‌منبع نوشته نمی‌شود.
-- هیچ ستونی را مجاز نمی‌داند. `capstone.audit.require_allowed` نگهبانِ پایتون است و
-  `capstone.require_allowed(text[])` در `sql/002_time_guard.sql` همان پرسش را داخل
-  دیتابیس می‌پرسد؛ جدول `capstone.column_audit` تا پر نشود خالی است و «خالی» یعنی «رد»،
-  نه «قبول». ورودی هر دو `docs/evidence/column_audit.csv` است.
-- تصمیم‌های دانشجو را *برایت* تعیین نمی‌کند. `config/capstone.example.toml` عمداً روی
-  `"unset"` است و `load_config` تا آن‌ها نوشته نشوند خطا می‌دهد؛ این «قفل» نیست،
-  همان قاعده‌ای است که در `04 §تعریف دقیق مسئله` به تو واگذار شده (بندهای 3.3 تا 3.6).
-  چهار تصمیم در `decisions.md` گرفته و ثبت شده‌اند، و چون `config/capstone.toml` در Git
-  نمی‌آید، مرجعِ ردیابی‌شده همان `decisions.md` است.
-- منبع API را پیشنهاد نمی‌دهد؛ انتخاب با توست (بند 12.1). `external.name = "none"` هم یک
-  پاسخِ کامل است — «منبع نمی‌گیریم و این را به‌عنوان یافته گزارش می‌کنیم» — و باید مثل
-  بقیه در `decisions.md` نوشته شود؛ خالی‌گذاشتن یعنی هنوز تصمیم نگرفته‌ای.
-
-## پیش‌نیازهایی که این اسکلت فرض می‌کند
-
-`stage-1/src` باید روی مسیر باشد تا دو گام اول زنجیره (`ingest`، `load-database`)
-از تفسیرِ تو import شوند؛ `data_factory` در `stage-1/pyproject.toml` تعریف شده و
-مرحلهٔ ۱ همان‌جا نصب می‌شود. کف پایتون از `stage-1/pyproject.toml` میراث است
-(`3.12`)، و `capstone doctor` نسخهٔ جاری را با همان عدد مقایسه می‌کند.
-`requirements.txt` این مرحله هنوز نوشته نشده (بند 2.9 باز است)؛ آزمون‌های آفلاین
-هیچ وابستگی بیرونی نمی‌خواهند، و برای همین همین حالا هم اجرا می‌شوند.
