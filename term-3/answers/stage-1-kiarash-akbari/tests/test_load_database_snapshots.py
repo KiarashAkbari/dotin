@@ -377,7 +377,11 @@ class EmptyDatabaseSnapshotTests(unittest.TestCase):
         self.csv_dir = root / "csv"
         self.csv_dir.mkdir()
         with self.engine.connect() as connection:
+            # Every test starts from the same empty database: --reset keeps the
+            # ledger rows of schemas it does not drop, so drop them all here.
             connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {OLIST_SCHEMA} CASCADE"))
+            connection.execute(sa.text("DROP SCHEMA IF EXISTS factory CASCADE"))
+            connection.execute(sa.text("DROP TABLE IF EXISTS public.data_factory_migrations"))
             connection.execute(
                 sa.text((self.sql_dir / "001_create_olist_schema.sql").read_text(encoding="utf-8"))
             )
