@@ -1170,5 +1170,117 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(script.witness_path(base, {}), base, msg="an untuned run keeps the old name")
 
 
+class PlanMechanismTests(unittest.TestCase):
+    """What the plan says a condition *could* do, which no number of repeats can decide.
+
+    Three runs of the same command on his machine credited and then de-credited `=2` with a gap that
+    changed sign between them (42.3 ms, then -3.4, then +0.9). The arithmetic was right every time and it
+    could not settle the question, because the question was whether the setting had a mechanism at all --
+    and the plan already answers that: `Workers Planned: 1` under a cap of `2` means the cap is not what
+    limited the plan. These tests pin the mechanism reads, and the refusal to answer when the plan does not
+    contain one.
+    """
+
+    PLAN = (
+        "Gather  (cost=22585.18..39901.76 rows=99265 width=261) (actual rows=99281 loops=1)\n"
+        "  Workers Planned: 1\n"
+        "  Workers Launched: 1\n"
+        "  Buffers: shared hit=17887\n"
+        "  ->  Hash Left Join  (cost=21585.18..28975.26 rows=58391 width=261) (actual rows=49640 loops=2)\n"
+        "Planning Time: 2.577 ms\n"
+        "Execution Time: 465.429 ms"
+    )
+
+    def setUp(self) -> None:
+        self.script = load_script()
+        self.source = (STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
+
+    def test_a_cap_the_planner_never_reached_is_inert(self) -> None:
+        plan_cap = self.script.cap_binding(
+            {"max_parallel_workers_per_gather": "2"}, {"before": self.PLAN, "tuned": self.PLAN}
+        )
+        self.assertEqual(plan_cap["planned"], 1)
+        self.assertEqual(plan_cap["cap"], 2)
+        self.assertFalse(plan_cap["binding"], msg="1 planned under a cap of 2: cost chose, not the setting")
+        line = self.script.inert_line(plan_cap)
+        self.assertIn("setting inert: `Workers Planned: 1` in `before` and `tuned`", line)
+        self.assertIn("no number of repeats makes this condition measurable", line)
+        # the cap set to what the planner already wanted *is* the limit: same plan, opposite claim
+        limited = self.script.cap_binding(
+            {"max_parallel_workers_per_gather": "1"}, {"before": self.PLAN, "tuned": self.PLAN}
+        )
+        self.assertTrue(limited["binding"])
+        self.assertIn("setting binding:", self.script.inert_line(limited))
+        # three ways to have no mechanism to report, and each must stay silent rather than guess
+        self.assertIsNone(self.script.cap_binding({"work_mem": "64MB"}, {"before": self.PLAN}))
+        self.assertIsNone(self.script.cap_binding({"max_parallel_workers_per_gather": "DISABLED"},
+                                                   {"before": self.PLAN}))
+        self.assertIsNone(self.script.cap_binding({"max_parallel_workers_per_gather": "2"},
+                                                   {"before": "Seq Scan on t  (cost=0.00..1.00 rows=1)"}))
+
+    def test_a_current_estimate_is_not_a_stale_plan_cured(self) -> None:
+        drift = self.script.estimate_drift(self.PLAN)
+        self.assertEqual(drift["estimated_rows"], 99265)
+        self.assertEqual(drift["actual_rows"], 99281)
+        self.assertLess(drift["pct"], 0.1, msg="his untuned state estimated the frame to within 16 rows")
+        line = self.script.stats_line(drift, moved_analyze=False, ceiling_ms=500.0)
+        self.assertIn("statistics already current", line)
+        self.assertIn("(0.02% off)", line)
+        self.assertIn("`ANALYZE` earns credit only on a frame rebuilt without it", line)
+        self.assertIsNone(self.script.stats_line(drift, True, 500.0), msg="a moved plan has an effect to price")
+        off = {"estimated_rows": 65000, "actual_rows": 99281, "pct": 34.5}
+        self.assertIsNone(self.script.stats_line(off, False, 500.0), msg="a wrong estimate is the story itself")
+        self.assertIsNone(self.script.estimate_drift("Seq Scan on t  (cost=0.00..1.00 rows=1)"))
+
+    def test_the_noise_sentence_carries_the_mechanism(self) -> None:
+        """The clause has to be in the line `report.md` copies, not only in a witness line above it.
+
+        Numbers from his third 15-repeat run, the one whose plans were byte-identical in all three states.
+        """
+        v = self.script.verdict
+        before = v([1760.916, 701.146, 702.381, 691.674, 679.858, 712.591, 702.167, 647.347, 528.772,
+                    481.585, 452.085, 451.043, 483.502, 441.688, 451.449], 500)
+        after = v([467.302, 469.85, 522.729, 519.671, 472.524, 474.059, 472.003, 489.961, 469.43,
+                   475.465, 472.185, 479.726, 484.251, 471.052, 484.832], 500)
+        tuned = v([474.739, 477.117, 479.597, 476.01, 479.22, 478.793, 491.288, 478.424, 475.968,
+                   476.392, 479.684, 466.43, 473.643, 474.283, 469.713], 500)
+        control = v([477.116, 481.044, 472.519, 471.468, 474.032, 476.01, 471.647, 473.518, 468.174,
+                     477.799, 478.551, 471.331, 472.928, 472.953, 481.679], 500)
+        split = self.script.gain_split(
+            naive_ms=after["best_ms"] - tuned["best_ms"], drift_ms=after["best_ms"] - control["best_ms"]
+        )
+        self.assertAlmostEqual(split["naive_ms"], 0.872, places=3, msg="the gap changed sign since run two")
+        gap = self.script.gap_pair(after, tuned, first_name="the ANALYZE state", second_name="the tuned state")
+        inert = self.script.cap_binding(
+            {"max_parallel_workers_per_gather": "2"}, {"before": self.PLAN, "tuned": self.PLAN}
+        )
+        text = self.script.describe(
+            before, tuned, state="ANALYZE + SET max_parallel_workers_per_gather=2", plans_changed=False,
+            split=split, gap=gap, inert=inert,
+        )
+        self.assertTrue(text.startswith("noise: the 0.9 ms between the two states"), msg=text[:56])
+        self.assertIn("the planner asked for 1 worker, under a cap of 2 it never reached", text)
+        self.assertIn("no repeat count will give it one", text)
+        without = self.script.describe(
+            before, tuned, state="ANALYZE + SET max_parallel_workers_per_gather=2", plans_changed=False,
+            split=split, gap=gap,
+        )
+        self.assertNotIn("the planner asked for", without, msg="no mechanism read, no mechanism clause")
+
+    def test_both_mechanism_lines_are_written_into_the_witness(self) -> None:
+        """A fact computed in `main()` and printed only to the terminal is a fact the file loses."""
+        body = self.source[self.source.index("def main(") :]
+        for mark in ("inert = cap_binding(", "drift = estimate_drift(plan_before)", "inert_text = inert_line(inert)"):
+            self.assertIn(mark, body)
+        write = body.index("witness.write_text")
+        for mark in ("[stats_text] if stats_text else []", "[inert_text] if inert_text else []"):
+            self.assertLess(body.index(mark), write, msg=f"{mark} has to reach the file")
+        self.assertIn("inert=inert", body[:write], msg="the sentence, not only the line")
+        for key in ('"parallel_cap": inert', '"plan_estimate_drift": drift'):
+            self.assertIn(key, body[write:], msg="and the same answer in the JSON")
+        # the two lines sit beside the plan facts they belong to, not in a block of their own at the bottom
+        self.assertLess(body.index('"  plan moved across the setting:'), body.index("[inert_text] if inert_text"))
+        self.assertLess(body.index('"  plan moved across the ANALYZE:'), body.index("[stats_text] if stats_text"))
+
 if __name__ == "__main__":
     unittest.main()

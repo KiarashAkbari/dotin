@@ -406,6 +406,109 @@ def workers_launched(plan: str) -> list[int]:
     return [int(n) for n in re.findall(r"Workers Launched: (\d+)", plan)]
 
 
+#: the only setting whose entire job is to raise a ceiling: `Workers Planned` is the planner's decision,
+#: `Workers Launched` the resource manager's, and a plan that *planned* fewer workers than the cap allows
+#: was never limited by the cap at all
+PARALLEL_CAP = re.compile(r"max_parallel_workers_per_gather")
+PLAN_GATHER_ROWS = re.compile(r"^Gather\s+\(cost=[\d.]+\.\.[\d.]+ rows=(\d+)", re.M)
+PLAN_GATHER_ACTUAL = re.compile(r"^Gather\s+\(.*?\(actual rows=(\d+)", re.M)
+
+
+def workers_planned(plan: str) -> list[int]:
+    """Every `Workers Planned: N` in the plan -- normally one, from the top Gather.
+
+    The sibling of `workers_launched`, and the two answer different questions: what the planner wanted,
+    versus what the cluster gave. `max_parallel_workers_per_gather` can only act on the first.
+    """
+    return [int(n) for n in re.findall(r"Workers Planned: (\d+)", plan)]
+
+
+def cap_binding(settings: dict[str, str], plans: dict[str, str]) -> dict | None:
+    """Whether the parallel cap in `settings` is what limited these plans, or was never reached.
+
+    `attribution()` answers the statistical question -- is this gap smaller than the states' own spread --
+    and a reader who is told `noise` reasonably asks how many repeats would settle it. None, if the
+    condition cannot move the plan at all: with `Workers Planned: 1` under a cap of `2`, the planner was
+    limited by cost, not by the setting, so the gap is not merely small, it is unpriceable. Returns None
+    when the setting is not the parallel cap, when its value is not a number (a word like `DISABLED` is a
+    different claim), or when no plan carries a Gather -- no plan, no mechanism, and no invented one.
+    """
+    cap = next((value for key, value in settings.items() if PARALLEL_CAP.search(key)), None)
+    if cap is None:
+        return None
+    try:
+        limit = int(cap)
+    except ValueError:
+        return None
+    planned = {name: max(values) for name, values in ((k, workers_planned(p)) for k, p in plans.items()) if values}
+    if not planned:
+        return None
+    top = max(planned.values())
+    return {"cap": limit, "planned": top, "per_state": planned, "binding": top >= limit}
+
+
+def estimate_drift(plan: str) -> dict | None:
+    """How far the top node's own row estimate is from what the same run measured, in percent.
+
+    A stale-plan story needs a stale estimate, and the plan carries both numbers on one line: `ANALYZE` is
+    credited with a pass only if the estimate was wrong before it ran. His 15-repeat run read
+    `Gather (cost=22585.18..39901.76 rows=99265 width=261) (actual rows=99281 loops=1)` in the *untuned*
+    state -- 0.02% off, which is what "there is no stale-plan effect left to measure on this database"
+    means, and is a different claim from "we measured no effect": only the second tells a reader to stop
+    repeating the command.
+    """
+    estimated, actual = PLAN_GATHER_ROWS.search(plan), PLAN_GATHER_ACTUAL.search(plan)
+    if estimated is None or actual is None:
+        return None
+    est, act = int(estimated.group(1)), int(actual.group(1))
+    if act == 0:
+        return None
+    return {"estimated_rows": est, "actual_rows": act, "pct": abs(est - act) / act * 100.0}
+
+
+def name_list(names) -> str:
+    """``a``, ``a and b``, ``a, b and c`` -- a witness line is prose, not a list dump.
+
+    The states are joined in the order they were measured, because "after and before and tuned" reads like
+    an alphabetised dict, and a reader should not have to unsort the one sentence that names them.
+    """
+    spelled = [f"`{name}`" for name in names]
+    if len(spelled) == 1:
+        return spelled[0]
+    return " and ".join([", ".join(spelled[:-1]), spelled[-1]])
+
+
+def inert_line(inert: dict | None) -> str | None:
+    """The witness line that prices a setting by mechanism instead of by repeats, or None for no claim."""
+    if inert is None:
+        return None
+    where = name_list(inert["per_state"])
+    if not inert["binding"]:
+        return (
+            f"  setting inert: `Workers Planned: {inert['planned']}` in {where} against a cap of "
+            f"{inert['cap']} -- the cap is not what limited the plan, so no number of repeats makes this "
+            "condition measurable on this query; `Workers Planned` is the planner's own choice and it "
+            "stopped below the ceiling you raised"
+        )
+    return (
+        f"  setting binding: `Workers Planned: {inert['planned']}` reached the cap of {inert['cap']} in "
+        f"{where} -- the plan was limited by the setting, so a change in it is a mechanism and not noise"
+    )
+
+
+def stats_line(drift: dict | None, moved_analyze: bool, ceiling_ms: float) -> str | None:
+    """The witness line that says whether `ANALYZE` can still be priced here, or None for no claim."""
+    if drift is None or moved_analyze or drift["pct"] > 1.0:
+        return None
+    return (
+        f"  statistics already current: the *untuned* plan estimates {drift['estimated_rows']:,} rows "
+        f"against {drift['actual_rows']:,} it actually returned ({drift['pct']:.2f}% off), so there was no "
+        "stale estimate for this `ANALYZE` to correct -- `ANALYZE` earns credit only on a frame rebuilt "
+        "without it, and repeating this command on this database cannot change that. Read the "
+        f"{ceiling_ms:.0f} ms line as met-but-thin, and buy headroom in the query, not in the statistics"
+    )
+
+
 def plan_changed(before: str, after: str) -> bool:
     """Whether the two states ran *different* plans, which is what a setting has to do to be credited.
 
@@ -624,6 +727,7 @@ def describe(
     plans_changed: bool = True,
     split: dict | None = None,
     gap: dict | None = None,
+    inert: dict | None = None,
 ) -> str:
     """The sentence the report needs, in the shape of a decision rather than a number.
 
@@ -639,6 +743,13 @@ def describe(
     where no repeat met the ceiling opens with the word the report acts on, `query finding`.
     """
     n = len(after["runs_ms"])
+    mechanism = (
+        f"; and the plan says why: the planner asked for {inert['planned']} worker"
+        f"{'' if inert['planned'] == 1 else 's'}, under a cap of {inert['cap']} it never reached -- so this "
+        "condition has no mechanism here and no repeat count will give it one"
+        if inert is not None and not inert["binding"]
+        else ""
+    )
     if gap is None:
         gap = {
             "observed_ms": round(before["best_ms"] - after["best_ms"], 3),
@@ -722,7 +833,7 @@ def describe(
                 if bool(before["passes"]) != bool(after["passes"])
                 else " -- both sides met it, so this pair measured the width of a band, not a movement"
             )
-            + f"{price}{straddle}"
+            + f"{price}{straddle}{mechanism}"
         )
     if kind == "conditional":
         return (
@@ -741,6 +852,7 @@ def describe(
             f"{after['below_ceiling']} of {n} repeats in that state were under the ceiling, with the "
             f"fastest as repeat {after['best_repeat']} of {n}. carry this as one fast outlier, not as "
             "a pass, and not as a condition the report can rely on"
+            + mechanism
         )
     if kind == "credited" and after["passes"]:
         remedy = (
@@ -946,6 +1058,17 @@ def main(argv: list[str] | None = None) -> int:
         if tuned is not None
         else "not measured"
     )
+    # mechanism before arithmetic: what the plan says the setting could do at all, and what the estimate
+    # says is left for ANALYZE to correct on this database. Both are read from text already in hand, so
+    # neither depends on how many repeats the run took
+    inert = cap_binding(
+        settings,
+        {"before": plan_before, "after": plan_after, "tuned": plan_tuned} if tuned is not None
+        else {"before": plan_before, "after": plan_after},
+    )
+    drift = estimate_drift(plan_before)
+    inert_text = inert_line(inert)
+    stats_text = stats_line(drift, moved_analyze, ceiling)
     verdict_text = describe(before, after, plans_changed=moved_analyze, gap=gap_analyze)
     verdict_tuned_text = (
         describe(
@@ -955,6 +1078,7 @@ def main(argv: list[str] | None = None) -> int:
             plans_changed=moved_setting,
             split=split,
             gap=gap_setting,
+            inert=inert,
         )
         if tuned is not None
         else None
@@ -996,6 +1120,7 @@ def main(argv: list[str] | None = None) -> int:
             else []
         ),
         f"  plan moved across the ANALYZE: {moved_analyze} ({kind_analyze})",
+        *( [stats_text] if stats_text else [] ),
         "  transfer: the judged statistic discards the rows on the server (`features.FRAME_TIMING_SQL`),"
         f" so the {read_rows:,} rows the frame returns are priced only by the read sample above",
         "",
@@ -1005,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
         lines += [
             state_line(f"after  ANALYZE + SET {tuning}", tuned),
             f"  plan moved across the setting: {moved_setting} ({kind_setting})",
+            *( [inert_text] if inert_text else [] ),
             f"with the setting applied: {verdict_tuned_text}",
         ]
     lines += bounds_lines(gap_analyze, gap_setting)
@@ -1063,6 +1189,12 @@ def main(argv: list[str] | None = None) -> int:
                     "tuned": plan_shape(plan_tuned) if tuned is not None else None,
                 },
                 "plans_moved": {"analyze": moved_analyze, "setting": moved_setting},
+                # the same two questions answered from the plan text instead of the clock: what the
+                # planner asked for against the cap it was given, and how far the untuned estimate was
+                # from the rows the same run counted
+                "parallel_cap": inert,
+                "plan_estimate_drift": drift,
+                "witness_lines": {"setting_inert": inert_text, "statistics": stats_text},
                 "attribution": {"analyze": kind_analyze, "setting": kind_setting},
                 "noise_bounds": {"analyze": gap_analyze, "setting": gap_setting},
                 "frame_rows_read": read_rows,
