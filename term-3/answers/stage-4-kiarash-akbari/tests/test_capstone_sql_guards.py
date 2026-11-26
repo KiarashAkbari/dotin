@@ -612,6 +612,37 @@ class StaticSqlContractTests(unittest.TestCase):
         self.assertEqual(referenced, set(NON_FEATURE_VIEWS))
         self.assertEqual(len(NON_FEATURE_VIEWS), 3)
 
+    def test_the_frame_reads_each_source_once(self):
+        """`v_feature_frame` joins `olist.orders` and the zip centroids zero times itself (section 38).
+
+        The two-scan shape -- the anchor view over `orders` plus `JOIN olist.orders AS o` for the
+        promise columns, and `mv_zip_centroid` joined once per end of the span -- is what this refuses
+        to let back in. `orders` still reaches the frame, once, through `v_decision_moment`; both
+        centroids arrive in one row of `mv_order_centroids`. The live twin below counts the plan's own
+        scan nodes; this one reads the text, so it runs without a database.
+        """
+        frame = dict(blocks_of(body_of((SQL_DIR / "003_feature_views.sql").read_text(encoding="utf-8"))))[
+            "v_feature_frame"
+        ]
+        self.assertEqual(re.findall(r"\bolist\.orders\b", frame), [])
+        self.assertEqual(re.findall(r"\bmv_zip_centroid\b", frame), [])
+        self.assertEqual(len(re.findall(r"\bcapstone\.v_decision_moment\b", frame)), 1)
+        self.assertEqual(len(re.findall(r"\bcapstone\.mv_order_centroids\b", frame)), 1)
+
+    def test_the_prediction_path_refreshes_the_centroid_snapshot_after_its_input(self):
+        """`mv_order_centroids` reads `mv_order_item_rollup`, so a refresh in the other order is stale.
+
+        Refreshed first, a freshly merged order would find no primary seller yet and get NULL seller
+        coordinates -- `geography_unavailable` true for a reason that is not about the data.
+        """
+        from capstone.predict import SNAPSHOTS
+
+        self.assertIn("capstone.mv_order_centroids", SNAPSHOTS)
+        self.assertLess(
+            SNAPSHOTS.index("capstone.mv_order_item_rollup"),
+            SNAPSHOTS.index("capstone.mv_order_centroids"),
+        )
+
     def test_the_as_of_predicate_is_in_sql_not_in_python(self):
         """``04`` requires the rule in the query, so the SQL files must contain it."""
         text = "\n".join(path.read_text(encoding="utf-8") for path in sql_files())
@@ -930,6 +961,31 @@ class LiveSqlContractTests(unittest.TestCase):
             " AND column_name IN ('lat', 'lng') ORDER BY column_name"
         )
         self.assertEqual([str(row[0]) for row in centroid], ["numeric", "numeric"], msg=str(centroid))
+
+    def test_the_plan_scans_orders_once_and_no_zip_centroid(self):
+        """Section 38, read off the planner instead of the SQL text.
+
+        The plan is the authority on how often a relation is read: a view the frame goes through
+        is inlined, so `v_decision_moment` and a second `JOIN olist.orders` both show up here as
+        a scan on `orders`. One scan of `orders`, one of `mv_order_centroids`, and none of
+        `mv_zip_centroid` -- its two lookups are done when the snapshot is refreshed.
+        """
+        import json
+
+        raw = self.query("EXPLAIN (FORMAT JSON) SELECT * FROM capstone.v_feature_frame")[0][0]
+        plan = json.loads(raw) if isinstance(raw, str) else raw
+        scans: dict[str, int] = {}
+
+        def walk(node: dict) -> None:
+            if "Relation Name" in node:
+                scans[node["Relation Name"]] = scans.get(node["Relation Name"], 0) + 1
+            for child in node.get("Plans", []):
+                walk(child)
+
+        walk(plan[0]["Plan"])
+        self.assertEqual(scans.get("orders"), 1, msg=str(scans))
+        self.assertEqual(scans.get("mv_order_centroids"), 1, msg=str(scans))
+        self.assertNotIn("mv_zip_centroid", scans, msg=str(scans))
 
     def test_reapplying_the_directory_changes_nothing(self):
         """Idempotency, tested rather than asserted: run the directory again, compare."""

@@ -92,11 +92,14 @@ BUNDLE_OPTIONAL = {"products": "olist_products_dataset.csv", "sellers": "olist_s
 #: FK-safe load order and its reverse for the delete
 LOAD_ORDER = ("customers", "sellers", "products", "orders", "order_items", "payments")
 STAGE_SCHEMA = "capstone_predict_stage"
-#: the snapshots sql/003 keeps; fresh orders change three of them (the zip centroids are reference)
+#: the snapshots sql/003 keeps; fresh orders change four of them (the zip centroids are reference).
+#: The order matters: ``mv_order_centroids`` reads ``mv_order_item_rollup`` for the primary seller, so
+#: it is refreshed after it -- refreshed first, a fresh order would get no seller centroid
 SNAPSHOTS = (
     "capstone.mv_customer_order_history",
     "capstone.mv_order_item_rollup",
     "capstone.mv_order_payment_rollup",
+    "capstone.mv_order_centroids",
 )
 
 

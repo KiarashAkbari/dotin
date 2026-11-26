@@ -21,7 +21,7 @@
 |---|---|---|
 | `001_capstone_schema.sql` | schema، جدول آینهٔ ممیزی `capstone.column_audit`، و `capstone.build_run` | `ROADMAP` فاز ۳ بند ۳: منشأ داده در schema جدا ممیزی می‌شود |
 | `002_time_guard.sql` | `v_decision_moment`، دید‌های شمارش D1، `v_audit_rejections`، و توابع `audit_is_allowed` / `require_allowed` | مرز نشت باید در خود SQL باشد، نه در توضیح (بند ۴.۲) |
-| `003_feature_views.sql` | `v_feature_frame` (۲۹ ویژگی)، دیدهای جمعِ سفارش/پرداخت/جغرافیا، و `v_order_label` جدا | یک دید، یک بار خوانش؛ زمان‌گیری روی همین است (بند ۵.۱) |
+| `003_feature_views.sql` | `v_feature_frame` (۲۹ ویژگی)، دیدهای جمعِ سفارش/پرداخت/جغرافیا، snapshotِ مرکزهای هر سفارش (`mv_order_centroids`، `decisions.md` §۳۸)، و `v_order_label` جدا | یک دید، یک بار خوانش؛ زمان‌گیری روی همین است (بند ۵.۱) |
 | `004_as_of_functions.sql` | تابع‌های تجمیعیِ تاریخی با شرط as-of؛ نسخهٔ کند و صریحِ همان عددِ `003` | شرط «فقط سطرهای تأییدشدهٔ قبل» باید در خود تابع دیده شود (بند ۵.۲) |
 | `005_external_signal.sql` | `external_municipio`، `v_external_signal`، و دید نرخ تطابق/شهرهای بی‌تطابق | نتیجهٔ منفی هم همین‌جا ثبت می‌شود، نه در گزارش (بند ۱۲.۵) |
 | `006_external_bridge.sql` | `v_external_feature` (یک ستون عددیِ سفارش‌به‌سفارش)، `v_external_feature_coverage`، و یک `DO` که بیش از یک شاخص را رد می‌کند | فاز ۵ برای ablation به ستون نیاز دارد، ولی `v_feature_frame` نباید دست بخورد (تصمیمِ خودِ `005`): پل جدا می‌آید و نامِ شاخص در SQL نوشته نمی‌شود |

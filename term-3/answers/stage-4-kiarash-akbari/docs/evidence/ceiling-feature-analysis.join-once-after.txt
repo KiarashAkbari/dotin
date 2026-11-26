@@ -1,0 +1,99 @@
+# ceiling on the feature frame, measured across one ANALYZE (scripts/analyze_ceiling_feature.py)
+config capstone.default.toml; frame capstone.v_feature_frame; ceiling 500 ms; frame rows 99281
+basis: best of the repeats, the same statistic the feature step judges on
+
+before ANALYZE: best 364.0 ms, mean 373.6 ms, worst 462.3 ms, runs [462.269, 366.627, 365.194, 364.022, 365.35, 364.132, 366.487, 367.702, 365.935, 365.496, 365.597, 370.956, 373.199, 368.671, 372.878]; 15/15 repeats under the ceiling, fastest was repeat 4 of 15 | read with transfer, one sample: 745.2 ms | spread 98.2 ms, drift -10.3 ms, the ceiling is outside it
+after  ANALYZE: best 360.7 ms, mean 365.0 ms, worst 368.4 ms, runs [363.425, 363.486, 360.665, 364.245, 362.398, 366.922, 367.961, 367.506, 368.379, 366.35, 365.631, 361.989, 363.555, 366.83, 366.205]; 15/15 repeats under the ceiling, fastest was repeat 3 of 15 | read with transfer, one sample: 745.7 ms | spread 7.7 ms, drift +1.6 ms, the ceiling is outside it
+analyzed: capstone.external_municipio, capstone.mv_external_density, capstone.v_feature_frame
+
+plan shape per state -- a condition has to move these to be credited with the delta:
+  before ANALYZE: Workers Launched: 1, no spill; execution 377.924 ms
+    fingerprint: Gather  (cost=16149.79..33159.30 rows=99269 width=261); Workers Planned: 1; Workers Launched: 1; ->  Hash Left Join  (cost=15149.79..22232.40 rows=58394 width=261); ->  Parallel Hash Left Join  (cost=15147.19..19294.07 rows=58394 width=289); ->  Parallel Hash Left Join  (cost=12553.18..16546.75 rows=58394 width=257); ->  Parallel Hash Left Join  (cost=9787.04..13627.32 rows=58394 width=248); ->  Parallel Hash Left Join  (cost=7190.93..10877.91 rows=58394 width=191); ->  Parallel Hash Right Join  (cost=4404.91..7938.60 rows=58394 width=175); ->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118); ->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128); ->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158); ->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36); ->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56); ->  Parallel Seq Scan on orders o  (cost=0.00..2393.95 rows=58394 width=90); ->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49); ->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57); ->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42); ->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65); ->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34); Planning Time: 2.306 ms; Execution Time: 377.924 ms
+  after  ANALYZE: Workers Launched: 1, no spill; execution 372.805 ms
+    fingerprint: Gather  (cost=16149.79..33159.30 rows=99269 width=261); Workers Planned: 1; Workers Launched: 1; ->  Hash Left Join  (cost=15149.79..22232.40 rows=58394 width=261); ->  Parallel Hash Left Join  (cost=15147.19..19294.07 rows=58394 width=289); ->  Parallel Hash Left Join  (cost=12553.18..16546.75 rows=58394 width=257); ->  Parallel Hash Left Join  (cost=9787.04..13627.32 rows=58394 width=248); ->  Parallel Hash Left Join  (cost=7190.93..10877.91 rows=58394 width=191); ->  Parallel Hash Right Join  (cost=4404.91..7938.60 rows=58394 width=175); ->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118); ->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128); ->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158); ->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36); ->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56); ->  Parallel Seq Scan on orders o  (cost=0.00..2393.95 rows=58394 width=90); ->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49); ->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57); ->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42); ->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65); ->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34); Planning Time: 2.167 ms; Execution Time: 372.805 ms
+  plan moved across the ANALYZE: False (noise)
+  statistics already current: the *untuned* plan estimates 99,269 rows against 99,281 it actually returned (0.01% off), so there was no stale estimate for this `ANALYZE` to correct -- `ANALYZE` earns credit only on a frame rebuilt without it, and repeating this command on this database cannot change that. Read the 500 ms line as met-but-thin, and buy headroom in the query, not in the statistics
+  the newest statistics on all 2 sources are from a manual ANALYZE (newest 2 min ago) -- which this script's own previous round writes, so `before` is the frame as the last `ANALYZE` left it and not as the build did. autovacuum has had no turn since, so nothing here separates the two and the pair cannot price the step either way
+  transfer: the judged statistic discards the rows on the server (`features.FRAME_TIMING_SQL`), so the 99,281 rows the frame returns are priced only by the read sample above
+
+finding: the frame already meets the ceiling (364.0 ms best of 15/15 repeats under 500 ms); this run is context, not a fix
+  noise bound (the ANALYZE): 3.4 ms observed against 98.2 ms of spread inside the untuned state -- the gap is inside the noise
+
+## the plan the error line asked for, read after the last measurement in the untuned state
+Gather  (cost=16149.79..33159.30 rows=99269 width=261) (actual rows=99281 loops=1)
+  Workers Planned: 1
+  Workers Launched: 1
+  Buffers: shared hit=10808
+  ->  Hash Left Join  (cost=15149.79..22232.40 rows=58394 width=261) (actual rows=49640 loops=2)
+        Hash Cond: (pr.product_category_name = t.product_category_name)
+        Buffers: shared hit=10808
+        ->  Parallel Hash Left Join  (cost=15147.19..19294.07 rows=58394 width=289) (actual rows=49640 loops=2)
+              Hash Cond: ((o.order_id)::text = (geo.order_id)::text)
+              Buffers: shared hit=10806
+              ->  Parallel Hash Left Join  (cost=12553.18..16546.75 rows=58394 width=257) (actual rows=49640 loops=2)
+                    Hash Cond: ((o.customer_id)::text = (c.customer_id)::text)
+                    Buffers: shared hit=9447
+                    ->  Parallel Hash Left Join  (cost=9787.04..13627.32 rows=58394 width=248) (actual rows=49640 loops=2)
+                          Hash Cond: ((o.order_id)::text = (p.order_id)::text)
+                          Buffers: shared hit=7997
+                          ->  Parallel Hash Left Join  (cost=7190.93..10877.91 rows=58394 width=191) (actual rows=49640 loops=2)
+                                Hash Cond: ((o.order_id)::text = (h.order_id)::text)
+                                Buffers: shared hit=6717
+                                ->  Parallel Hash Right Join  (cost=4404.91..7938.60 rows=58394 width=175) (actual rows=49640 loops=2)
+                                      Hash Cond: ((i.order_id)::text = (o.order_id)::text)
+                                      Buffers: shared hit=5245
+                                      ->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118) (actual rows=49333 loops=2)
+                                            Hash Cond: ((i.primary_product_id)::text = (pr.product_id)::text)
+                                            Buffers: shared hit=3436
+                                            ->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128) (actual rows=49333 loops=2)
+                                                  Hash Cond: ((i.primary_seller_id)::text = (s.seller_id)::text)
+                                                  Buffers: shared hit=2562
+                                                  ->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158) (actual rows=49333 loops=2)
+                                                        Buffers: shared hit=2496
+                                                  ->  Hash  (cost=63.95..63.95 rows=3095 width=36) (actual rows=3095 loops=2)
+                                                        Buckets: 4096  Batches: 1  Memory Usage: 238kB
+                                                        Buffers: shared hit=66
+                                                        ->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36) (actual rows=3095 loops=2)
+                                                              Buffers: shared hit=66
+                                            ->  Hash  (cost=766.51..766.51 rows=32951 width=56) (actual rows=32951 loops=2)
+                                                  Buckets: 65536  Batches: 1  Memory Usage: 3363kB
+                                                  Buffers: shared hit=874
+                                                  ->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56) (actual rows=32951 loops=2)
+                                                        Buffers: shared hit=874
+                                      ->  Parallel Hash  (cost=2393.95..2393.95 rows=58394 width=90) (actual rows=49640 loops=2)
+                                            Buckets: 131072  Batches: 1  Memory Usage: 13536kB
+                                            Buffers: shared hit=1809
+                                            ->  Parallel Seq Scan on orders o  (cost=0.00..2393.95 rows=58394 width=90) (actual rows=49640 loops=2)
+                                                  Filter: (order_approved_at IS NOT NULL)
+                                                  Rows Removed by Filter: 80
+                                                  Buffers: shared hit=1809
+                                ->  Parallel Hash  (cost=2056.01..2056.01 rows=58401 width=49) (actual rows=49640 loops=2)
+                                      Buckets: 131072  Batches: 1  Memory Usage: 8864kB
+                                      Buffers: shared hit=1472
+                                      ->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49) (actual rows=49640 loops=2)
+                                            Buffers: shared hit=1472
+                          ->  Parallel Hash  (cost=1864.94..1864.94 rows=58494 width=57) (actual rows=49720 loops=2)
+                                Buckets: 131072  Batches: 1  Memory Usage: 10400kB
+                                Buffers: shared hit=1280
+                                ->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57) (actual rows=49720 loops=2)
+                                      Buffers: shared hit=1280
+                    ->  Parallel Hash  (cost=2034.95..2034.95 rows=58495 width=42) (actual rows=49720 loops=2)
+                          Buckets: 131072  Batches: 1  Memory Usage: 8832kB
+                          Buffers: shared hit=1450
+                          ->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42) (actual rows=49720 loops=2)
+                                Buffers: shared hit=1450
+              ->  Parallel Hash  (cost=1864.01..1864.01 rows=58401 width=65) (actual rows=49640 loops=2)
+                    Buckets: 131072  Batches: 1  Memory Usage: 11168kB
+                    Buffers: shared hit=1280
+                    ->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65) (actual rows=49640 loops=2)
+                          Buffers: shared hit=1280
+        ->  Hash  (cost=1.71..1.71 rows=71 width=34) (actual rows=71 loops=2)
+              Buckets: 1024  Batches: 1  Memory Usage: 13kB
+              Buffers: shared hit=2
+              ->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34) (actual rows=71 loops=2)
+                    Buffers: shared hit=2
+Planning:
+  Buffers: shared hit=104
+Planning Time: 2.167 ms
+Execution Time: 372.805 ms
+note: the untuned state and the ANALYZE state met 500 ms outside its own interval, so the ceiling is met on this machine at this repeat count -- but the attribution above is what `report.md` copies, and `noise` or `ordering` there means this is not a fix *by the setting*

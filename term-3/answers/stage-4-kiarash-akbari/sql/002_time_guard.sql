@@ -11,12 +11,21 @@
 --
 -- `order_approved_at IS NULL` is D1 (`drop_before_training`, decisions.md item 1): the
 -- row is kept here so the exclusion is countable, and the feature frame drops it.
+--
+-- The last two columns are the order's own promise, both fixed when the order is placed and so
+-- known at the anchor: the frame's `promise_days` is their difference. They are carried here so
+-- the frame reads `olist.orders` once, through this view, instead of joining the table a second
+-- time by `order_id` (decisions.md section 38). Appended after `has_anchor` on purpose:
+-- `CREATE OR REPLACE VIEW` may add columns at the end and nothing else, so a database that
+-- already holds the four-column anchor takes this file without a drop.
 CREATE OR REPLACE VIEW capstone.v_decision_moment AS
 SELECT
     o.order_id,
     o.customer_id,
     o.order_approved_at,
-    (o.order_approved_at IS NOT NULL) AS has_anchor
+    (o.order_approved_at IS NOT NULL) AS has_anchor,
+    o.order_purchase_timestamp,
+    o.order_estimated_delivery_date
 FROM olist.orders AS o;
 
 -- The excluded population, as a number the report quotes rather than a comment.

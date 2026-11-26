@@ -183,18 +183,67 @@ REFRESH MATERIALIZED VIEW capstone.mv_customer_order_history;
 REFRESH MATERIALIZED VIEW capstone.mv_zip_centroid;
 REFRESH MATERIALIZED VIEW capstone.mv_order_item_rollup;
 REFRESH MATERIALIZED VIEW capstone.mv_order_payment_rollup;
+
+-- Both ends of an order's span, keyed by the order (decisions.md section 38).
+--
+-- The frame used to join `mv_zip_centroid` twice, once through the customer's ZIP and once
+-- through the primary seller's, and every read of the frame paid both 99,281-row hash probes.
+-- The two lookups are the same two lookups on every read: they depend only on the order, its
+-- customer, its primary seller and the centroids, all of which this file has already snapshotted
+-- above. So they are done once here, at refresh time, and the frame joins one row per order by
+-- `order_id` -- the key every other snapshot it reads is already joined on.
+--
+-- What does not move: the four coordinates are the centroid's own `numeric(…, 6)` values, copied
+-- and not recomputed, and the span is still computed in the frame from them, with the same
+-- expression -- so `customer_seller_span_sq` is the same `float8`, bit for bit. Only anchored
+-- orders get a row (the frame reads no other), and an order whose customer or seller ZIP has no
+-- centroid keeps its row with NULLs, which is exactly the LEFT JOIN the frame used to do itself:
+-- `geography_unavailable` reads the same NULLs it read before. The leak guard follows this
+-- snapshot to the view below and from there to `olist.customers`/`olist.sellers`, as before.
+-- The cost we accept is the one section 16 already accepted for the other snapshots: it is as
+-- fresh as its last refresh, and it reads `mv_order_item_rollup`, so it is refreshed after that
+-- one -- here, and in the prediction path (`capstone.predict.SNAPSHOTS`, last).
+CREATE OR REPLACE VIEW capstone.v_order_centroids AS
+SELECT
+    a.order_id,
+    cust_geo.lat AS customer_lat,
+    cust_geo.lng AS customer_lng,
+    seller_geo.lat AS seller_lat,
+    seller_geo.lng AS seller_lng
+FROM capstone.v_decision_moment AS a
+LEFT JOIN olist.customers AS c ON c.customer_id = a.customer_id
+LEFT JOIN capstone.mv_zip_centroid AS cust_geo
+       ON cust_geo.geolocation_zip_code_prefix = c.customer_zip_code_prefix
+LEFT JOIN capstone.mv_order_item_rollup AS i ON i.order_id = a.order_id
+LEFT JOIN olist.sellers AS s ON s.seller_id = i.primary_seller_id
+LEFT JOIN capstone.mv_zip_centroid AS seller_geo
+       ON seller_geo.geolocation_zip_code_prefix = s.seller_zip_code_prefix
+WHERE a.has_anchor;
+CREATE MATERIALIZED VIEW IF NOT EXISTS capstone.mv_order_centroids AS
+    SELECT order_id, customer_lat, customer_lng, seller_lat, seller_lng
+    FROM capstone.v_order_centroids WITH NO DATA;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_mv_order_centroids ON capstone.mv_order_centroids (order_id);
+REFRESH MATERIALIZED VIEW capstone.mv_order_centroids;
 -- fresh tables from the loader have no statistics yet, and a plan built without them was 2x slower
 ANALYZE olist.orders, olist.order_items, olist.payments, olist.customers, olist.sellers,
     olist.products, olist.product_category_name_translation;
 ANALYZE capstone.mv_customer_order_history, capstone.mv_zip_centroid,
-    capstone.mv_order_item_rollup, capstone.mv_order_payment_rollup;
+    capstone.mv_order_item_rollup, capstone.mv_order_payment_rollup,
+    capstone.mv_order_centroids;
 
 -- The frame itself: one row per approved order, 29 feature columns beside the three
 -- technical keys (order_id, customer_id, order_approved_at), and no column the audit does
--- not allow. It names five ``olist`` tables directly -- orders, customers, sellers, products,
--- product_category_name_translation -- and reaches eight in total, because the item, payment
--- and geography aggregates arrive through this directory's own views. The live test counts the
--- dependency closure in ``pg_depend`` rather than trusting this sentence.
+-- not allow. It names four ``olist`` tables directly -- customers, sellers, products,
+-- product_category_name_translation -- reads ``orders`` once, through ``v_decision_moment``, and
+-- reaches eight in total, because the item, payment and geography aggregates arrive through this
+-- directory's own views. The live test counts the dependency closure in ``pg_depend`` rather than
+-- trusting this sentence.
+--
+-- Each source is read once (decisions.md section 38): the anchor carries the two promise columns,
+-- so ``olist.orders`` is not joined a second time, and both centroids arrive in one row of
+-- ``mv_order_centroids`` instead of two joins to ``mv_zip_centroid``. Column names, order, types
+-- and values are the ones the two-scan version produced; ``scripts/frame_fingerprint.py`` is the
+-- check, run before and after.
 CREATE OR REPLACE VIEW capstone.v_feature_frame AS
 SELECT
     a.order_id,
@@ -214,10 +263,10 @@ SELECT
     i.shipping_limit_days,
     COALESCE(i.n_sellers, 0) AS n_sellers,
     COALESCE(i.n_products, 0) AS n_products,
-    (EXTRACT(EPOCH FROM (o.order_estimated_delivery_date - o.order_purchase_timestamp))
+    (EXTRACT(EPOCH FROM (a.order_estimated_delivery_date - a.order_purchase_timestamp))
         / 86400.0)::float8 AS promise_days,
-    EXTRACT(DAY FROM o.order_approved_at)::int AS approval_day_of_month,
-    EXTRACT(HOUR FROM o.order_approved_at)::int AS approval_hour,
+    EXTRACT(DAY FROM a.order_approved_at)::int AS approval_day_of_month,
+    EXTRACT(HOUR FROM a.order_approved_at)::int AS approval_hour,
 
     -- how it was paid for
     COALESCE(p.n_payments, 0) AS n_payments,
@@ -230,8 +279,8 @@ SELECT
     -- where it goes, and who sends it
     c.customer_state,
     (c.customer_zip_code_prefix::int / 1000) AS customer_zip_region,
-    (((cust_geo.lat - seller_geo.lat) * (cust_geo.lat - seller_geo.lat)
-        + (cust_geo.lng - seller_geo.lng) * (cust_geo.lng - seller_geo.lng))::float8)
+    (((geo.customer_lat - geo.seller_lat) * (geo.customer_lat - geo.seller_lat)
+        + (geo.customer_lng - geo.seller_lng) * (geo.customer_lng - geo.seller_lng))::float8)
         AS customer_seller_span_sq,
     s.seller_state,
 
@@ -243,19 +292,15 @@ SELECT
     -- the three "not available" flags of decisions.md item 7: a missing row is a fact
     -- about the data, and it is reported as one
     (p.order_id IS NULL) AS payments_unavailable,
-    (cust_geo.lat IS NULL OR seller_geo.lat IS NULL) AS geography_unavailable,
+    (geo.customer_lat IS NULL OR geo.seller_lat IS NULL) AS geography_unavailable,
     (t.product_category_name_english IS NULL) AS category_unavailable
 FROM capstone.v_decision_moment AS a
-JOIN olist.orders AS o ON o.order_id = a.order_id
 LEFT JOIN capstone.mv_customer_order_history AS h ON h.order_id = a.order_id
 LEFT JOIN capstone.mv_order_item_rollup AS i ON i.order_id = a.order_id
 LEFT JOIN capstone.mv_order_payment_rollup AS p ON p.order_id = a.order_id
 LEFT JOIN olist.customers AS c ON c.customer_id = a.customer_id
-LEFT JOIN capstone.mv_zip_centroid AS cust_geo
-       ON cust_geo.geolocation_zip_code_prefix = c.customer_zip_code_prefix
+LEFT JOIN capstone.mv_order_centroids AS geo ON geo.order_id = a.order_id
 LEFT JOIN olist.sellers AS s ON s.seller_id = i.primary_seller_id
-LEFT JOIN capstone.mv_zip_centroid AS seller_geo
-       ON seller_geo.geolocation_zip_code_prefix = s.seller_zip_code_prefix
 LEFT JOIN olist.products AS pr ON pr.product_id = i.primary_product_id
 LEFT JOIN olist.product_category_name_translation AS t
        ON t.product_category_name = pr.product_category_name

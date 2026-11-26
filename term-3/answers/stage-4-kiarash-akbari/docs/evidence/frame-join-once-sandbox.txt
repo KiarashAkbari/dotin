@@ -1,0 +1,57 @@
+# section 38 (patch 0048): the frame reads orders once and the zip centroids through one order-keyed snapshot
+# measured in the review sandbox, 2026-11-27: PostgreSQL 16.4 (zonky embedded binaries), aarch64, 2 vCPU,
+# ~7.9 GB RAM shared with other work, server defaults (shared_buffers 128MB, work_mem 4MB, jit on,
+# max_parallel_workers_per_gather 2). Dedicated database loaded by this stage's own chain
+# (ingest, load-database, load-audit, features; external/model/capacity-list skipped): full public Olist,
+# frame 99,281 rows x 32 columns. No other session on that database during the timing runs.
+# These are sandbox numbers. They are not the student's machine; re-run there before quoting them as his.
+
+## identical rows: scripts/frame_fingerprint.py (md5 over md5(f::text) per row in order_id order; columns = name + format_type in attnum order)
+old-view: columns 32 a96e111b07e88702044e0d8bfdfd00f8
+old-view: rows 99281
+old-view: digest 97d0630591e6a8276ba1ae35b230dfcf
+old-view: columns 32 a96e111b07e88702044e0d8bfdfd00f8
+old-view: rows 99281
+old-view: digest 97d0630591e6a8276ba1ae35b230dfcf
+old-view-2: columns 32 a96e111b07e88702044e0d8bfdfd00f8
+old-view-2: rows 99281
+old-view-2: digest 97d0630591e6a8276ba1ae35b230dfcf
+new-view: columns 32 a96e111b07e88702044e0d8bfdfd00f8
+new-view: rows 99281
+new-view: digest 97d0630591e6a8276ba1ae35b230dfcf
+new-view-2: columns 32 a96e111b07e88702044e0d8bfdfd00f8
+new-view-2: rows 99281
+new-view-2: digest 97d0630591e6a8276ba1ae35b230dfcf
+(old-view = the 003 of ea630ad5; new-view = this patch; old-view-2/new-view-2 = the frame body swapped back and forth on the same database after the new 002/003 were applied)
+
+## timing: scripts/analyze_ceiling_feature.py --repeats 15, same database, same session settings, order before -> after -> before-2 -> after-2
+### before-1 (docs/evidence/ceiling-feature-analysis.join-once-before.txt)
+before ANALYZE: best 407.8 ms, mean 412.2 ms, worst 419.3 ms, 15/15 repeats under the ceiling, fastest was repeat 8 of 15 | read with transfer, one sample: 802.4 ms | spread 11.5 ms, drift -1.6 ms, the ceiling is outside it
+after  ANALYZE: best 408.5 ms, mean 414.1 ms, worst 420.7 ms, 15/15 repeats under the ceiling, fastest was repeat 3 of 15 | read with transfer, one sample: 839.9 ms | spread 12.2 ms, drift +1.5 ms, the ceiling is outside it
+### after-1 (docs/evidence/ceiling-feature-analysis.join-once-after.txt)
+before ANALYZE: best 364.0 ms, mean 373.6 ms, worst 462.3 ms, 15/15 repeats under the ceiling, fastest was repeat 4 of 15 | read with transfer, one sample: 745.2 ms | spread 98.2 ms, drift -10.3 ms, the ceiling is outside it
+after  ANALYZE: best 360.7 ms, mean 365.0 ms, worst 368.4 ms, 15/15 repeats under the ceiling, fastest was repeat 3 of 15 | read with transfer, one sample: 745.7 ms | spread 7.7 ms, drift +1.6 ms, the ceiling is outside it
+### before-2 (docs/evidence/ceiling-feature-analysis.join-once-before-2.txt)
+before ANALYZE: best 412.7 ms, mean 416.6 ms, worst 426.1 ms, 15/15 repeats under the ceiling, fastest was repeat 4 of 15 | read with transfer, one sample: 796.4 ms | spread 13.3 ms, drift +0.1 ms, the ceiling is outside it
+after  ANALYZE: best 406.3 ms, mean 414.4 ms, worst 422.2 ms, 15/15 repeats under the ceiling, fastest was repeat 2 of 15 | read with transfer, one sample: 803.3 ms | spread 16.0 ms, drift +1.8 ms, the ceiling is outside it
+### after-2 (docs/evidence/ceiling-feature-analysis.join-once-after-2.txt)
+before ANALYZE: best 371.0 ms, mean 377.3 ms, worst 383.5 ms, 15/15 repeats under the ceiling, fastest was repeat 11 of 15 | read with transfer, one sample: 768.8 ms | spread 12.5 ms, drift -4.0 ms, the ceiling is outside it
+after  ANALYZE: best 368.6 ms, mean 373.0 ms, worst 380.8 ms, 15/15 repeats under the ceiling, fastest was repeat 5 of 15 | read with transfer, one sample: 750.4 ms | spread 12.2 ms, drift -1.4 ms, the ceiling is outside it
+
+## plan nodes, counted in the plan each witness stores (## the plan ... section)
+join-once-before: scans on orders=2, on mv_zip_centroid=2, on mv_order_centroids=0; scan nodes=11; join nodes=10
+join-once-before-2: scans on orders=2, on mv_zip_centroid=2, on mv_order_centroids=0; scan nodes=11; join nodes=10
+join-once-after: scans on orders=1, on mv_zip_centroid=0, on mv_order_centroids=1; scan nodes=9; join nodes=8
+join-once-after-2: scans on orders=1, on mv_zip_centroid=0, on mv_order_centroids=1; scan nodes=9; join nodes=8
+
+## the cost moved to refresh time: REFRESH MATERIALIZED VIEW, 5 runs each, same database, after the timing runs
+capstone.mv_order_centroids refresh ms best 315.1 mean 324.6 worst 347.3 [347.3, 327.0, 317.2, 315.1, 316.2]
+capstone.mv_zip_centroid refresh ms best 661.6 mean 686.9 worst 703.7 [689.6, 694.7, 703.7, 684.7, 661.6]  (unchanged object, for scale)
+capstone.mv_order_item_rollup refresh ms best 597.2 mean 608.1 worst 626.1 [626.1, 617.3, 600.9, 599.3, 597.2]  (unchanged object, for scale)
+mv_order_centroids: 99281 rows, 16 MB with its unique index
+
+## not measured here
+- the student's machine (his four earlier rounds on the old view: per-state bests between 441.7 and 564.1 ms, report.md section 8); no number above is his
+- the predict path end to end: it now refreshes four snapshots instead of three (+ one ANALYZE target); only the refresh above was timed
+- a cold cache / freshly restarted server; every run here read from shared buffers (the stored plans show 'shared hit' only)
+- the chain's own 'features' timing on the new view (the chain ran on the old tree before the rewrite)
