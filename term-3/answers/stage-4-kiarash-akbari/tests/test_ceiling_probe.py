@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import helpers
@@ -1281,6 +1282,93 @@ class PlanMechanismTests(unittest.TestCase):
         # the two lines sit beside the plan facts they belong to, not in a block of their own at the bottom
         self.assertLess(body.index('"  plan moved across the setting:'), body.index("[inert_text] if inert_text"))
         self.assertLess(body.index('"  plan moved across the ANALYZE:'), body.index("[stats_text] if stats_text"))
+
+
+class StatisticsProvenanceTests(unittest.TestCase):
+    """Whose statistics the `before` state ran against -- read from the catalog, not guessed.
+
+    Run three and run four of the same command disagreed about the untuned state (441.7 / 1760.9 ms
+    against 534.0 / 595.1) and nothing in either witness explained it. The explanation was in
+    `pg_stat_user_tables`: autovacuum had analyzed all five sources at 01:43:51, fifteen minutes before
+    the run's own `ANALYZE` at 01:58:09, so run four's `before` was a warm frame and its `before` ->
+    `after` gap priced nothing. These tests pin the three readings -- warm, manual, never -- and the
+    refusal to name an author the catalog did not name.
+    """
+
+    NOW = datetime(2025, 11, 27, 2, 0, tzinfo=timezone.utc)
+    SOURCES = [
+        "capstone.mv_customer_order_history",
+        "capstone.mv_order_item_rollup",
+        "capstone.mv_order_payment_rollup",
+        "capstone.mv_zip_centroid",
+        "capstone.external_municipio",
+    ]
+
+    def setUp(self) -> None:
+        self.script = load_script()
+
+    def when(self, minutes: int):
+        """A catalog stamp `minutes` before this run began -- the unit the line quotes."""
+        return self.NOW - timedelta(minutes=minutes)
+
+    def test_autovacuum_warmth_is_read_off_the_catalog(self) -> None:
+        # two different ages on purpose: "newest" has to be the *smallest* gap to now, not the largest
+        names = ("mv_customer_order_history", "mv_order_item_rollup")
+        ages = {"mv_customer_order_history": 40, "mv_order_item_rollup": 16}
+        warm = [(name, self.when(120), self.when(ages[name])) for name in names]
+        prov = self.script.statistics_provenance(warm, now=self.NOW)
+        self.assertEqual(["mv_customer_order_history", "mv_order_item_rollup"], prov["auto"])
+        line = self.script.provenance_line(prov)
+        self.assertIn("before was not a stale frame", line)
+        # how long ago, and how many of the sources: "autovacuum did it" without a size is a vibe
+        self.assertIn("2 of 2; newest 16 min ago", line)
+        # 80 = the tighter of the two manual/auto pairs (120 vs 40, and 120 vs 16). The age against `now`
+        # depends on the server rendering its stamps in the client's zone; this difference does not, and it
+        # is the number the finding rests on
+        self.assertIn("the two stamps sit 80 min apart", line)
+        self.assertIn("a rebuild without an `ANALYZE`", line)
+
+    def test_a_manual_stamp_from_the_previous_round_is_named_as_such(self) -> None:
+        """Naive stamps too: a driver that hands back no timezone is not a reason to crash."""
+        prov = self.script.statistics_provenance(
+            [("mv_zip_centroid", self.when(9).replace(tzinfo=None), None)], now=self.NOW
+        )
+        self.assertEqual([], prov["auto"])
+        self.assertEqual([], prov["never_statted"])
+        line = self.script.provenance_line(prov)
+        self.assertIn("manual ANALYZE", line)
+        self.assertIn("as the last `ANALYZE` left it", line)
+
+    def test_no_stamps_at_all_is_the_one_state_analyze_can_price(self) -> None:
+        never = [(name.split(".", 1)[1], None, None) for name in self.SOURCES]
+        prov = self.script.statistics_provenance(never, now=self.NOW)
+        self.assertEqual(5, len(prov["never_statted"]))
+        self.assertIsNone(prov["newest_minutes"])
+        line = self.script.provenance_line(prov)
+        self.assertIn("no statistics at all", line)
+        self.assertIn("the planner's defaults", line)
+
+    def test_no_catalog_rows_claims_no_author(self) -> None:
+        self.assertIsNone(self.script.statistics_provenance([], now=self.NOW))
+        self.assertIsNone(self.script.provenance_line(None))
+
+    def test_the_query_names_the_sources_and_is_issued_before_the_analyze(self) -> None:
+        query = self.script.statistics_query(self.SOURCES)
+        self.assertIn("pg_stat_user_tables", query)
+        self.assertIn("schemaname = 'capstone'", query)
+        for name in self.SOURCES:
+            self.assertIn(f"'{name.split('.', 1)[1]}'", query)
+        # ...and it has to be read before the statement that overwrites the answer, or it proves nothing
+        source = (STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
+        body = source[source.index("def main(") :]
+        self.assertLess(
+            body.index("statistics_query(ANALYZE_TARGETS)"),
+            body.index("for target in ANALYZE_TARGETS:"),
+            msg="the ANALYZE overwrites the stamps the line is about",
+        )
+        write = body.index("witness.write_text")
+        self.assertLess(body.index("[prov_text] if prov_text"), write, msg="the file keeps it too")
+        self.assertIn('"statistics_provenance": prov', body[write:], msg="and the JSON keeps it")
 
 if __name__ == "__main__":
     unittest.main()

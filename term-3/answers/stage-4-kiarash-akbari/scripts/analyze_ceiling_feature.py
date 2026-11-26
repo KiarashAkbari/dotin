@@ -68,6 +68,13 @@ comes off with `RESET` in the same connection, while `ANALYZE` has no inverse --
 estimates it stored -- so the before -> after gap has no arm and stays a claim about estimates, not about
 speed.
 
+A third question is answered from the catalog instead of from the plan text: `pg_stat_user_tables` says
+*who* last refreshed the statistics each source carries, which is the difference between a stale frame and
+a warm one. Autovacuum analyzing a quarter of an hour before a run makes that run's `before` state a duplicate of
+its `after`, and it is the reason two rounds of this command disagreed about the untuned state. The read
+happens before the `ANALYZE` this script issues, because that statement is itself one of the possible
+answers and it overwrites the evidence.
+
 Writes ``docs/evidence/ceiling-feature-analysis.txt`` (+ ``.json``) and refuses to overwrite a witness
 whose header names a different ceiling, frame row count or tuning, for the same reason
 `scripts/cheating_model_gap.py` refuses a witness from another split.
@@ -86,6 +93,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 STAGE = Path(__file__).resolve().parents[1]
@@ -506,6 +514,130 @@ def stats_line(drift: dict | None, moved_analyze: bool, ceiling_ms: float) -> st
         "stale estimate for this `ANALYZE` to correct -- `ANALYZE` earns credit only on a frame rebuilt "
         "without it, and repeating this command on this database cannot change that. Read the "
         f"{ceiling_ms:.0f} ms line as met-but-thin, and buy headroom in the query, not in the statistics"
+    )
+
+
+#: who refreshed the statistics this run is about to call "untuned". `pg_stat_user_tables` keeps two
+#: stamps per relation and they have two different authors: `last_analyze` is a manual pass -- including
+#: *this script's own*, from the previous round -- and `last_autoanalyze` is the autovacuum launcher
+#: deciding a table had changed enough. The run's own `ANALYZE` overwrites `last_analyze`, so the
+#: question can only be asked before the statement that destroys the answer
+STATISTICS_SQL = (
+    "SELECT relname, last_analyze, last_autoanalyze FROM pg_stat_user_tables "
+    "WHERE schemaname = '{schema}' AND relname IN ({quoted}) ORDER BY relname"
+)
+
+
+def statistics_query(targets: list[str]) -> str:
+    """The catalog read for `targets`, built from them rather than written out beside them.
+
+    The five names are the five the run is about to `ANALYZE`, so the question "whose statistics did the
+    `before` state run against" is asked about exactly the relations whose statistics it is about to
+    overwrite -- and a sixth table added to `ANALYZE_TARGETS` is queried here without anyone remembering
+    to edit a second literal list.
+    """
+    schema = targets[0].split(".", 1)[0]
+    quoted = ", ".join(f"'{name.split('.', 1)[1]}'" for name in targets)
+    return STATISTICS_SQL.format(schema=schema, quoted=quoted)
+
+
+def minutes_since(stamp: datetime, now: datetime) -> float:
+    """Minutes between a catalog stamp and the clock, with or without a timezone on either side.
+
+    `pg_stat_user_tables` holds `timestamptz`, so the driver gives back an aware datetime and the age is
+    absolute. Asked for as `to_char(..., 'HH24:MI:SS')` -- which is how this got checked by hand once -- the
+    same number is a *wall clock in the server's zone*, and his reads +03:30: an age computed against a UTC
+    `now` is then off by three and a half hours, which is a bigger error than the finding. A naive stamp is
+    therefore taken at face value rather than assumed to be UTC, and what the witness leans on is the
+    difference between two stamps, which no zone can move.
+    """
+    left, right = (now, stamp) if stamp.tzinfo else (now.replace(tzinfo=None), stamp)
+    return max(0.0, (left - right).total_seconds() / 60.0)
+
+
+def statistics_provenance(rows, *, now: datetime) -> dict | None:
+    """Which author wrote the newest statistics on each source, and how long ago.
+
+    `before` -> `after` prices one thing only: a manual `ANALYZE` run on statistics nobody had touched
+    since the build. Nothing in the run says whether that was the situation -- his fourth round read 6/15
+    and 2/15 for two states the third round put at 6/15 and 13/15, and the catalog said why: autoanalyze
+    at 01:43:51, his manual `ANALYZE` at 01:58:09. The `before` state of that run was warm already, so
+    the pair measured an autovacuum pass nobody in the run had paid for. None when there are no catalog
+    rows at all: a view's statistics are its base tables' business, and silence beats an invented author.
+    """
+    if not rows:
+        return None
+    per_source: dict[str, dict] = {}
+    for name, manual, auto in rows:
+        stamps = {who: value for who, value in (("manual", manual), ("auto", auto)) if value is not None}
+        if not stamps:
+            per_source[name] = {"author": "never", "minutes_ago": None, "separation_minutes": None}
+            continue
+        author = max(stamps, key=lambda who: stamps[who])
+        gap = (
+            None
+            if manual is None or auto is None
+            else round(abs(minutes_since(manual, auto)), 1)
+        )
+        per_source[name] = {
+            "author": author,
+            "minutes_ago": round(minutes_since(stamps[author], now), 1),
+            "separation_minutes": gap,
+        }
+    ages = [value["minutes_ago"] for value in per_source.values() if value["minutes_ago"] is not None]
+    separations = [
+        value["separation_minutes"] for value in per_source.values() if value["separation_minutes"] is not None
+    ]
+    return {
+        "sources": len(per_source),
+        "per_source": per_source,
+        "auto": sorted(name for name, value in per_source.items() if value["author"] == "auto"),
+        "never_statted": sorted(name for name, value in per_source.items() if value["author"] == "never"),
+        "newest_minutes": min(ages) if ages else None,
+        # how far apart the two authors were, over the sources where both wrote: the finding is "minutes",
+        # and only a difference survives a server that renders its stamps in +03:30
+        "separation_minutes": min(separations) if separations else None,
+    }
+
+
+def provenance_line(prov: dict | None) -> str | None:
+    """The witness line naming the author of the statistics the `before` state ran against, or None.
+
+    The third mechanism read, after `inert_line` (what a setting could do) and `stats_line` (what an
+    estimate still owed): this one says whether the pair measured `ANALYZE` at all. It exists because a
+    missing line now means the opposite of what it meant in run three -- `statistics already current`
+    stopped being a rendering glitch and became a finding -- so a reader who has to run their own catalog
+    query to know what `before` was is one step away from quoting it as a stale frame.
+    """
+    if prov is None:
+        return None
+    if prov["auto"]:
+        return (
+            f"  before was not a stale frame: autovacuum holds the newest statistics on "
+            f"{name_list(prov['auto'])} ({len(prov['auto'])} of {prov['sources']}; newest "
+            f"{prov['newest_minutes']:.0f} min ago), so the `ANALYZE` step ran on numbers somebody else "
+            "had already refreshed. Read the before -> after pair as the same statistics twice -- and "
+            "reconcile a `before` that looks slow with that: the only state that measures the build's own "
+            "statistics is a rebuild without an `ANALYZE`"
+            + (
+                f" (the two stamps sit {prov['separation_minutes']:.0f} min apart, and a difference between "
+                "them is the one number here no timezone can move)"
+                if prov["separation_minutes"] is not None
+                else ""
+            )
+        )
+    if prov["never_statted"] and len(prov["never_statted"]) == prov["sources"]:
+        return (
+            f"  no statistics at all: none of the {prov['sources']} sources carries an `analyze` or an "
+            "`autoanalyze` stamp, so this is the one situation a manual `ANALYZE` can price -- the "
+            "estimates the `before` state ran against are the planner's defaults, and a plan that moves "
+            "here is a real move"
+        )
+    return (
+        f"  the newest statistics on all {prov['sources']} sources are from a manual ANALYZE (newest "
+        f"{prov['newest_minutes']:.0f} min ago) -- which this script's own previous round writes, so "
+        "`before` is the frame as the last `ANALYZE` left it and not as the build did. autovacuum has had "
+        "no turn since, so nothing here separates the two and the pair cannot price the step either way"
     )
 
 
@@ -974,6 +1106,11 @@ def main(argv: list[str] | None = None) -> int:
             print(refusal(witness, stored, claims, witness_path(DEFAULT_EVIDENCE, tagged)))
             return 2
 
+        # read the stamps first: the question is who left the statistics the `before` state is about to
+        # run against, and this run's own `ANALYZE` is one of the possible answers
+        cursor.execute(statistics_query(ANALYZE_TARGETS))
+        prov = statistics_provenance(cursor.fetchall(), now=datetime.now(timezone.utc))
+        prov_text = provenance_line(prov)
         before_runs = measure(cursor, frame, repeat=args.repeats, clock=time.perf_counter)
         plan_before = read_plan(cursor, frame)
         read_before, read_rows = measure_read(cursor, frame, clock=time.perf_counter)
@@ -1121,6 +1258,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         f"  plan moved across the ANALYZE: {moved_analyze} ({kind_analyze})",
         *( [stats_text] if stats_text else [] ),
+        *( [prov_text] if prov_text else [] ),
         "  transfer: the judged statistic discards the rows on the server (`features.FRAME_TIMING_SQL`),"
         f" so the {read_rows:,} rows the frame returns are priced only by the read sample above",
         "",
@@ -1194,7 +1332,14 @@ def main(argv: list[str] | None = None) -> int:
                 # from the rows the same run counted
                 "parallel_cap": inert,
                 "plan_estimate_drift": drift,
-                "witness_lines": {"setting_inert": inert_text, "statistics": stats_text},
+                # and who left the statistics the `before` state ran against: autovacuum, a previous
+                # manual pass, or nobody -- the catalog's answer, kept next to the two mechanism reads
+                "statistics_provenance": prov,
+                "witness_lines": {
+                    "setting_inert": inert_text,
+                    "statistics": stats_text,
+                    "provenance": prov_text,
+                },
                 "attribution": {"analyze": kind_analyze, "setting": kind_setting},
                 "noise_bounds": {"analyze": gap_analyze, "setting": gap_setting},
                 "frame_rows_read": read_rows,
