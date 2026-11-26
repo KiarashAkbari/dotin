@@ -523,7 +523,13 @@ def attribution(
     return "uncredited"
 
 
-def exit_note(before: dict, after: dict, kind_setting: str, control: dict | None) -> tuple[int, str]:
+def exit_note(
+    before: dict,
+    after: dict,
+    kind_setting: str,
+    control: dict | None,
+    tuned: dict | None = None,
+) -> tuple[int, str]:
     """Whether the run may exit green, and the line that says why not.
 
     `0041` refused the *prose* of a pass that only the minimum of a straddling state supports, and left the
@@ -531,10 +537,38 @@ def exit_note(before: dict, after: dict, kind_setting: str, control: dict | None
     and returned 0, which is the exact combination a harness reads as success. The judged statistic and the
     exit code have to be refused by the same test: a state counts here only if it met the ceiling outside
     its own interval, which is the same sentence `describe()` already refuses to print without it.
+
+    `0042` applied that rule to `before` and `after` only -- the before -> ANALYZE pair -- and so refused
+    his 15-repeat run for the wrong reason: the states that *did* meet the line outside their own interval
+    were the tuned one (`15/15`, best 451.6, spread 11.5 ms) and the control arm (`15/15`, spread 25.7 ms),
+    and the rule never looked at either. Two separate questions live in one exit code, and only one of them
+    is attribution: *did the frame meet the ceiling under these conditions* (any state's own repeats answer
+    that), versus *which condition moved it* (the plan and the control arm answer that, in the sentences
+    above). So every measured state is asked the first question here, and the second is named in the note
+    when it disagrees -- which is also why a green exit now carries a `note:` line instead of silence: the
+    pass is real, and "by the setting" is not.
     """
-    met = any(state["passes"] and not straddles_ceiling(state) for state in (before, after))
+    states = [state for state in (before, after, tuned, control) if state is not None]
+    met = [
+        name
+        for name, state in zip(("the untuned state", "the ANALYZE state", "the tuned state", "the control"),
+                               (before, after, tuned, control))
+        if state is not None and state["passes"] and not straddles_ceiling(state)
+    ]
     if met or kind_setting in ("credited", "conditional"):
-        return 0, ""
+        # read as a sentence, not as a list dump: "the tuned state, the control met" is a comma splice in
+        # the one line of this file a reader is most likely to copy into `report.md`
+        who = (
+            "" if not met else met[0] if len(met) == 1 else " and ".join([", ".join(met[:-1]), met[-1]])
+        )
+        note = (
+            ""
+            if not met  # granted on attribution alone: there is no interval to name, so nothing to say
+            else f"note: {who} met {before['ceiling_ms']:.0f} ms outside its own interval, so "
+            "the ceiling is met on this machine at this repeat count -- but the attribution above is what "
+            "`report.md` copies, and `noise` or `ordering` there means this is not a fix *by the setting*"
+        )
+        return 0, note
     arm = (
         ""
         if control is None
@@ -544,7 +578,7 @@ def exit_note(before: dict, after: dict, kind_setting: str, control: dict | None
         1,
         f"red: no state met {before['ceiling_ms']:.0f} ms outside its own interval{arm} -- the ceiling is "
         "unresolved on this machine at this repeat count, so this is not a pass to report and not a "
-        "breach to fix yet: either `--repeats 15` on the same command, or carry the shortfall into "
+        "breach to fix yet: take more repeats on the same command, or carry the shortfall into "
         "section 8 of `report.md` as the unresolved line the witness already spells out",
     )
 
@@ -633,14 +667,17 @@ def describe(
             f"{before['below_ceiling']}/{len(before['runs_ms'])} repeats under "
             f"{before['ceiling_ms']:.0f} ms); this run is context, not a fix"
         )
-    if before["passes"] and kind != "refuted":
+    if before["passes"] and kind != "refuted" and split is None:
         # ...but "meets" needs the state to have met it all the way through. His nine repeats read 467.3
         # to 599.8 ms against a 500 ms ceiling: the same session holds a pass and a breach of the same
         # query, and picking the fast one is the 0030 rule again -- `min` over a sample is a statistic
         # about the sample, and here the sample says both. This branch refuses the sentence rather than
         # decorating it, because the sentence is what the report copies. `refuted` is the one kind word it
         # must not swallow: with a control arm in hand the pair below has a priced sentence of its own, and
-        # printing this one twice for two different comparisons left the tuned state's `0/9` unsaid.
+        # printing this one twice for two different comparisons left the tuned state's `0/9` unsaid. The
+        # `split is None` half of the test is what `0042` got wrong: it excluded only `refuted`, so his
+        # 15-repeat `noise` pair -- priced by the arm, and with a `15/15` tuned state to report -- was
+        # swallowed again. No arm, no price: then the straddle really is this pair's own finding.
         return (
             f"noise: the untuned state both met and missed {before['ceiling_ms']:.0f} ms -- best "
             f"{before['best_ms']:.1f}, worst {before['worst_ms']:.1f}, {before['below_ceiling']} of "
@@ -652,17 +689,19 @@ def describe(
         # each state's own count over its own repeats: quoting "1 of 5" from a nine-repeat state would be
         # the same class of error this whole function exists to stop
         price = ""
-        if split is not None and split["ordering_share"] > 0:
-            # the same number that makes a `refuted` pair an `ordering` one, kept here too: once a control
-            # arm has priced the gap, "this pair never measured the condition" and "the gain you were about
-            # to credit is ordering" are the same finding, and the second is the one the report copies
+        if split is not None:
+            # once a control arm has priced the gap, "this pair never measured the condition" and "the gain
+            # you were about to credit is ordering" are the same finding -- and with a *negative* gap
+            # (his 15-repeat run: the tuned state was 3.4 ms slower than the ANALYZE state) there is no
+            # gain to price at all, so the arm says nothing is creditable rather than quoting a share of it
             price = (
-                f", and the control arm says the {split['naive_ms']:.1f} ms is "
-                f"{split['ordering_share']:.0%} ordering ({split['attributed_ms']:.1f} ms left for the "
-                "condition)"
+                f", and the control arm says {split['ordering_share']:.0%} of the gap is ordering: "
+                f"{split['attributed_ms']:.1f} ms is what is left for the condition"
+                if split["ordering_share"] > 0
+                else ", and the control arm says there is nothing here to credit"
             )
         straddle = ""
-        if before["passes"] and split is not None:
+        if before["passes"] and split is not None and not after["passes"]:
             # the untuned state still both met and missed the line, and it is worth naming here -- as a
             # clause of this pair, not as a replacement for it. With no control arm the branch above owns
             # this fact; with one, the pair gets its own sentence and the straddle rides along as a clause.
@@ -670,16 +709,20 @@ def describe(
             # `with the setting applied:` printed the ANALYZE comparison's sentence verbatim.)
             straddle = (
                 f"; the untuned state both met and missed {before['ceiling_ms']:.0f} ms (best "
-                f"{before['best_ms']:.1f}, worst {before['worst_ms']:.1f}), so the line is unresolved on "
-                "this machine at this repeat count"
+                f"{before['best_ms']:.1f}, worst {before['worst_ms']:.1f})"
             )
         return (
             f"noise: the {abs(gap['observed_ms']):.1f} ms between the two states is smaller than the "
             f"{gap['spread_ms']:.1f} ms that {gap['spread_of']}'s own repeats spread, so this pair never "
             "measured the condition -- it measured how wide that state is. Nothing is owed to "
             f"`{state}`: {before['below_ceiling']}/{len(before['runs_ms'])} of the untuned repeats and "
-            f"{after['below_ceiling']}/{n} of these ones met the ceiling, and a session that answers both "
-            f"ways is not a finding about the query{price}{straddle}"
+            f"{after['below_ceiling']}/{n} of these ones met the ceiling"
+            + (
+                ", and a session that answers both ways is not a finding about the query"
+                if bool(before["passes"]) != bool(after["passes"])
+                else " -- both sides met it, so this pair measured the width of a band, not a movement"
+            )
+            + f"{price}{straddle}"
         )
     if kind == "conditional":
         return (
@@ -970,10 +1013,16 @@ def main(argv: list[str] | None = None) -> int:
     if split is not None:
         # a `--control` run with no `--set` has a second measurement of the same state and nothing to
         # divide: the gap that would be priced belongs to the setting, and it does not exist here
+        priced = (
+            f" -- inside the {gap_setting['spread_ms']:.1f} ms spread of the states being compared, so "
+            "this line prices a gap neither arm could have resolved"
+            if gap_setting is not None and abs(split["naive_ms"]) < gap_setting["spread_ms"]
+            else ""
+        )
         lines += [
             f"  gain split: {split['naive_ms']:.1f} ms observed = {split['attributed_ms']:.1f} ms "
             f"credited to the condition + {split['ordering_ms']:.1f} ms ordering "
-            f"({split['ordering_share']:.0%} of the gap)",
+            f"({split['ordering_share']:.0%} of the gap){priced}",
         ]
     lines += [
         "",
@@ -981,10 +1030,12 @@ def main(argv: list[str] | None = None) -> int:
         + ("the tuned state " + f"({tuning})" if tuned is not None else "the untuned state"),
         plan,
     ]
-    code, note = exit_note(before, after, kind_setting, control)
+    code, note = exit_note(before, after, kind_setting, control, tuned)
     if note:
-        # in the witness too, not only on the terminal: a red exit nobody can read is a red exit that gets
-        # "fixed" by dropping the flag that made it honest, and the file is what a reader re-opens
+        # both colours go in the witness, not only on the terminal: a red exit nobody can read is a red
+        # exit that gets "fixed" by dropping the flag that made it honest, and a green exit with no
+        # sentence beside it is a pass that gets quoted without its attribution -- the file is what a
+        # reader re-opens, so the exit's *reason* travels with it either way
         lines.append(note)
     witness.write_text("\n".join(lines) + "\n", encoding="utf-8")
     witness.with_suffix(".json").write_text(

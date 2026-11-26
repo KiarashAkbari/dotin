@@ -443,7 +443,7 @@ class AttributionTests(unittest.TestCase):
         ):
             self.assertLess(body.index(state), body.index(read), msg=f"{state} then its own read")
         head = self.source[self.source.index("def main(") :]
-        self.assertIn("code, note = exit_note(before, after, kind_setting, control)", head)
+        self.assertIn("code, note = exit_note(before, after, kind_setting, control, tuned)", head)
         self.assertLess(
             head.index("code, note = exit_note("),
             head.index("witness.write_text"),
@@ -870,7 +870,7 @@ class ControlTests(unittest.TestCase):
             self.assertLess(head.index(earlier), head.index(later), msg=f"{earlier} then {later}")
         self.assertIn('"control": control', head)
         self.assertIn('"gain_split": split', head)
-        self.assertIn("code, note = exit_note(before, after, kind_setting, control)", head)
+        self.assertIn("code, note = exit_note(before, after, kind_setting, control, tuned)", head)
         self.assertIn('"exit": {"code": code, "note": note}', head)
         self.assertIn("if tuned is not None and control is not None", head)
         self.assertLess(
@@ -978,17 +978,136 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("red: no state met 500 ms outside its own interval", note)
         self.assertIn("the control arm is what priced the gap", note)
-        self.assertIn("--repeats 15", note, msg="a refusal has to end in something to type")
+        self.assertIn(
+            "take more repeats on the same command", note, msg="a refusal has to end in something to type"
+        )
+        self.assertNotIn("--repeats 15", note, msg="15 was the count this very run used; a fixed number ages badly")
         self.assertIn("as the unresolved line the witness already spells out", note)
         self.assertIn("section 8 of `report.md`", note)
         bare = self.script.exit_note(before, after, "refuted", None)
         self.assertEqual(bare[0], 1)
         self.assertNotIn("control arm", bare[1], msg="no arm was taken; do not describe one")
         tight = v([452.561, 452.16, 454.608, 454.153, 452.394], 500)
-        self.assertEqual(self.script.exit_note(tight, after, "refuted", None), (0, ""))
-        self.assertEqual(self.script.exit_note(before, after, "conditional", None)[0], 0)
+        code0, note0 = self.script.exit_note(tight, after, "refuted", None)
+        # `tight` is the first argument here, so it *is* the untuned state of the pair -- the note names it
+        self.assertEqual(code0, 0)
+        self.assertIn("the untuned state met", note0, msg="a green exit says what it was granted for")
+        # a state outside the rule's reach used to be invisible: `0042` looked only at `before`/`after`
+        self.assertEqual(self.script.exit_note(before, after, "refuted", None, tight)[0], 0)
+        self.assertIn("the tuned state met", self.script.exit_note(before, after, "refuted", None, tight)[1])
+        # `conditional` buys the exit on attribution alone, with no state meeting the line outside its
+        # own interval: an empty `met` used to reach for met[-1] and raise IndexError instead of exiting
+        self.assertEqual(self.script.exit_note(before, after, "conditional", None), (0, ""))
         failing = v([600.0, 610.0, 605.0], 500)
         self.assertEqual(self.script.exit_note(failing, after, "uncredited", None)[0], 1)
+
+    def test_a_priced_pair_is_not_answered_by_the_untuned_state(self) -> None:
+        """`0042` left the duplicate alive for the one case his 15-repeat run actually was.
+
+        The gate excluded `refuted`, but this pair is `noise`: both sides met the ceiling, so
+        `attribution()` answered `noise` for the 3.4 ms gap and the straddle branch on `before` fired first
+        again -- printing the ANALYZE sentence a second time and leaving the tuned state's `15/15` unsaid.
+        With a control arm in hand (`split` is not None) the pair has its own sentence whatever the kind
+        word is; the straddle branch keeps only the pairs no arm priced.
+        """
+        v = self.script.verdict
+        before = v(
+            [716.385, 680.524, 692.036, 686.152, 738.026, 700.403, 667.655, 511.659, 466.878, 472.682,
+             480.869, 472.146, 462.754, 527.872, 470.169],
+            500,
+        )
+        after = v(
+            [549.609, 463.633, 463.943, 469.557, 470.217, 458.018, 455.84, 452.293, 453.586, 463.704,
+             450.818, 452.604, 448.124, 450.589, 471.88],
+            500,
+        )
+        tuned = v(
+            [456.104, 458.263, 460.473, 454.776, 452.988, 455.748, 463.038, 453.258, 456.072, 452.973,
+             461.729, 461.984, 454.302, 452.674, 451.553],
+            500,
+        )
+        control = v(
+            [479.281, 455.514, 458.362, 457.486, 453.852, 455.491, 456.579, 453.605, 453.757, 454.358,
+             462.349, 453.894, 455.881, 462.876, 457.367],
+            500,
+        )
+        self.assertTrue(self.script.straddles_ceiling(before))
+        self.assertFalse(self.script.straddles_ceiling(tuned), msg="15/15 inside an 11.5 ms band")
+        split = self.script.gain_split(
+            naive_ms=after["best_ms"] - tuned["best_ms"], drift_ms=after["best_ms"] - control["best_ms"]
+        )
+        self.assertAlmostEqual(split["naive_ms"], -3.429, places=3)
+        self.assertEqual(split["ordering_share"], 0.0)
+        setting = self.script.describe(
+            before,
+            tuned,
+            state="ANALYZE + SET max_parallel_workers_per_gather=2",
+            plans_changed=False,
+            split=split,
+            gap=self.script.gap_pair(
+                after, tuned, first_name="the ANALYZE state", second_name="the tuned state"
+            ),
+        )
+        self.assertTrue(setting.startswith("noise: the 3.4 ms between the two states"), msg=setting[:60])
+        self.assertIn("6/15 of the untuned repeats and 15/15 of these ones met the ceiling", setting)
+        self.assertIn("both sides met it, so this pair measured the width of a band", setting)
+        self.assertIn("the control arm says there is nothing here to credit", setting)
+        self.assertNotIn("The line is unresolved", setting, msg="that sentence belongs to the other pair")
+        code, note = self.script.exit_note(before, after, "noise", control, tuned)
+        self.assertEqual(code, 0)
+        self.assertIn("note: the tuned state and the control met 500 ms outside its own interval", note)
+        self.assertIn("this is not a fix *by the setting*", note)
+        self.assertEqual(self.script.exit_note(before, after, "noise", None, None)[0], 1)
+
+    def test_a_priced_noise_pair_shares_the_arms_number(self) -> None:
+        """`noise` and `ordering` are the same doubt at two prices, and the witness must say which.
+
+        A pair whose gap its own spread swallows, with a control arm that credits most of the gap to
+        measuring later, is judged `noise` (the gap test is the first question `attribution()` asks). The
+        price is the second, and it belongs in the same sentence: dropping the clause leaves a reader with
+        "this pair never measured the condition" and no way to see what the arm actually paid.
+        """
+        v = self.script.verdict
+        before = v([471.9, 830.2, 500.1], 500)
+        after = v([472.3, 560.0, 549.0], 500)
+        tuned = v([450.0, 560.0, 550.0], 500)
+        control = v([458.0, 456.0, 460.0], 500)
+        split = self.script.gain_split(
+            naive_ms=after["best_ms"] - tuned["best_ms"], drift_ms=after["best_ms"] - control["best_ms"]
+        )
+        self.assertAlmostEqual(split["naive_ms"], 22.3, places=1)
+        self.assertAlmostEqual(split["ordering_share"], 0.731, places=3)
+        text = self.script.describe(
+            before,
+            tuned,
+            state="ANALYZE + SET work_mem=64MB",
+            plans_changed=False,
+            split=split,
+            gap=self.script.gap_pair(after, tuned, first_name="the ANALYZE state", second_name="the tuned state"),
+        )
+        self.assertTrue(text.startswith("noise: the 22.3 ms between the two states"), msg=text[:60])
+        self.assertIn("and the control arm says 73% of the gap is ordering: 6.0 ms is what is left", text)
+        self.assertNotIn("The line is unresolved", text)
+        unpriced = self.script.describe(
+            before,
+            after,
+            plans_changed=False,
+            gap=self.script.gap_pair(before, after, first_name="x", second_name="y"),
+        )
+        self.assertIn("The line is unresolved", unpriced, msg="no arm: the straddle branch owns this pair")
+
+    def test_the_gain_split_line_states_its_own_bound(self) -> None:
+        """A priced gap smaller than the spread of the arms is not a price, and must not read like one.
+
+        His `gain split: -3.4 ms observed = -3.4 ms credited to the condition` was two claims about a
+        number neither arm could resolve -- `credited` implies a measurement, and the negative sign means
+        the tuned state was *slower*. The line now carries the bound that made it unreadable.
+        """
+        src = (STAGE / "scripts" / "analyze_ceiling_feature.py").read_text(encoding="utf-8")
+        body = src[src.index("def main(") :]
+        self.assertIn("inside the {gap_setting['spread_ms']:.1f} ms spread of the states being compared", body)
+        joined = " ".join(part.strip() for part in body.splitlines())
+        self.assertIn("so this line prices a gap neither arm could have resolved", joined.replace('" "', ""))
 
     def test_the_plan_comparison_ignores_the_clock(self) -> None:
         """A summary a reader cannot check is a claim; a JSON key that lies about its content is worse.
