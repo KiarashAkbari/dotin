@@ -135,7 +135,7 @@ if not problems:
     print('  none, so require_allowed can vouch for every frame column')
 
 %% md
-## ۵ · سیگنال بیرونی (۶۱۴)
+## ۵ · سیگنال بیرونی (IBGE، چگالی جمعیت سرشماری ۲۰۱۰، متغیر ۶۱۶)
 
 ستون‌های `external_*` از `sql/005_external_signal.sql` می‌آیند. پوشششان یک عددِ تحویلی است: «سیگنال به چند درصد سفارش‌ها رسید» بدون آن، جملهٔ «کمک کرد» بی‌معناست.
 
