@@ -227,10 +227,16 @@ def plan(config: CapstoneConfig, environ: dict[str, str] | None = None) -> Inges
 
 
 def subprocess_env(plan_: IngestPlan, environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The child's environment: stage 1 importable, the password only as a variable."""
+    """The child's environment: stage 1 importable, the password only as a variable.
+
+    The password in ``CAPSTONE_DATABASE_URI`` wins over an ``OLIST_DB_PASSWORD`` left in the shell: the
+    URI is the one database setting this stage documents, and a stale variable from an earlier stage-2
+    session used to make stage 1 authenticate with a different password than every other step. Only when
+    the URI carries no password is the variable passed through as it is.
+    """
     environ = dict(os.environ if environ is None else environ)
     _, password = stage1_url(environ.get(DATABASE_URI_ENV, ""))
-    if password and not environ.get(STAGE1_PASSWORD_ENV):
+    if password:
         environ[STAGE1_PASSWORD_ENV] = password
     src = str(plan_.stage1_dir / "src")
     environ["PYTHONPATH"] = os.pathsep.join(

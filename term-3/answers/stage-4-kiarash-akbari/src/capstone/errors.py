@@ -8,17 +8,76 @@ terminal and a record aimed at a file should not be written twice.
 
 from __future__ import annotations
 
+import os
+import re
+from urllib.parse import urlsplit
+
 from .exit_codes import ExitCode
+
+#: ``scheme://user:password@`` anywhere in a text; the password half is what gets replaced
+_URI_PASSWORD = re.compile(r"(\b[a-zA-Z][a-zA-Z0-9+.-]*://[^:/@\s]+:)([^@\s]+)@")
+REDACTED = "«redacted»"
+
+
+def _secrets(environ) -> list[str]:
+    """Every password this process can see: the one inside each ``*_URI``/``*_URL`` value and each
+    ``*PASSWORD*`` value. Shorter than 3 characters is skipped -- replacing ``a`` everywhere would
+    shred the message without protecting anything."""
+    found: set[str] = set()
+    for key, value in environ.items():
+        if not value:
+            continue
+        upper = key.upper()
+        if "PASSWORD" in upper:
+            found.add(value)
+        elif upper.endswith(("_URI", "_URL")) and "://" in value:
+            try:
+                secret = urlsplit(value).password
+            except ValueError:
+                secret = None
+            if secret:
+                found.add(secret)
+    return sorted((s for s in found if len(s) >= 3), key=len, reverse=True)
+
+
+def redact(text: str, environ=None) -> str:
+    """``text`` with every database password it could carry replaced by ``«redacted»``.
+
+    Two passes: a URI written into the text loses its password whatever it is, and any password held
+    in this process's environment is removed wherever it appears -- a driver or a child process may echo
+    it without the ``user:...@`` around it. Error messages end up in manifests, logs and test output,
+    and a failing assertion is printed in full, so the scrub sits where every message is born.
+    """
+    if not text:
+        return text
+    out = _URI_PASSWORD.sub(lambda m: m.group(1) + REDACTED + "@", str(text))
+    for secret in _secrets(os.environ if environ is None else environ):
+        out = out.replace(secret, REDACTED)
+    return out
+
+
+def _redact_value(value):
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {key: _redact_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_redact_value(item) for item in value)
+    return value
 
 
 class CapstoneError(Exception):
-    """Base class. Anything raised deliberately is a subclass of this."""
+    """Base class. Anything raised deliberately is a subclass of this.
+
+    Its message and context are passed through :func:`redact` on the way in, so no subclass can carry
+    a database password to a terminal, a manifest or a test report.
+    """
 
     exit_code: ExitCode = ExitCode.UNEXPECTED
 
     def __init__(self, message: str, *, context: dict | None = None) -> None:
-        super().__init__(message)
-        self.context = context or {}
+        super().__init__(redact(message))
+        self.context = _redact_value(context or {})
 
 
 class ConfigError(CapstoneError):

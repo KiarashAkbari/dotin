@@ -174,12 +174,90 @@ class IngestStepTests(unittest.TestCase):
 
             write_olist(Path(tmp))
             env = {ingest.DATABASE_URI_ENV: "postgresql://u:pw@h/db", ingest.OLIST_DIR_ENV: tmp}
-            with mock.patch.dict("os.environ", env):
+            # clear=True: a real OLIST_DB_PASSWORD in the shell running the suite used to reach this
+            # comparison, and assertEqual printed it in the failure report
+            with mock.patch.dict("os.environ", env, clear=True):
                 out = ingest.load(config, run=fake_run)
         self.assertEqual(out["loaded"], {"orders": 3})
         self.assertTrue(seen["cwd"].endswith("stage-1-kiarash-akbari"))
-        self.assertEqual(seen["env"][ingest.STAGE1_PASSWORD_ENV], "pw")
+        self.assertTrue(
+            seen["env"].get(ingest.STAGE1_PASSWORD_ENV) == "pw",
+            "the child did not get the URI's password (value deliberately not shown)",
+        )
         self.assertIn("--reset", seen["command"])
+
+    def test_the_uri_password_wins_over_a_stale_shell_variable(self) -> None:
+        """The incident behind this test: a sandbox run had OLIST_DB_PASSWORD exported from an
+        earlier session; the child got that one, and the assertion above printed the real password."""
+        config = load_config(helpers.DEFAULT_CONFIG)
+        with tempfile.TemporaryDirectory() as tmp:
+            from test_capstone_ingest import write_olist
+
+            write_olist(Path(tmp))
+            environ = {
+                ingest.DATABASE_URI_ENV: "postgresql://u:fresh-secret@h/db",
+                ingest.OLIST_DIR_ENV: tmp,
+                ingest.STAGE1_PASSWORD_ENV: "stale-secret",
+            }
+            child = ingest.subprocess_env(ingest.plan(config, environ), environ)
+        self.assertTrue(child[ingest.STAGE1_PASSWORD_ENV] == "fresh-secret", "stale variable won")
+
+    def test_a_stage_1_failure_never_carries_the_password(self) -> None:
+        config = load_config(helpers.DEFAULT_CONFIG)
+        secret = "hunter2-capstone"
+        with tempfile.TemporaryDirectory() as tmp:
+            from test_capstone_ingest import write_olist
+
+            write_olist(Path(tmp))
+            env = {
+                ingest.DATABASE_URI_ENV: f"postgresql://u:{secret}@h/db",
+                ingest.OLIST_DIR_ENV: tmp,
+            }
+            echo = (
+                f"sqlalchemy: could not connect to postgresql+psycopg://u:{secret}@h/db "
+                f"(password {secret} rejected)"
+            )
+            failing = lambda *a, **k: SimpleNamespace(returncode=69, stdout="", stderr=echo)  # noqa: E731
+            with mock.patch.dict("os.environ", env, clear=True), self.assertRaises(CapstoneError) as caught:
+                ingest.load(config, run=failing)
+        text = str(caught.exception) + repr(caught.exception.context)
+        self.assertFalse(secret in text, "the password reached the error message")
+        self.assertIn("«redacted»", str(caught.exception))
+        self.assertIn("could not connect", str(caught.exception), "the diagnosis itself must survive")
+
+
+class RedactTests(unittest.TestCase):
+    """`errors.redact` is applied to every CapstoneError, so the guarantee is the package's, not one call's."""
+
+    def test_a_uri_in_any_message_loses_its_password(self) -> None:
+        from capstone.errors import ConfigError, redact
+
+        text = "bad uri postgresql://kiarash:s3cr3t-pass@localhost:5432/capstone here"
+        self.assertEqual(
+            redact(text, environ={}),
+            "bad uri postgresql://kiarash:«redacted»@localhost:5432/capstone here",
+        )
+        error = ConfigError(text, context={"uri": text, "nested": ["x " + text]})
+        self.assertNotIn("s3cr3t-pass", str(error))
+        self.assertNotIn("s3cr3t-pass", repr(error.context))
+
+    def test_a_bare_password_from_the_environment_is_removed_too(self) -> None:
+        from capstone.errors import redact
+
+        environ = {
+            "CAPSTONE_DATABASE_URI": "postgresql://u:abc-123-xyz@h/db",
+            "OLIST_DB_PASSWORD": "other-pass-9",
+            "CAPSTONE_SMOKE_DATABASE_URI": "postgresql://u:smoke-pw-7@h/db2",
+        }
+        out = redact("abc-123-xyz / other-pass-9 / smoke-pw-7 / keep-me", environ=environ)
+        self.assertEqual(out, "«redacted» / «redacted» / «redacted» / keep-me")
+
+    def test_text_without_secrets_is_untouched(self) -> None:
+        from capstone.errors import redact
+
+        for text in ("", "plain sentence", "postgresql://u@h/db has no password"):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text, environ={"OLIST_DB_PASSWORD": "pw"}), text)
 
     def test_a_stage_1_failure_keeps_its_exit_code(self) -> None:
         config = load_config(helpers.DEFAULT_CONFIG)
