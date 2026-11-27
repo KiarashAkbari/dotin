@@ -1,5 +1,5 @@
 # cheating-model gap (scripts/cheating_model_gap.py)
-model family: hgb.d3; split boundary 2018-05-31; evaluation window ['2018-06', '2018-07', '2018-08', '2018-09']; quota 10%
+model family: hgb.d3; split boundary 2018-05-31 (config capstone.default.toml, seed 20181); evaluation window ['2018-06', '2018-07', '2018-08', '2018-09']; quota 10%
 tempting columns added: order_status, order_delivered_customer_date (as delivery_days and late_days), order_delivered_carrier_date (as carrier_days)
 
 | model | recall@5% | recall@10% | recall@20% | precision@10% | AUC |

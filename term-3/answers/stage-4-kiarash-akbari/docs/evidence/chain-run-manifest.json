@@ -4,69 +4,69 @@
   "layers": [
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:08:03+00:00",
+      "finished_at": "2026-11-27T16:52:14+00:00",
       "name": "ingest",
-      "seconds": 1.344,
-      "started_at": "2026-11-25T10:08:01+00:00",
+      "seconds": 8.264,
+      "started_at": "2026-11-27T16:52:06+00:00",
       "status": "ok"
     },
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:08:58+00:00",
+      "finished_at": "2026-11-27T16:53:10+00:00",
       "name": "load-database",
-      "seconds": 55.506,
-      "started_at": "2026-11-25T10:08:03+00:00",
+      "seconds": 56.28,
+      "started_at": "2026-11-27T16:52:14+00:00",
       "status": "ok"
     },
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:08:58+00:00",
+      "finished_at": "2026-11-27T16:53:11+00:00",
       "name": "load-audit",
-      "seconds": 0.182,
-      "started_at": "2026-11-25T10:08:58+00:00",
+      "seconds": 0.179,
+      "started_at": "2026-11-27T16:53:10+00:00",
       "status": "ok"
     },
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:09:03+00:00",
+      "finished_at": "2026-11-27T16:53:15+00:00",
       "name": "features",
-      "seconds": 5.157,
-      "started_at": "2026-11-25T10:08:58+00:00",
+      "seconds": 4.914,
+      "started_at": "2026-11-27T16:53:11+00:00",
       "status": "ok"
     },
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:09:07+00:00",
+      "finished_at": "2026-11-27T16:53:19+00:00",
       "name": "external",
-      "seconds": 3.93,
-      "started_at": "2026-11-25T10:09:03+00:00",
+      "seconds": 3.969,
+      "started_at": "2026-11-27T16:53:15+00:00",
       "status": "ok"
     },
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:10:00+00:00",
+      "finished_at": "2026-11-27T16:54:13+00:00",
       "name": "model",
-      "seconds": 52.862,
-      "started_at": "2026-11-25T10:09:07+00:00",
+      "seconds": 53.746,
+      "started_at": "2026-11-27T16:53:19+00:00",
       "status": "ok"
     },
     {
       "detail": "",
-      "finished_at": "2026-11-25T10:10:00+00:00",
+      "finished_at": "2026-11-27T16:54:13+00:00",
       "name": "capacity-list",
       "seconds": 0.057,
-      "started_at": "2026-11-25T10:10:00+00:00",
+      "started_at": "2026-11-27T16:54:13+00:00",
       "status": "ok"
     }
   ],
   "over_budget": false,
-  "seconds_used": 119.038,
+  "seconds_used": 127.409,
   "total": {
     "detail": "budget 45 min",
-    "finished_at": "2026-11-25T10:10:00+00:00",
+    "finished_at": "2026-11-27T16:54:13+00:00",
     "name": "total",
-    "seconds": 119.038,
-    "started_at": "2026-11-25T10:08:01+00:00",
+    "seconds": 127.409,
+    "started_at": "2026-11-27T16:52:06+00:00",
     "status": "ok"
   }
 }
