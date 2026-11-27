@@ -22,17 +22,25 @@
 ```bash
 cd term-3/answers/stage-4-kiarash-akbari
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export PYTHONPATH="$PWD/src:$PWD/../stage-1-kiarash-akbari/src"
-export CAPSTONE_DATABASE_URI="postgresql://USER:PASSWORD@localhost:5432/DBNAME"   # رمز فقط در محیط
-export CAPSTONE_OLIST_DIR="/path/to/olist/csvs"        # اگر CSVها در data/raw/olist نیستند
-python scripts/run_chain.py                            # یک فرمان: ingest → load → audit → features → external → model → list
+pip install -r requirements.txt                 # stage 1 هم با -e ../stage-1-kiarash-akbari نصب می‌شود
+export PYTHONPATH="$PWD/src:$PWD/tests:$PWD/../stage-1-kiarash-akbari/src"
+
+# آدرس دیتابیس فقط در یک فایل 0600 بیرون از مخزن؛ هرگز در فرمان، history یا config
+mkdir -p ~/.config/capstone && (umask 077 && ${EDITOR:-nano} ~/.config/capstone/db_uri)
+#   یک خط:  CAPSTONE_DATABASE_URI=postgresql://USER:PASSWORD@localhost:5432/DBNAME
+set -a; . ~/.config/capstone/db_uri; set +a
+
+export CAPSTONE_OLIST_DIR="/path/to/olist/csvs"   # اگر CSVها در data/raw/olist نیستند
+python scripts/run_chain.py                      # یک فرمان: ingest → load → audit → features → external → model → list
 ```
+
+`CAPSTONE_DATABASE_URI` تنها تنظیمِ دیتابیس است: گامِ stage 1 رمز را از همین URI می‌گیرد (یک
+`OLIST_DB_PASSWORD` کهنه در shell دیگر بر آن غلبه نمی‌کند) و هیچ پیامِ خطایی رمز را چاپ نمی‌کند.
 
 خروجی‌ها در `data/curated/`: `followup_list.csv` (فهرست پیگیری)، `capacity_table.json` (جدول ۵/۱۰/۲۰٪)،
 `model_metrics.json`، `model.joblib`، و manifest زمان هر مرحله. کد خروج غیرصفر یعنی یک مرحله ایستاده و
-manifest می‌گوید کدام. روی ماشین سندباکس کل زنجیره روی دیتابیسِ تازه‌ساخته ۱۱۹ ثانیه طول کشید
-(`docs/evidence/chain-run-manifest.json`؛ بودجه ۴۵ دقیقه).
+manifest می‌گوید کدام. روی ماشین سندباکس (۲ vCPU) کل زنجیره روی دیتابیسِ تازه‌ساخته ۱۲۷٫۴ ثانیه طول کشید
+(`docs/evidence/chain-run-manifest.json`؛ بودجه ۴۵ دقیقه). روی ماشین خودتان دوباره بگیرید.
 
 `config/capstone.default.toml` قرارداد تصمیم‌گرفته و بی‌رمز است و همه‌چیز از آن خوانده می‌شود؛ اگر روی ماشین
 خودتان چیزی متفاوت لازم است، `config/capstone.toml` بسازید (در Git نمی‌آید).
@@ -63,11 +71,24 @@ python -m capstone predict --input path/to/fresh_orders/        # پوشه‌ا�
 ## تست‌ها
 
 ```bash
-python -m unittest discover -s tests          # بدون CAPSTONE_DATABASE_URI تست‌های زنده skip می‌شوند
+export PYTHONPATH="$PWD/src:$PWD/tests:$PWD/../stage-1-kiarash-akbari/src"   # stage 1 لازم است
+python -m unittest discover -s tests -t .           # بدون CAPSTONE_DATABASE_URI تست‌های زنده skip می‌شوند
+set -a; . ~/.config/capstone/db_uri; set +a
+python -m unittest discover -s tests -t .           # با دیتابیسِ ساخته‌شده توسط زنجیره: قراردادِ SQLِ زنده هم اجرا می‌شود
+# تست‌های smoke/سرتاسری یک دیتابیسِ دورریختنی را پاک و دوباره می‌سازند — هرگز دیتابیسِ اصلی:
+CAPSTONE_SMOKE_DATABASE_URI=postgresql://USER:PASSWORD@localhost:5432/capstone_scratch \
+CAPSTONE_SMOKE_ALLOW_DESTROY=1 python -m unittest tests.test_postgres_smoke tests.test_end_to_end
 ```
 
-با `CAPSTONE_DATABASE_URI` تست‌های SQL و تست سرتاسری (زنجیره روی دادهٔ ساختگی تا پیش‌بینی) هم اجرا می‌شوند.
-تست ضدنشت در `tests/test_capstone_sql_guards.py` و `tests/test_capstone_features.py` است.
+تست ضدنشت در `tests/test_capstone_sql_guards.py` و `tests/test_capstone_features.py` است؛ تست سرتاسری
+(زنجیره روی دادهٔ ساختگی تا پیش‌بینی) در `tests/test_end_to_end.py`.
+
+## زمانِ کوئریِ ویژگی (سقف ۵۰۰ ms) روی ماشین خودتان
+
+```bash
+python scripts/analyze_ceiling_feature.py --tag "$(hostname -s)-$(date +%F)" --repeats 15
+# شاهد: docs/evidence/ceiling-feature-analysis.<tag>.txt (+ .json) با پلن؛ نامِ تکراری بی --force رد می‌شود
+```
 
 ## ساختن نوتبوک‌ها و شاهدها (بعد از زنجیره)
 
@@ -75,6 +96,7 @@ python -m unittest discover -s tests          # بدون CAPSTONE_DATABASE_URI �
 python scripts/build_exploration_notebook.py --execute --kernel --force   # 01_exploration.ipynb در kernel تازه
 python scripts/build_system_notebook.py                                    # 02_system.ipynb در kernel تازه
 python scripts/cheating_model_gap.py                                       # مدل تقلبی ← docs/evidence/
+python scripts/boundary_sensitivity.py                                     # حساسیتِ مرز ← docs/evidence/
 python docs/evidence/model-ablation-run.py                                 # با/بدون منبع بیرونی، همهٔ خانواده‌ها
 ```
 
