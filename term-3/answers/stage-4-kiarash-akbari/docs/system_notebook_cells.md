@@ -163,4 +163,24 @@ followup = pd.read_csv(CURATED / "followup_list.csv")
 print("follow-up list:", len(followup), "orders (top", CONFIG.capacity.share, "of the evaluation window)")
 display(followup.head(10))
 print((STAGE / "docs/evidence/sealed-cut-rehearsal.txt").read_text())
+
+%% md
+## ۹. دو شاهدِ دیگرِ گزارش: زمانِ کوئریِ ویژگی (سقف ۵۰۰ ms، با پلن) و حساسیتِ مرز
+
+هر دو را اسکریپت‌هایی جدا از زنجیره نوشته‌اند (`scripts/analyze_ceiling_feature.py --tag …` و
+`scripts/boundary_sensitivity.py`)؛ این‌جا فقط خوانده می‌شوند تا هر عددِ `report.md` در نوتبوک هم دیده شود.
+زمانِ قاب روی این دیتابیس هم یک بار دوباره گرفته می‌شود (`features.FRAME_TIMING_SQL`، بهترینِ پنج اجرا).
+
+%% code
+import time
+from capstone import features
+ceiling = sorted((STAGE / "docs/evidence").glob("ceiling-feature-analysis.sandbox-*.txt"))[-1]
+print(ceiling.name)
+print("\n".join(line for line in ceiling.read_text().splitlines()[:8] if line.strip()))
+runs = []
+for _ in range(5):
+    start = time.perf_counter(); cur.execute(features.FRAME_TIMING_SQL.format(frame=features.FRAME_VIEW)); cur.fetchall()
+    runs.append((time.perf_counter() - start) * 1000)
+print(f"this database, now: best {min(runs):.1f} ms of 5 (ceiling {CONFIG.features.feature_query_ms} ms)")
+print((STAGE / "docs/evidence/boundary-sensitivity.txt").read_text())
 conn.close()
