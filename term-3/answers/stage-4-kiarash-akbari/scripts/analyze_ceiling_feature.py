@@ -84,6 +84,11 @@ run writes ``ceiling-feature-analysis.tuned-<tag>.txt`` beside it, where `<tag>`
 sorted settings. Both files are evidence -- one says the frame misses the ceiling, the other says what
 it costs to move it -- and a refusal whose only remedy is `--force` would teach people to destroy the
 first one to produce the second.
+
+A *round* is named with ``--tag NAME``: the witness becomes ``ceiling-feature-analysis.NAME.txt`` (a
+tuned one ``ceiling-feature-analysis.NAME.tuned-<digest>.txt``), and a tagged file that already exists is
+refused without ``--force``. Before ``--tag`` the only file names were the state's, so a second round of
+the same command silently replaced the first and its numbers survived only in a terminal paste.
 """
 
 from __future__ import annotations
@@ -268,6 +273,30 @@ def tuning_tag(settings: dict[str, str]) -> str:
         return ""
     joined = ";".join(f"{key}={settings[key]}" for key in sorted(settings))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:6]
+
+
+#: what `--tag` accepts: a word that can sit inside a filename on every OS, and nothing that could
+#: climb out of docs/evidence/ (no separators, no leading dot)
+RUN_TAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$")
+
+
+def tagged_evidence(evidence: Path, tag: str | None) -> Path:
+    """The base witness for one named run: `--tag mine` turns `x.txt` into `x.mine.txt`.
+
+    Without a tag the base is returned unchanged, so every command typed before `--tag` existed writes
+    exactly where it wrote before. The tag goes *before* any `.tuned-<digest>` that `witness_path` adds,
+    so a tagged tuned run is `x.mine.tuned-411fdc.txt` and the two naming rules never fight.
+    """
+    if not tag:
+        return evidence
+    if not RUN_TAG.match(tag):
+        raise ValueError(
+            f"--tag {tag!r} is not a usable name: letters, digits, '-' and '_' only, at most 40 "
+            "characters, starting with a letter or digit"
+        )
+    if TUNED_NAME.search(evidence.stem) or evidence.stem.endswith(f".{tag}"):
+        return evidence
+    return evidence.with_name(f"{evidence.stem}.{tag}{evidence.suffix}")
 
 
 def witness_path(evidence: Path, settings: dict[str, str]) -> Path:
@@ -1050,6 +1079,12 @@ def main(argv: list[str] | None = None) -> int:
         help="base witness; --set and --control write <base>.tuned-<tag>.txt instead of over it",
     )
     parser.add_argument(
+        "--tag",
+        metavar="NAME",
+        help="name this run: the witness becomes <base>.<NAME>.txt (+ .json), and an existing file of "
+        "that name is never overwritten without --force, so a second round cannot erase the first",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="overwrite a witness measured at a different ceiling, row count or tuning",
@@ -1076,6 +1111,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
+    try:
+        args.evidence = tagged_evidence(args.evidence, args.tag)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
     config = load_config(args.config)
     ceiling = float(config.features.feature_query_ms)
     frame = features.FRAME_VIEW
@@ -1084,6 +1125,12 @@ def main(argv: list[str] | None = None) -> int:
     tagged = tag_settings(settings, control=args.control)
     witness = witness_path(args.evidence, tagged)
     previous = None
+    if args.tag and witness.exists() and not args.force:
+        print(
+            f"refusing to overwrite {shown(witness)}: a tagged run is a named round, and that name is "
+            "taken -- pick a new --tag, or --force if this run really replaces it"
+        )
+        return 2
     if witness.exists():
         # the guard is about *what the file claims*; `--force` is consulted inside it, so it stays the
         # only way past
@@ -1103,7 +1150,7 @@ def main(argv: list[str] | None = None) -> int:
         claims = {"ceiling_ms": str(int(ceiling)), "frame_rows": str(rows), "tuning": tuning}
         difference = state_difference(stored, claims) if previous else []
         if difference and not args.force:
-            print(refusal(witness, stored, claims, witness_path(DEFAULT_EVIDENCE, tagged)))
+            print(refusal(witness, stored, claims, witness_path(tagged_evidence(DEFAULT_EVIDENCE, args.tag), tagged)))
             return 2
 
         # read the stamps first: the question is who left the statistics the `before` state is about to

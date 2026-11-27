@@ -32,13 +32,16 @@ Five rules, all testable without a database:
 from __future__ import annotations
 
 import importlib.util
+import io
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import helpers
 
 STAGE = helpers.STAGE_ROOT
+SCRIPT = STAGE / "scripts" / "analyze_ceiling_feature.py"
 
 
 def load_script():
@@ -1169,6 +1172,58 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(tuned.name, "ceiling-feature-analysis.tuned-411fdc.txt")
         self.assertEqual(script.witness_path(tuned, settings), tuned, msg="rewriting its own file is fine")
         self.assertEqual(script.witness_path(base, {}), base, msg="an untuned run keeps the old name")
+
+
+class RunTagTests(unittest.TestCase):
+    """`--tag` names a round, so two rounds of the same command keep two witnesses.
+
+    Before it, the witness name came only from the state (`tuned-<digest>`), and his second 15-repeat
+    round overwrote the first; the numbers of rounds two to four survived only as terminal pastes.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.script = load_script()
+
+    def test_no_tag_keeps_every_old_name(self) -> None:
+        base = self.script.DEFAULT_EVIDENCE
+        self.assertEqual(self.script.tagged_evidence(base, None), base)
+        self.assertEqual(self.script.tagged_evidence(base, ""), base)
+
+    def test_a_tag_lands_beside_the_base_and_before_the_tuning_digest(self) -> None:
+        base = self.script.DEFAULT_EVIDENCE
+        named = self.script.tagged_evidence(base, "his-run_1")
+        self.assertEqual(named.name, "ceiling-feature-analysis.his-run_1.txt")
+        self.assertEqual(named.parent, base.parent)
+        settings = self.script.parse_settings(["max_parallel_workers_per_gather=4"])
+        self.assertEqual(
+            self.script.witness_path(named, settings).name,
+            "ceiling-feature-analysis.his-run_1.tuned-411fdc.txt",
+        )
+        self.assertEqual(self.script.tagged_evidence(named, "his-run_1"), named, msg="idempotent")
+
+    def test_a_tag_that_could_leave_the_folder_is_refused(self) -> None:
+        base = self.script.DEFAULT_EVIDENCE
+        for bad in ("../x", "a/b", ".hidden", "a b", "x" * 41):
+            with self.subTest(tag=bad), self.assertRaises(ValueError):
+                self.script.tagged_evidence(base, bad)
+
+    def test_main_names_the_file_before_reading_it_and_refuses_a_taken_name(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        head = source[source.index("def main(") :]
+        self.assertIn('"--tag"', head)
+        self.assertLess(
+            head.index("args.evidence = tagged_evidence(args.evidence, args.tag)"),
+            head.index("witness = witness_path(args.evidence, tagged)"),
+        )
+        guard = head[head.index("if args.tag and witness.exists() and not args.force") :]
+        self.assertIn("return 2", guard[:400])
+
+    def test_a_bad_tag_exits_2_before_any_connection(self) -> None:
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = self.script.main(["--tag", "../escape"])
+        self.assertEqual(code, 2)
+        self.assertIn("--tag", err.getvalue())
 
 
 class PlanMechanismTests(unittest.TestCase):
