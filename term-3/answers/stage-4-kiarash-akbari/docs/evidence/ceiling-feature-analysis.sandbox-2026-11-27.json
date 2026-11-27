@@ -1,0 +1,182 @@
+{
+  "config": "config/capstone.default.toml",
+  "ceiling_ms": 500.0,
+  "frame_rows": 99281,
+  "settings": {},
+  "before": {
+    "runs_ms": [
+      392.738,
+      370.55,
+      367.743,
+      359.198,
+      357.194,
+      362.626,
+      358.944,
+      358.997,
+      369.76,
+      361.882,
+      368.892,
+      364.901,
+      367.011,
+      371.626,
+      371.672
+    ],
+    "best_ms": 357.194,
+    "best_repeat": 5,
+    "below_ceiling": 15,
+    "mean_ms": 366.916,
+    "worst_ms": 392.738,
+    "spread_ms": 35.544,
+    "ceiling_ms": 500.0,
+    "ceiling_margin_ms": 142.806,
+    "passes": true,
+    "read_ms": 798.506,
+    "trend_ms": -0.156,
+    "straddles_ceiling": false
+  },
+  "after": {
+    "runs_ms": [
+      366.124,
+      365.378,
+      364.955,
+      366.415,
+      371.223,
+      368.571,
+      384.064,
+      366.278,
+      360.666,
+      360.731,
+      367.632,
+      364.899,
+      367.072,
+      361.705,
+      368.752
+    ],
+    "best_ms": 360.666,
+    "best_repeat": 9,
+    "below_ceiling": 15,
+    "mean_ms": 366.964,
+    "worst_ms": 384.064,
+    "spread_ms": 23.398,
+    "ceiling_ms": 500.0,
+    "ceiling_margin_ms": 139.334,
+    "passes": true,
+    "read_ms": 805.041,
+    "trend_ms": -4.816,
+    "straddles_ceiling": false
+  },
+  "tuned": null,
+  "control": null,
+  "gain_split": null,
+  "plan_shapes": {
+    "before_analyze": "Workers Launched: 1, no spill; execution 388.294 ms",
+    "after_analyze": "Workers Launched: 1, no spill; execution 381.172 ms",
+    "tuned": null
+  },
+  "plan_shapes_compared": {
+    "before_analyze": [
+      "Gather  (cost=16357.28..34265.81 rows=105892 width=261)",
+      "Workers Planned: 1",
+      "Workers Launched: 1",
+      "->  Hash Left Join  (cost=15357.28..22676.61 rows=62289 width=261)",
+      "->  Parallel Hash Left Join  (cost=15354.68..19542.45 rows=62289 width=289)",
+      "->  Parallel Hash Left Join  (cost=12760.66..16784.91 rows=62289 width=257)",
+      "->  Parallel Hash Left Join  (cost=9994.53..13855.26 rows=62289 width=248)",
+      "->  Parallel Hash Left Join  (cost=7398.41..11095.62 rows=62289 width=191)",
+      "->  Parallel Hash Right Join  (cost=4612.39..8146.08 rows=62289 width=175)",
+      "->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118)",
+      "->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128)",
+      "->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158)",
+      "->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36)",
+      "->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56)",
+      "->  Parallel Seq Scan on orders o  (cost=0.00..2552.75 rows=62289 width=90)",
+      "->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49)",
+      "->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57)",
+      "->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42)",
+      "->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65)",
+      "->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34)"
+    ],
+    "after_analyze": [
+      "Gather  (cost=16357.28..34265.81 rows=105892 width=261)",
+      "Workers Planned: 1",
+      "Workers Launched: 1",
+      "->  Hash Left Join  (cost=15357.28..22676.61 rows=62289 width=261)",
+      "->  Parallel Hash Left Join  (cost=15354.68..19542.45 rows=62289 width=289)",
+      "->  Parallel Hash Left Join  (cost=12760.66..16784.91 rows=62289 width=257)",
+      "->  Parallel Hash Left Join  (cost=9994.53..13855.26 rows=62289 width=248)",
+      "->  Parallel Hash Left Join  (cost=7398.41..11095.62 rows=62289 width=191)",
+      "->  Parallel Hash Right Join  (cost=4612.39..8146.08 rows=62289 width=175)",
+      "->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118)",
+      "->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128)",
+      "->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158)",
+      "->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36)",
+      "->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56)",
+      "->  Parallel Seq Scan on orders o  (cost=0.00..2552.75 rows=62289 width=90)",
+      "->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49)",
+      "->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57)",
+      "->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42)",
+      "->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65)",
+      "->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34)"
+    ],
+    "tuned": null
+  },
+  "plans_moved": {
+    "analyze": false,
+    "setting": false
+  },
+  "parallel_cap": null,
+  "plan_estimate_drift": {
+    "estimated_rows": 105892,
+    "actual_rows": 99281,
+    "pct": 6.658877327988236
+  },
+  "statistics_provenance": {
+    "sources": 2,
+    "per_source": {
+      "external_municipio": {
+        "author": "never",
+        "minutes_ago": null,
+        "separation_minutes": null
+      },
+      "mv_external_density": {
+        "author": "never",
+        "minutes_ago": null,
+        "separation_minutes": null
+      }
+    },
+    "auto": [],
+    "never_statted": [
+      "external_municipio",
+      "mv_external_density"
+    ],
+    "newest_minutes": null,
+    "separation_minutes": null
+  },
+  "witness_lines": {
+    "setting_inert": null,
+    "statistics": null,
+    "provenance": "  no statistics at all: none of the 2 sources carries an `analyze` or an `autoanalyze` stamp, so this is the one situation a manual `ANALYZE` can price -- the estimates the `before` state ran against are the planner's defaults, and a plan that moves here is a real move"
+  },
+  "attribution": {
+    "analyze": "noise",
+    "setting": "not measured"
+  },
+  "noise_bounds": {
+    "analyze": {
+      "observed_ms": -3.472,
+      "spread_ms": 35.544,
+      "spread_of": "the untuned state",
+      "first_spread_ms": 35.544,
+      "second_spread_ms": 23.398,
+      "inside_noise": true
+    },
+    "setting": null
+  },
+  "frame_rows_read": 99281,
+  "verdict": "finding: the frame already meets the ceiling (357.2 ms best of 15/15 repeats under 500 ms); this run is context, not a fix",
+  "verdict_tuned": null,
+  "exit": {
+    "code": 0,
+    "note": "note: the untuned state and the ANALYZE state met 500 ms outside its own interval, so the ceiling is met on this machine at this repeat count -- but the attribution above is what `report.md` copies, and `noise` or `ordering` there means this is not a fix *by the setting*"
+  }
+}

@@ -1219,6 +1219,15 @@ class RunTagTests(unittest.TestCase):
         guard = head[head.index("if args.tag and witness.exists() and not args.force") :]
         self.assertIn("return 2", guard[:400])
 
+    def test_the_json_witness_names_the_config_relative_to_the_stage(self) -> None:
+        """The JSON used to carry `str(args.config)`, an absolute path of the machine that ran it."""
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"config": shown(args.config.resolve())', source)
+        self.assertNotIn('"config": str(args.config)', source)
+        for witness in (STAGE / "docs" / "evidence").glob("ceiling-feature-analysis*.json"):
+            with self.subTest(witness=witness.name):
+                self.assertNotIn('"config": "/', witness.read_text(encoding="utf-8"))
+
     def test_a_bad_tag_exits_2_before_any_connection(self) -> None:
         with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
             code = self.script.main(["--tag", "../escape"])
@@ -1424,6 +1433,48 @@ class StatisticsProvenanceTests(unittest.TestCase):
         write = body.index("witness.write_text")
         self.assertLess(body.index("[prov_text] if prov_text"), write, msg="the file keeps it too")
         self.assertIn('"statistics_provenance": prov', body[write:], msg="and the JSON keeps it")
+
+
+class ThresholdEdgeTests(unittest.TestCase):
+    """Both of 0044's thresholds, on each side of their bound (docs/evidence/ceiling-threshold-derivation.txt)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.script = load_script()
+
+    def drift(self, estimated: int, actual: int = 99281) -> dict:
+        plan = (
+            f"Gather  (cost=1.00..2.00 rows={estimated} width=261) (actual rows={actual} loops=1)\n"
+            "  Workers Planned: 1\n"
+        )
+        return self.script.estimate_drift(plan)
+
+    def test_the_stale_statistics_bound_is_inclusive_at_one_percent(self) -> None:
+        line = self.script.stats_line
+        self.assertEqual(self.script.STATS_CURRENT_PCT, 1.0)
+        at = {"estimated_rows": 990, "actual_rows": 1000, "pct": 1.0}
+        over = {"estimated_rows": 989, "actual_rows": 1000, "pct": 1.1}
+        self.assertIsNotNone(line(at, False, 500.0), "exactly 1.0 % is still current")
+        self.assertIsNone(line(over, False, 500.0), "just over the bound makes no claim")
+
+    def test_the_measured_states_fall_where_the_derivation_says(self) -> None:
+        line = self.script.stats_line
+        for estimated, current in ((99259, True), (99275, True), (98944, True), (57581, False)):
+            with self.subTest(estimated=estimated):
+                drift = self.drift(estimated)
+                self.assertEqual(line(drift, False, 500.0) is not None, current, drift)
+
+    def test_binding_is_read_at_equality_and_inert_only_below(self) -> None:
+        def plans(n: int) -> dict:
+            return {"before": f"Gather (cost=1..2 rows=1 width=1)\n  Workers Planned: {n}\n"}
+
+        cap = self.script.cap_binding
+        self.assertTrue(cap({"max_parallel_workers_per_gather": "1"}, plans(1))["binding"],
+                        "planned == cap cannot prove the cap idle")
+        self.assertFalse(cap({"max_parallel_workers_per_gather": "2"}, plans(1))["binding"])
+        self.assertTrue(cap({"max_parallel_workers_per_gather": "2"}, plans(2))["binding"])
+        self.assertFalse(cap({"max_parallel_workers_per_gather": "8"}, plans(1))["binding"])
+
 
 if __name__ == "__main__":
     unittest.main()

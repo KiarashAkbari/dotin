@@ -1,0 +1,14 @@
+# ceiling-threshold-derivation (docs/evidence/ceiling-threshold-derivation.py), agent sandbox 2026-11-27
+# database: a TEMPLATE copy of capstone_fresh (the chain-built database of chain-run-manifest.json); 2 vCPU shared, server defaults
+# command: ceiling-threshold-derivation.py analyzed no-statistics analyzed never-analyzed analyzed cap=0 cap=1 cap=2 cap=4 cap=8
+database capstone_ceiling; PostgreSQL 16.4 on aarch64-unknown-linux-gnu; max_parallel_workers_per_gather=2
+state analyzed       top node 'Gather': estimated rows 99259, actual 99281, off 0.022 %; Workers Planned ['1']
+state no-statistics  top node 'Gather': estimated rows 98944, actual 99281, off 0.339 %; Workers Planned ['1']
+state analyzed       top node 'Gather': estimated rows 99275, actual 99281, off 0.006 %; Workers Planned ['1']
+state never-analyzed top node 'Gather': estimated rows 57581, actual 99281, off 42.002 %; Workers Planned ['1']
+state analyzed       top node 'Gather': estimated rows 99269, actual 99281, off 0.012 %; Workers Planned ['1']
+state cap=0          top node 'Hash Left Join': estimated rows 99269, actual 99281, off 0.012 %; Workers Planned -
+state cap=1          top node 'Gather': estimated rows 99269, actual 99281, off 0.012 %; Workers Planned ['1']
+state cap=2          top node 'Gather': estimated rows 99269, actual 99281, off 0.012 %; Workers Planned ['1']
+state cap=4          top node 'Gather': estimated rows 99269, actual 99281, off 0.012 %; Workers Planned ['1']
+state cap=8          top node 'Gather': estimated rows 99269, actual 99281, off 0.012 %; Workers Planned ['1']

@@ -1,5 +1,5 @@
 {
-  "config": "/tmp/w/dotin/term-3/answers/stage-4-kiarash-akbari/config/capstone.default.toml",
+  "config": "config/capstone.default.toml",
   "ceiling_ms": 500.0,
   "frame_rows": 99281,
   "settings": {},

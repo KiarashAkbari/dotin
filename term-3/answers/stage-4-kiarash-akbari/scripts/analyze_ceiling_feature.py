@@ -481,6 +481,11 @@ def cap_binding(settings: dict[str, str], plans: dict[str, str]) -> dict | None:
     if not planned:
         return None
     top = max(planned.values())
+    # `>=`, not `>`: PostgreSQL plans min(desired, cap) workers, so `planned == cap` cannot tell "wanted
+    # exactly the cap" from "wanted more and was clipped". Only `planned < cap` proves the cap idle, and
+    # `inert` is the only claim this line makes strongly -- so equality is read as binding. The cost is
+    # measured in ceiling-threshold-derivation.txt: at cap=1 the frame plans 1 worker (binding) although
+    # caps 2, 4 and 8 also plan 1; the error is in the direction of claiming *less*.
     return {"cap": limit, "planned": top, "per_state": planned, "binding": top >= limit}
 
 
@@ -533,9 +538,19 @@ def inert_line(inert: dict | None) -> str | None:
     )
 
 
+#: the top-node row-estimate error (percent) at or under which the plan is called "statistics already
+#: current". Derived, not chosen: docs/evidence/ceiling-threshold-derivation.txt reads the same frame in
+#: three states on one database -- analyzed 0.006-0.022 %, column statistics deleted 0.339 %, never
+#: analyzed (reltuples = -1) 42.002 % -- so 1.0 sits ~45x above the analyzed state and ~42x below the
+#: never-analyzed one. Its blind spot is measured too: with table sizes known but no column statistics
+#: the top node is still within 1.0 %, so this line says "nothing at the top node for ANALYZE to
+#: correct", never "every relation has statistics" -- that question is the catalog line's (0046).
+STATS_CURRENT_PCT = 1.0
+
+
 def stats_line(drift: dict | None, moved_analyze: bool, ceiling_ms: float) -> str | None:
     """The witness line that says whether `ANALYZE` can still be priced here, or None for no claim."""
-    if drift is None or moved_analyze or drift["pct"] > 1.0:
+    if drift is None or moved_analyze or drift["pct"] > STATS_CURRENT_PCT:
         return None
     return (
         f"  statistics already current: the *untuned* plan estimates {drift['estimated_rows']:,} rows "
@@ -1352,7 +1367,7 @@ def main(argv: list[str] | None = None) -> int:
     witness.with_suffix(".json").write_text(
         json.dumps(
             {
-                "config": str(args.config),
+                "config": shown(args.config.resolve()),
                 "ceiling_ms": ceiling,
                 "frame_rows": rows,
                 "settings": settings,
