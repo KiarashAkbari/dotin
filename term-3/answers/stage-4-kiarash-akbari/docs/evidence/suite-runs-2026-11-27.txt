@@ -1,0 +1,22 @@
+# stage-4 test runs, branch fix/stage-4-finish, tree 94f4a00 (sandbox, 2026-11-27)
+# environment: Python 3.12 venv from requirements.txt; PostgreSQL 16.4 (zonky arm64), 2 vCPU; psql 16.16 client on PATH
+# PYTHONPATH="$PWD/src:$PWD/tests:$PWD/../stage-1-kiarash-akbari/src" in every run; the database password never appears below
+
+1. offline (no CAPSTONE_DATABASE_URI): python -m unittest discover -s tests -t .
+   Ran 575 tests -- OK (skipped=18)
+   the same on a fresh `git clone --branch fix/stage-4-finish`: Ran 575 tests -- OK (skipped=18)
+
+2. with the chain-built database (CAPSTONE_DATABASE_URI -> the database run_chain built) and the smoke variables
+   (CAPSTONE_SMOKE_DATABASE_URI -> a throwaway database, CAPSTONE_SMOKE_ALLOW_DESTROY=1):
+   Ran 585 tests -- OK (skipped=3)
+   skipped: CAPSTONE_EXTERNAL_LIVE not set (one live IBGE request); the empty-external-table case (this database holds
+   the IBGE rows); the psycopg2 comparison (psycopg2 is not in requirements.txt)
+
+3. smoke and end-to-end alone: python -m unittest tests.test_postgres_smoke tests.test_end_to_end
+   Ran 14 tests -- OK (skipped=1: psycopg2 not installed)
+   without psql on PATH the ten smoke tests skip ("no psql is on PATH"); the four end-to-end tests run either way
+
+4. CAPSTONE_EXTERNAL_LIVE=1 python -m unittest tests.test_capstone_external (offline otherwise): Ran 78 tests -- OK (skipped=2)
+
+5. stage 1 on this branch, offline: cd ../stage-1-kiarash-akbari && python -m unittest discover -s tests
+   Ran 265 tests -- OK (skipped=2)

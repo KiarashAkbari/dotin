@@ -80,6 +80,9 @@ CAPSTONE_SMOKE_DATABASE_URI=postgresql://USER:PASSWORD@localhost:5432/capstone_s
 CAPSTONE_SMOKE_ALLOW_DESTROY=1 python -m unittest tests.test_postgres_smoke tests.test_end_to_end
 ```
 
+تست‌های `test_postgres_smoke` به `psql` روی `PATH` نیاز دارند و بدون آن skip می‌شوند؛ چهار تست سرتاسری در هر حال اجرا
+می‌شوند. شمارِ آخرین اجراها: `docs/evidence/suite-runs-2026-11-27.txt`.
+
 تست ضدنشت در `tests/test_capstone_sql_guards.py` و `tests/test_capstone_features.py` است؛ تست سرتاسری
 (زنجیره روی دادهٔ ساختگی تا پیش‌بینی) در `tests/test_end_to_end.py`.
 
