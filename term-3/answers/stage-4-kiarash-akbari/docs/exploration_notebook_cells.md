@@ -90,6 +90,18 @@ counts = Counter(row['review_count'] for row in labelled if row['review_count'] 
 multi = sum(value for key, value in counts.items() if key and key > 1)
 print(f'orders with more than one review: {multi}  (D3: worst_score_wins)')
 
+# D1 and D2 counted on the database itself, so report.md's two decisions trace to this notebook
+with engine.cursor() as cursor:
+    cursor.execute(
+        "SELECT count(*) FILTER (WHERE order_approved_at IS NULL), "
+        "count(*) FILTER (WHERE order_approved_at IS NULL AND order_status = 'canceled') FROM olist.orders"
+    )
+    no_approval, no_approval_canceled = cursor.fetchone()
+    cursor.execute("SELECT count(*) FROM capstone.v_d2_unlabelled_orders")
+    (no_review,) = cursor.fetchone()
+print(f'D1 orders without order_approved_at: {no_approval} ({no_approval_canceled} of them canceled)')
+print(f'D2 approved orders without a review: {no_review}')
+
 %% md
 ## ۳ · توزیع ویژگی‌ها و «گم‌شده‌ها»
 
