@@ -643,6 +643,24 @@ class StaticSqlContractTests(unittest.TestCase):
             SNAPSHOTS.index("capstone.mv_order_centroids"),
         )
 
+    def test_the_prediction_path_refreshes_each_order_snapshot_exactly_once_in_the_sql_order(self):
+        """Every snapshot that depends on order rows is refreshed once, in the order 003 refreshes it.
+
+        The guard above only checked one pair, so `SNAPSHOTS` with `mv_order_centroids` listed twice
+        stayed green (the gate review measured it: `Ran 547 ... OK`). A duplicate costs a refresh per
+        prediction; a missing one leaves `predict` reading a snapshot built before the bundle was staged.
+        `mv_zip_centroid` is the one exception: it reads `olist.geolocation`, which a bundle never carries.
+        """
+        from capstone.predict import SNAPSHOTS
+
+        text = body_of((SQL_DIR / "003_feature_views.sql").read_text(encoding="utf-8"))
+        refreshed = re.findall(r"REFRESH MATERIALIZED VIEW (capstone\.\w+)", text)
+        expected = [name for name in refreshed if name != "capstone.mv_zip_centroid"]
+        for name in expected:
+            with self.subTest(snapshot=name):
+                self.assertEqual(SNAPSHOTS.count(name), 1, f"{name} must be refreshed exactly once")
+        self.assertEqual(list(SNAPSHOTS), expected, "same members, same order as sql/003")
+
     def test_the_as_of_predicate_is_in_sql_not_in_python(self):
         """``04`` requires the rule in the query, so the SQL files must contain it."""
         text = "\n".join(path.read_text(encoding="utf-8") for path in sql_files())
@@ -986,6 +1004,31 @@ class LiveSqlContractTests(unittest.TestCase):
         self.assertEqual(scans.get("orders"), 1, msg=str(scans))
         self.assertEqual(scans.get("mv_order_centroids"), 1, msg=str(scans))
         self.assertNotIn("mv_zip_centroid", scans, msg=str(scans))
+
+    def test_every_order_snapshot_holds_what_its_view_says_now(self):
+        """A snapshot that was not refreshed after its input changed is stale, and stale is silent.
+
+        For each snapshot its own stored definition (`pg_matviews.definition`), run live, is the truth:
+        same row count, and the same number of NULL centroids on `mv_order_centroids`, whose NULLs
+        become `geography_unavailable`.
+        """
+        snapshots = self.query(
+            "SELECT matviewname, definition FROM pg_matviews WHERE schemaname = 'capstone' ORDER BY 1"
+        )
+        self.assertIn("mv_order_centroids", [name for name, _ in snapshots])
+        for name, definition in snapshots:
+            with self.subTest(snapshot=name):
+                body = definition.strip().rstrip(";")
+                (live,) = self.query(f"SELECT count(*) FROM ({body}) AS live")[0]
+                (kept,) = self.query(f"SELECT count(*) FROM capstone.{name}")[0]
+                self.assertEqual(kept, live, f"capstone.{name} is stale against its own definition")
+        nulls = (
+            "SELECT count(*) FILTER (WHERE customer_lat IS NULL), "
+            "count(*) FILTER (WHERE seller_lat IS NULL) FROM capstone.{}"
+        )
+        self.assertEqual(
+            self.query(nulls.format("mv_order_centroids")), self.query(nulls.format("v_order_centroids"))
+        )
 
     def test_reapplying_the_directory_changes_nothing(self):
         """Idempotency, tested rather than asserted: run the directory again, compare."""
