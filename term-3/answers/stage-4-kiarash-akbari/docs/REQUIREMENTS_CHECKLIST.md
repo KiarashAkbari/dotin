@@ -68,7 +68,8 @@
   (`test_no_persian_in_the_python_sources`، `test_docstrings_are_english_sentences`).
 - **۲.۱۱** · انجام‌شده — `00 §۳` پنج بخشِ گزارش. شاهد: `report.md` §۱ فهم مسئله، §۲ تصمیم‌ها (≥ ۱۰)،
   §۷ شکست‌ها، §۸ ریسک‌ها، §۹ «دو روز دیگر».
-- **۲.۱۲** · باز — `00 §۳` + `04 §تحویل`: ۸۰۰ تا ۱۵۰۰ کلمه. `report.md` هنوز از این بازه بلندتر است.
+- **۲.۱۲** · انجام‌شده — `00 §۳` + `04 §تحویل`: ۸۰۰ تا ۱۵۰۰ کلمه. شاهد: `tests/test_stage4_layout.py` (`ReportLengthTest`،
+  شمارش توکن‌های جداشده با فاصله در کل فایل)؛ جزئیاتِ بیرون‌آمده در `decisions.md` §۴۱.
 - **۲.۱۳** · انجام‌شده — `00 §۳/§۴` هر عدد ردیابی‌پذیر. شاهد: هر عدد گزارش کنار فایل شاهدش آمده؛ D1/D2 در خروجیِ
   `01_exploration.ipynb`، نتیجه‌ها در `02_system.ipynb` از `docs/evidence/model-run.json`.
 - **۲.۱۴** · انجام‌شده — `00 §۴` repo با history، بدون دادهٔ خام. شاهد: `.gitignore` (`data/raw/*`، `*.joblib`، …)
@@ -125,7 +126,7 @@
   --tag` (۱۵ تکرار، قبل/بعد از `ANALYZE`، پلن). شاهدِ سندباکس:
   `docs/evidence/ceiling-feature-analysis.sandbox-2026-11-27.txt` (۳۵۷٫۲ ms). آستانه‌های این ابزار:
   `decisions.md` §۳۹، `docs/evidence/ceiling-threshold-derivation.txt`. اندازهٔ ماشین دانشجو بعد از 0048 گرفته نشده.
-- **۵.۴** · انجام‌شده — یک جملهٔ فرضیه برای هر ویژگی. شاهد: `report.md` §۵، `docs/feature_hypotheses.csv`.
+- **۵.۴** · انجام‌شده — یک جملهٔ فرضیه برای هر ویژگی. شاهد: `docs/feature_hypotheses.csv`، فهرست فارسی در `decisions.md` §۴۱، نمونه‌ها در `report.md` §۵.
 - **۵.۵** · انجام‌شده — همهٔ DDL نسخه‌دار. شاهد: `sql/001`…`006`، `docs/evidence/sql-checksums.txt`.
 
 ## ۶. مدل و تصمیم ظرفیت‌محور (`04 §۳`)

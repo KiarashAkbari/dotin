@@ -380,5 +380,26 @@ class ReadmeTest(unittest.TestCase):
                 self.assertNotRegex(line, r"\b\d{2}:\d{2}\b", "a measured duration in a README")
 
 
+class ReportLengthTest(unittest.TestCase):
+    """The delivery guide (00 section 3) and the brief ask for a report of 800 to 1,500 words.
+
+    Words are whitespace-separated tokens of the whole file, tables and code spans included, which
+    is the stricter of the two obvious counts; detail that does not fit belongs in ``decisions.md``.
+    """
+
+    def test_the_report_is_within_the_word_range(self) -> None:
+        words = len((STAGE / "report.md").read_text(encoding="utf-8").split())
+        self.assertGreaterEqual(words, 800)
+        self.assertLessEqual(words, 1500)
+
+    def test_the_sections_the_guide_and_the_brief_require_survive_the_trim(self) -> None:
+        text = (STAGE / "report.md").read_text(encoding="utf-8")
+        for marker in ("cheating-model-gap.txt", "model-ablation-run.txt", "AI usage", "decisions.md"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, text)
+        numbered = re.findall(r"^\d+\. \*\*", text, flags=re.MULTILINE)
+        self.assertGreaterEqual(len(numbered), 10, "the brief asks for at least ten key decisions")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
