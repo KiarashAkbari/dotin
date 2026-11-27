@@ -171,15 +171,16 @@ class DoctorTest(unittest.TestCase):
         }
         # A deliverable is reported while it is missing and not after it is written:
         # the doctor reads the tree, so it cannot drift into claiming a gap that closed.
-        for deliverable in ("report.md", "decisions.md", "manager_summary.md"):
+        # The two notebooks and the lock file follow the same rule: once all are delivered, a doctor
+        # that still names one of them is reporting a gap that closed.
+        for deliverable in (
+            "report.md", "decisions.md", "manager_summary.md",
+            "01_exploration.ipynb", "02_system.ipynb", "requirements.txt",
+        ):
             with self.subTest(deliverable=deliverable):
                 self.assertEqual(
                     deliverable in names, not (helpers.STAGE_ROOT / deliverable).exists()
                 )
-        self.assertTrue(
-            names & {"01_exploration.ipynb", "02_system.ipynb", "requirements.txt"},
-            "the doctor must still warn about what the scaffold round did not write",
-        )
 
     def test_doctor_json_is_parseable_and_complete(self) -> None:
         code, out, _ = run("doctor", "--json", "--config", str(helpers.EXAMPLE_CONFIG))

@@ -115,9 +115,11 @@ ax.bar(months["month"], months["recall"], color="#4c72b0")
 ax.axhline(op["recall"], color="black", ls="--", label="whole window")
 ax.set_ylabel("recall @10% (re-ranked in month)"); ax.legend(); ax.set_title("monthly spread")
 plt.tight_layout(); plt.show()
-full = months[months["labelled"] >= 1000]
-last = full.iloc[-1]
-print(f"second metric -- last full evaluation month {last['month']}: recall {last['recall']:.4f} on {last['labelled']} labelled orders")
+judged = M["drift_vs_model"]
+last = judged["last_full_month"]
+print(f"months not judged (< {judged['min_month_labelled']} labelled orders): {judged['months_not_judged']}")
+print(f"second metric -- last judged evaluation month {last['month']}: recall {last['recall']:.4f}, "
+      f"AUC {last['auc']:.4f} on {last['labelled']} labelled orders; monthly range {judged['recall_range']:.4f}")
 
 %% md
 ## ۵. جابه‌جایی داده (Drift): پنجرهٔ آموزش در برابر پنجرهٔ ارزیابی

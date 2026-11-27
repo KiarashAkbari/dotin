@@ -69,11 +69,12 @@ NOTEBOOK_DELIVERABLES = frozenset(
         "term-3/answers/stage-4-kiarash-akbari/02_system.ipynb",
     }
 )
-#: empty until those phases land. Adding a notebook means adding its exact path here -- one
+#: both are delivered now (02_system.ipynb since fix/stage-4-finish). Adding a notebook means adding its exact path here -- one
 #: deliberate line, rather than inventing a rule -- and the test below refuses a stale or wider entry.
 NOTEBOOK_EXCEPTIONS: frozenset = frozenset(
     {
         "term-3/answers/stage-4-kiarash-akbari/01_exploration.ipynb",
+        "term-3/answers/stage-4-kiarash-akbari/02_system.ipynb",
     }
 )
 
