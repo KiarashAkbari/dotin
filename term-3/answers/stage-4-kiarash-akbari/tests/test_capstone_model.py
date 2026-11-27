@@ -955,5 +955,23 @@ class ExternalReadinessTests(unittest.TestCase):
         self.assertEqual(report["coverage"]["valued_rows"], 93)
 
 
+class DecisionCountsTests(unittest.TestCase):
+    def test_it_reads_two_statements_and_names_the_numbers(self) -> None:
+        from unittest import mock
+
+        from capstone.model import D2_COUNT_SQL, DECISION_COUNTS_SQL, decision_counts
+
+        cursor = mock.MagicMock()
+        cursor.fetchone.side_effect = [(7, 5), (11,)]  # synthetic, not the corpus
+        connection = mock.MagicMock()
+        connection.cursor.return_value.__enter__.return_value = cursor
+        self.assertEqual(
+            decision_counts(connection),
+            {"no_approved_at": 7, "no_approved_at_canceled": 5, "approved_without_review": 11},
+        )
+        self.assertEqual([c.args[0] for c in cursor.execute.call_args_list], [DECISION_COUNTS_SQL, D2_COUNT_SQL])
+        self.assertNotIn("order_reviews", DECISION_COUNTS_SQL, "D1 is about the approval stamp only")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -100,6 +100,31 @@ def require_two_families(names: list[str]) -> list[str]:
     return names
 
 
+#: the two populations decisions D1 and D2 are about, counted where they live
+DECISION_COUNTS_SQL = (
+    "SELECT count(*) FILTER (WHERE order_approved_at IS NULL), "
+    "count(*) FILTER (WHERE order_approved_at IS NULL AND order_status = 'canceled') "
+    "FROM olist.orders"
+)
+D2_COUNT_SQL = "SELECT count(*) FROM capstone.v_d2_unlabelled_orders"
+
+
+def decision_counts(connection: Any) -> dict[str, int]:
+    """D1 and D2 as numbers: orders without ``order_approved_at`` (and how many were canceled), and
+    approved orders that never got a review. Read-only; the notebook prints them so the report's
+    first two decisions trace to it rather than to a log."""
+    with connection.cursor() as cursor:
+        cursor.execute(DECISION_COUNTS_SQL)
+        no_approval, canceled = cursor.fetchone()
+        cursor.execute(D2_COUNT_SQL)
+        (no_review,) = cursor.fetchone()
+    return {
+        "no_approved_at": int(no_approval),
+        "no_approved_at_canceled": int(canceled),
+        "approved_without_review": int(no_review),
+    }
+
+
 def label_definition() -> str:
     """One line the report can quote instead of restating the label from memory."""
     return f"a review is negative at a score of 1..{NEGATIVE_MAX_SCORE}"
