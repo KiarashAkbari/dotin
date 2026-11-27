@@ -1,0 +1,14 @@
+# boundary sensitivity (scripts/boundary_sensitivity.py)
+config capstone.default.toml; decided boundary 2018-05-31; seed 20181; quota 10%; frame rows 99281; roster logreg.c0_1, logreg.c1, hgb.d3, hgb.d6
+only split.boundary changes between rows; selection is on the last 3 months before each boundary, evaluation on everything after it
+
+| boundary | train rows (neg) | eval rows / labelled (neg) | eval months | chosen | recall@5% | recall@10% | recall@20% | AUC | rule@10% | last judged month |
+|---|---|---|---|---|---:|---:|---:|---:|---:|---|
+| 2018-05-31 | 80320 (12417) | 18961 / 18864 (2037) | 2018-06, 2018-07, 2018-08, 2018-09 | hgb.d3 | 0.1487 | 0.2229 | 0.3348 | 0.6030 | 0.2150 | 2018-08 0.2060 |
+| 2018-06-30 | 86484 (13077) | 12797 / 12725 (1377) | 2018-07, 2018-08, 2018-09 | hgb.d3 | 0.1402 | 0.2164 | 0.3261 | 0.5994 | 0.1903 | 2018-08 0.2131 |
+| 2018-07-31 | 92660 (13749) | 6621 / 6595 (705) | 2018-08, 2018-09 | hgb.d3 | 0.1560 | 0.2156 | 0.2936 | 0.5867 | 0.2057 | 2018-08 0.2159 |
+
+monthly recall@10% (re-ranked within the month):
+  2018-05-31: 2018-06 0.2621, 2018-07 0.2024, 2018-08 0.2060, 2018-09 1.0000
+  2018-06-30: 2018-07 0.2068, 2018-08 0.2131, 2018-09 1.0000
+  2018-07-31: 2018-08 0.2159, 2018-09 1.0000

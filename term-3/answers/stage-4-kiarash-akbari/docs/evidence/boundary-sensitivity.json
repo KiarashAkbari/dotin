@@ -1,0 +1,100 @@
+{
+  "rows": [
+    {
+      "boundary": "2018-05-31",
+      "train_rows": 80320,
+      "train_negatives": 12417,
+      "validation_months": [
+        "2018-03",
+        "2018-04",
+        "2018-05"
+      ],
+      "eval_rows": 18961,
+      "eval_labelled": 18864,
+      "eval_negatives": 2037,
+      "eval_months": [
+        "2018-06",
+        "2018-07",
+        "2018-08",
+        "2018-09"
+      ],
+      "chosen_model": "hgb.d3",
+      "rule": "n_items",
+      "recall_5": 0.1487481590574374,
+      "recall_10": 0.22287677957781052,
+      "recall_20": 0.33480608738340695,
+      "auc": 0.6030119703533015,
+      "rule_recall_10": 0.21502209131075112,
+      "monthly_recall": {
+        "2018-06": 0.26212121212121214,
+        "2018-07": 0.20238095238095238,
+        "2018-08": 0.2059659090909091,
+        "2018-09": 1.0
+      },
+      "last_judged_month": "2018-08",
+      "last_judged_recall": 0.2059659090909091
+    },
+    {
+      "boundary": "2018-06-30",
+      "train_rows": 86484,
+      "train_negatives": 13077,
+      "validation_months": [
+        "2018-04",
+        "2018-05",
+        "2018-06"
+      ],
+      "eval_rows": 12797,
+      "eval_labelled": 12725,
+      "eval_negatives": 1377,
+      "eval_months": [
+        "2018-07",
+        "2018-08",
+        "2018-09"
+      ],
+      "chosen_model": "hgb.d3",
+      "rule": "n_items",
+      "recall_5": 0.140159767610748,
+      "recall_10": 0.21641249092229484,
+      "recall_20": 0.3260711692084241,
+      "auc": 0.5994316531035448,
+      "rule_recall_10": 0.19026870007262164,
+      "monthly_recall": {
+        "2018-07": 0.20684523809523808,
+        "2018-08": 0.21306818181818182,
+        "2018-09": 1.0
+      },
+      "last_judged_month": "2018-08",
+      "last_judged_recall": 0.21306818181818182
+    },
+    {
+      "boundary": "2018-07-31",
+      "train_rows": 92660,
+      "train_negatives": 13749,
+      "validation_months": [
+        "2018-05",
+        "2018-06",
+        "2018-07"
+      ],
+      "eval_rows": 6621,
+      "eval_labelled": 6595,
+      "eval_negatives": 705,
+      "eval_months": [
+        "2018-08",
+        "2018-09"
+      ],
+      "chosen_model": "hgb.d3",
+      "rule": "n_items",
+      "recall_5": 0.15602836879432624,
+      "recall_10": 0.21560283687943263,
+      "recall_20": 0.2936170212765957,
+      "auc": 0.5866622114655203,
+      "rule_recall_10": 0.20567375886524822,
+      "monthly_recall": {
+        "2018-08": 0.2159090909090909,
+        "2018-09": 1.0
+      },
+      "last_judged_month": "2018-08",
+      "last_judged_recall": 0.2159090909090909
+    }
+  ]
+}
