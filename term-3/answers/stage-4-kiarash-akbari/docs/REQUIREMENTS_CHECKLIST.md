@@ -38,7 +38,7 @@
   شاهد: `docs/evidence/chain-run-manifest.rash-ThinkPad-L14-Gen-1-2026-11-28.json` — ۲۳۶٫۲ ثانیه (`seconds_used` 236.226)، `over_budget: false`، زمانِ جدای هر گام؛
   سندباکس: `docs/evidence/chain-run-manifest.json` — ۱۲۷٫۴ ثانیه؛
   سقف از `config/capstone.default.toml` (`budget.chain_minutes`).
-- **۱.۴** · انجام‌شده با آمارِ داوری‌شده؛ حاشیهٔ کم، پایدار نیست — `04 §معماری` بند ۲: کوئری ویژگی < ۵۰۰ ms با پلن.
+- **۱.۴** · حل‌نشده روی ماشینِ دانشجو با این تعداد تکرار (بهترینِ تکرارها زیرِ سقف، حاشیهٔ کم) — `04 §معماری` بند ۲: کوئری ویژگی < ۵۰۰ ms با پلن.
   ماشین دانشجو: گامِ `features` بهترین ۴۲۵٫۶ ms از ۵ تکرار (`docs/evidence/chain-run-log.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`)؛ تحلیلگرِ ۱۵ تکراری
   بعد از `ANALYZE` بهترین ۴۱۲٫۲، بدترین ۵۳۰٫۱ ms، ۱۳ از ۱۵ زیر سقف، پلن کامل و حکمِ «unresolved» در `docs/evidence/ceiling-feature-analysis.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`.
   سندباکس (ثانوی): `docs/evidence/ceiling-feature-analysis.sandbox-2026-11-27.txt`، بهترین ۳۵۷٫۲ ms، ۱۵ از ۱۵ زیر سقف.
@@ -125,7 +125,7 @@
 - **۵.۲** · انجام‌شده — تجمیع‌های تاریخی فقط گذشته را می‌بینند، در خودِ SQL. شاهد: `RANGE … PRECEDING` در
   `sql/003_feature_views.sql`، توابع as-of در `sql/004_as_of_functions.sql` (از جمله تاریخچهٔ فروشنده)،
   `tests/test_capstone_features.py`.
-- **۵.۳** · انجام‌شده با آمارِ داوری‌شده؛ حاشیهٔ کم، پایدار نیست — زمان‌گیریِ تکرارپذیر + `EXPLAIN (ANALYZE)`، < ۵۰۰ ms.
+- **۵.۳** · حل‌نشده روی ماشینِ دانشجو با این تعداد تکرار (بهترینِ تکرارها زیرِ سقف، حاشیهٔ کم) — زمان‌گیریِ تکرارپذیر + `EXPLAIN (ANALYZE)`، < ۵۰۰ ms.
   ابزار: `scripts/analyze_ceiling_feature.py --tag` (۱۵ تکرار، قبل/بعد از `ANALYZE`، پلن). شاهدِ ماشین دانشجو:
   `docs/evidence/ceiling-feature-analysis.rash-ThinkPad-L14-Gen-1-2026-11-28.txt` (`.json` کنارش) — پیش از `ANALYZE` بهترین ۳۹۹٫۷، میانگین ۵۷۰٫۸، بدترین ۶۲۸٫۱ ms و ۳ از ۱۵ زیر سقف؛
   بعد از آن بهترین ۴۱۲٫۲، میانگین ۴۵۷٫۲، بدترین ۵۳۰٫۱ ms و ۱۳ از ۱۵ زیر سقف؛ پلن جابه‌جا نشد؛ حکمِ ابزار
