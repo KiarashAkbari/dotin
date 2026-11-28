@@ -1,0 +1,42 @@
+Real run of stage 3 on Kaggle's Give Me Some Credit (2026-11-25, UTC)
+=====================================================================
+
+Machine: shared Linux sandbox, 2 vCPU, ~7.9 GB RAM shared with other jobs, aarch64.
+Python 3.12.16, scikit-learn 1.9.1, pandas 3.1.0, numpy 2.5.4 (installed from requirements.txt;
+`pip check` -> "No broken requirements found."). PostgreSQL 16.4, empty database.
+Threads limited for the run: OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1.
+Env: OLIST_DB_PASSWORD (not written anywhere), CREDIT_STAGE1_CONFIG -> an untracked copy of
+stage 1's config/default.toml whose [database].url names the run's database, PYTHONPATH=src.
+
+Input files (not in Git), data/raw/:
+  cs-training.csv  7,564,965 bytes  sha256 1bd46da486a5708c58c7b01a034fae2a13b327f6f7b62ea7ba4fe3b5824b24ac
+  cs-test.csv      4,983,329 bytes  sha256 bab363a2a807218d32a51f5fc9668b8be7977795065edd386abc8546abaa5b78
+  (byte-identical copies of the Kaggle competition files; the same bytes are served by several
+  public mirrors, e.g. zenodo record 13385610.)
+
+1) Load through the stage-1 package (fresh schema)
+$ python -m credit.load --reset --credit-config config/credit.toml
+file=cs-training.csv sha256=1bd46da486a5 loaded=150000 rejected=0 pages=16 migrations=2 manifest=<stage-3>/data/curated/credit_run_manifest.json  (absolute path shortened here)
+wall time 5.7 s
+
+2) Run All, then validate the executed notebook
+$ python scripts/run_notebook.py --budget-minutes 20
+executed solution.ipynb code_cells=23 errors=0 elapsed=376.7s budget=20min problems=0
+$ python scripts/run_notebook.py --check
+checked solution.ipynb code_cells=23 errors=0 problems=0
+Last cell: report.md slots filled: {"slots": 98, "unresolved": 0, "changed": true, "untraceable": []}
+(Two earlier Run All passes on the same data while the report template was being written took
+114.5 s and 165.1 s; the time depends on how busy the shared machine is. All are far below the
+20-minute ceiling.)
+The evidence and manifest of this run are the two JSON files in this folder (copied from
+data/curated/ unchanged).
+
+3) Predict on a fresh file with the same schema and no labels (saved bundle, staging view 011)
+$ python -m credit.predict --file data/raw/cs-test.csv --bundle data/curated/model --credit-config config/credit.toml
+file=cs-test.csv sha256=bab363a2a807 rows=101503 rejected=0 cost_per_1000=unavailable (no labels in the file)
+exit 0, wall time 6.9 s. With --out: 22,607 of 101,503 rows flagged at threshold 0.075.
+
+4) Full test suite, with the database reachable
+$ TEST_DATABASE_URL=postgresql+psycopg://kiarash:***@localhost:5432/<db> python -m unittest discover -s tests
+Ran 319 tests in 17.206s
+OK

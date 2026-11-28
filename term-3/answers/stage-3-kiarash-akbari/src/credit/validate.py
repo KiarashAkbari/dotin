@@ -22,7 +22,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 
-from .columns import COLUMNS, CreditColumn
+from .columns import COLUMNS, TARGET_COLUMN, CreditColumn
 
 #: text the file may use for "not recorded", besides an empty field
 MISSING_TEXT = frozenset({"", "na", "n/a", "nan", "null", "none", "-"})
@@ -88,19 +88,28 @@ def parse_row(
     *,
     seen_ids: set[int] | None = None,
     id_column: str = "row_id",
+    label_required: bool = True,
 ) -> ParsedRow:
     """Validate one raw record and return it under its database names.
 
     ``seen_ids`` enables duplicate detection; it is optional so the same function
     serves a single-row prediction path, where an identifier seen before is not a
     defect.
+
+    ``label_required=False`` is the scoring path: a fresh file has no outcome yet
+    (Kaggle's ``cs-test.csv`` ships the column empty), so a blank label is the normal
+    case there, not a defect. A label that *is* present is still checked against
+    its domain, because a ``2`` would mean the file is not the schema we think.
     """
     reasons: list[CreditReasonCode] = []
     record: dict[str, object] = {}
     for spec in COLUMNS:
         raw = row.get(spec.csv_name)
         if _is_missing(raw):
-            if not spec.nullable:
+            optional = spec.nullable or (
+                not label_required and spec.csv_name == TARGET_COLUMN
+            )
+            if not optional:
                 reasons.append(CreditReasonCode.MISSING_REQUIRED_FIELD)
             record[spec.db_name] = None
             continue
@@ -125,11 +134,12 @@ def parse_stream(
     rows: Iterable[Mapping[str, object]],
     *,
     detect_duplicates: bool = True,
+    label_required: bool = True,
 ) -> Iterator[tuple[ParsedRow, Mapping[str, object]]]:
     """Parse a stream of raw records, tracking identifiers as it goes."""
     seen: set[int] | None = set() if detect_duplicates else None
     for row in rows:
-        yield parse_row(row, seen_ids=seen), row
+        yield parse_row(row, seen_ids=seen, label_required=label_required), row
 
 
 def count_reasons(parsed: Iterable[ParsedRow]) -> dict[str, int]:

@@ -21,7 +21,7 @@ than asserted.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -45,73 +45,115 @@ INDICATOR_SUFFIX = "_was_missing"
 
 @dataclass(frozen=True)
 class PrepPlan:
-    """What to do, as opposed to what the numbers are.
+    """What to do with a missing value, as opposed to what the numbers are.
 
-    ``impute`` names the statistic that fills a NULL; ``zero`` is the policy that
-    treats an unreported count as an absence of events rather than an average
-    applicant. ``indicator`` adds the flag column that lets a model tell the two
-    apart - the reason it is usually worth its columns is that missingness here is
-    informative, which :mod:`credit.missingness` measures.
+    ``impute`` names the statistic that fills a NULL: ``median`` (fitted on train),
+    ``zero`` (a declared constant), or ``none`` (leave NaN for a family that handles
+    it natively). ``indicator`` adds a ``<column>_was_missing`` flag for every column
+    that had a NULL in train - the flag is what keeps "not reported" and "code 96/98"
+    apart from a real value after the fill.
+
+    ``scale`` and ``log_columns`` are *not* a missing-data choice: they depend on the
+    model family, so :func:`for_family` sets them from ``Family.requires_scaling``
+    rather than letting the missing-data plan decide them for every family.
     """
 
     name: str
     impute: str = "median"
     indicator: bool = True
     log_columns: tuple[str, ...] = ()
-    scale: bool = True
+    scale: bool = False
     justification: str = ""
 
 
-LOG_COUNTS: tuple[str, ...] = tuple(
+#: heavy right tails that a linear model would otherwise fit as a few huge points;
+#: log1p is row-wise and unfitted, so it is safe on any split
+LOG_COLUMNS: tuple[str, ...] = tuple(
     db_for(name)
     for name in (
         "NumberOfTime30-59DaysPastDueNotWorse",
         "NumberOfTimes90DaysLate",
+        "NumberOfTime60-89DaysPastDueNotWorse",
         "NumberOfOpenCreditLinesAndLoans",
+        "NumberRealEstateLoansOrLines",
+        "DebtRatio",
+        "MonthlyIncome",
     )
-)
+) + ("income_per_dependent", "delinquency_events_total", "utilization_over_limit")
+#: kept under its old name for callers that imported it
+LOG_COUNTS = LOG_COLUMNS
 
 PLANS: dict[str, PrepPlan] = {
     "median+indicator": PrepPlan(
         name="median+indicator",
         impute="median",
         indicator=True,
-        log_columns=LOG_COUNTS,
-        scale=True,
         justification=(
-            "median for the skewed counts, a flag for every imputed column, log1p on the "
-            "heavy tails, z-scaling because the linear model's penalty is in coefficient units"
+            "train median for every NULL plus a flag per imputed column: the fill is a "
+            "typical value, and the flag carries the fact that the value was missing or coded"
+        ),
+    ),
+    "median+none": PrepPlan(
+        name="median+none",
+        impute="median",
+        indicator=False,
+        justification="the same fill without the flags, to price the flags themselves",
+    ),
+    "zero+indicator": PrepPlan(
+        name="zero+indicator",
+        impute="zero",
+        indicator=True,
+        justification=(
+            "zero for every NULL, but flagged, so a coded late count is not read as "
+            "'never late' and a missing income is not read as 'no income'"
         ),
     ),
     "zero+none": PrepPlan(
         name="zero+none",
         impute="zero",
         indicator=False,
-        log_columns=(),
-        scale=False,
         justification=(
-            "an unreported late count read as no recorded lateness, no flags, no scaling - "
-            "the smallest amount of bookkeeping that still produces a usable matrix"
+            "zero with no flag: a 96/98 code and an unreported income both become a real "
+            "zero. Kept as the measured counter-example, not as a candidate we expect to win"
         ),
     ),
-    "median+no-indicator": PrepPlan(
-        name="median+no-indicator",
-        impute="median",
+    "native": PrepPlan(
+        name="native",
+        impute="none",
         indicator=False,
-        log_columns=LOG_COUNTS,
-        scale=True,
-        justification="the same imputation without the flags, to price the flags themselves",
+        justification=(
+            "no fill at all: gradient-boosted trees route NaN to whichever side of a split "
+            "costs less, so missingness is learned rather than imputed"
+        ),
     ),
 }
+
+
+def for_family(plan: PrepPlan, *, scaled: bool, handles_missing: bool) -> PrepPlan:
+    """The plan a given family actually needs.
+
+    A family that ``requires_scaling`` gets log1p on the heavy tails and z-scaling;
+    any other family gets neither, because a monotone transform cannot move a tree
+    split. A plan that leaves NaN in place is refused for a family that cannot read it.
+    """
+    if plan.impute == "none" and not handles_missing:
+        raise ValueError(f"plan {plan.name!r} leaves NaN, which this family cannot fit")
+    return replace(
+        plan,
+        scale=scaled,
+        log_columns=LOG_COLUMNS if scaled else (),
+    )
 
 
 def _median_or_zero(values: np.ndarray, impute: str) -> float:
     finite = values[np.isfinite(values)]
     if impute == "zero":
         return 0.0
+    if impute == "none":
+        return float("nan")
     if finite.size == 0:
         # a column with nothing to measure has to fall back somewhere; zero is the
-        # same choice the plan makes for unreported counts
+        # same choice the zero plans make for unreported counts
         return 0.0
     return float(np.median(finite))
 
@@ -193,7 +235,12 @@ def fit(
         )
         for column in columns
     }
-    imputed = {column: train[column].fillna(medians[column]) for column in columns}
+    imputed = {
+        column: train[column].astype("float64")
+        if np.isnan(medians[column])
+        else train[column].astype("float64").fillna(medians[column])
+        for column in columns
+    }
     # a plan names the columns it wants on a log scale, but a caller may fit a subset
     # (an ablation, a smaller matrix); taking the intersection here is what keeps the
     # transform and the returned stats describing the same columns
@@ -205,6 +252,7 @@ def fit(
     if plan.scale:
         for column, values in imputed.items():
             array = np.asarray(values, dtype="float64")
+            array = array[np.isfinite(array)]
             means[column] = float(array.mean()) if array.size else 0.0
             spread = float(array.std(ddof=1)) if array.size > 1 else 0.0
             # a constant column would divide by zero and turn the model into NaN;
@@ -239,7 +287,9 @@ def apply(frame: pd.DataFrame, stats: PrepStats) -> pd.DataFrame:
             raise KeyError(f"prepared frame is missing column {column!r}")
         if stats.indicator_columns and column in stats.indicator_columns:
             out[column + INDICATOR_SUFFIX] = out[column].isna().astype("int64")
-        out[column] = out[column].astype("float64").fillna(value)
+        out[column] = out[column].astype("float64")
+        if not np.isnan(value):
+            out[column] = out[column].fillna(value)
     for column in stats.log_columns:
         out[column] = np.log1p(out[column].clip(lower=0.0))
     for column, mean in stats.means.items():

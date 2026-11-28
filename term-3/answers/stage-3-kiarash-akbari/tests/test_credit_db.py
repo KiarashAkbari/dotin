@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1" / "src",
+    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -117,7 +117,7 @@ class EngineForTests(unittest.TestCase):
         )
         engine = RefusingEngine(refusal)
         with patch_engine(lambda url: engine), self.assertRaises(ConfigError) as caught:
-            db.engine_for(Path("stage-1/config/default.toml"))
+            db.engine_for(Path("stage-1-kiarash-akbari/config/default.toml"))
         message = str(caught.exception)
         self.assertIn("the database refused the connection", message)
         self.assertIn("no password supplied", message)

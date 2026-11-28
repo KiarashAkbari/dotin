@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-STAGE1_SRC = HERE.parents[1] / "stage-1" / "src"
+STAGE1_SRC = HERE.parents[1] / "stage-1-kiarash-akbari" / "src"
 for candidate in (HERE, HERE.parent / "src", STAGE1_SRC):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))

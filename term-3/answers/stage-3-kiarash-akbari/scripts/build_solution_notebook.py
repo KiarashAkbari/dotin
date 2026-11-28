@@ -102,10 +102,9 @@ CELLS: list[tuple[str, str]] = [
             "و ``report.md`` مجاز است فقط از همان اعداد نقل کند (سلول آخر این را چک می‌کند).\n\n"
             "**زمان:** اگر به سقف ۲۰ دقیقه نزدیک شدیم، ``RUN_LIGHT = True`` فولدها را از ۵ به ۳ کم "
             "می‌کند؛ این یک تخمین است، نه عدد اندازه‌گیری‌شده.\n\n"
-            "**خروجی‌های این فایل:** از اجرای کامل ``Run All`` روی PostgreSQL ۱۶ و یک دادهٔ fixture "
-            "آزمایشی (۱۵۰٬۰۰۰ ردیف تولید‌شده، نه فایل Kaggle) نوشته شده‌اند تا نشان دهند ماشین‌افزار "
-            "از سر تا پا کار می‌کند؛ این‌ها نتیجهٔ چالش نیستند. برای اعداد واقعی، همین نوت‌بوک را روی "
-            "دیتابیس خودتان با فایل اصلی Run All کنید - خروجی‌های تازه جای همین‌ها را می‌گیرند.\n\n"
+            "**خروجی‌های این فایل:** از اجرای کامل ``Run All`` روی فایل واقعی ``cs-training.csv`` "
+            "(۱۵۰٬۰۰۰ ردیف) در PostgreSQL ۱۶ و Python 3.12 آمده‌اند؛ همان اجرا "
+            "``docs/evidence/real/credit_evidence.json`` را نوشته است.\n\n"
             "| # | بخش | معیار پذیرش |\n|---|---|---|\n"
             "| ۱ | ممیزی نشتی زمان-تصمیم | اولین بخش |\n"
             "| ۲ | ساختار، sentinel، گم‌شدگی | سیاست با عدد، ≥۲ سیاست imputation |\n"
@@ -127,15 +126,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path.cwd() / "src"))
 import pandas as pd
 
-from credit import columns, cost, db, evaluate, features, measure, missingness, models, prep, read, report, split, tables
+from credit import columns, cost, db, evaluate, features, measure, missingness, models, paths, prep, read, report, split, tables
 from credit.config import load_credit_config
 from credit.predict import score_file
 from data_factory.manifest import code_version
 
 SEED = {SEED}
 RUN_LIGHT = False
-engine = db.engine_for(Path("../stage-1/config/default.toml"))
-credit_cfg = load_credit_config(Path("config/credit.toml"))
+# stage 1 is the sibling folder stage-1-kiarash-akbari, found from the package itself
+engine = db.engine_for(paths.stage1_config())
+credit_cfg = load_credit_config(paths.credit_config())
 print(f"seed={{SEED}} light={{RUN_LIGHT}} schema={{credit_cfg.schema}} code={{code_version()}}")""",
     ),
     (
@@ -171,7 +171,7 @@ print(f"provenance ok: {rows_view} rows, sha256 {str(provenance['sha256'])[:12]}
     (
         "code",
         """audit = features.audit_table()
-tables.md_table(print(audit))
+print(tables.md_table(audit))
 unavailable = audit.loc[audit["available before the decision"] == "NO", "feature"].tolist()
 print(f"\\nnot available at decision time: {unavailable or 'none'}")
 assert not unavailable, "a feature unavailable at decision time cannot be used"
@@ -194,9 +194,9 @@ print(f"\\n{tables.md_table(needs_evidence) if len(needs_evidence) else 'no feat
         """spikes_sql = measure.run_query(engine, "sentinel_spikes", sql_dir=Path("sql"))
 raw = read.load_frame(engine, "raw", schema=credit_cfg.schema)
 spikes_py = features.sentinel_spike_counts(raw)
-tables.md_table(print(spikes_sql))
+print(tables.md_table(spikes_sql))
 print(f"\\nsql rows={len(spikes_sql)} python rows={len(spikes_py)}")
-tables.md_table(print(spikes_py))
+print(tables.md_table(spikes_py))
 """,
     ),
     (
@@ -218,9 +218,11 @@ print(f"probed pairs={len(merged)}, measured zeros={zeros} (a measured zero is e
     ),
     (
         "code",
-        """frame = read.load_frame(engine, "input", schema=credit_cfg.schema)
-frame = features.build_features(frame)
-print(f"rows={len(frame)} columns={len(frame.columns)} target_rate={frame[columns.VIEW_TARGET_COLUMN].mean():.6f}")
+        """view = read.load_frame(engine, "input", schema=credit_cfg.schema)
+print("impossible values, per declared rule (rows kept, the value becomes missing):")
+print(tables.md_table(features.impossible_value_counts(view)))
+frame = features.build_features(view)
+print(f"\\nrows={len(frame)} columns={len(frame.columns)} target_rate={frame[columns.VIEW_TARGET_COLUMN].mean():.6f}")
 print("\\ndtypes:")
 print(tables.md_table(frame.dtypes.to_frame("dtype").reset_index(names="column")))
 counts = ["num_real_estate_loans", "num_dependents", "num_late_90"]
@@ -231,14 +233,15 @@ print("why not one-hot: each is ordered and zero is a real value; binning would 
         "markdown",
         (
             "## ۳. گم‌شدگی: آیا عدد دارد و سیاست را عوض می‌کند؟\n\n"
-            "پاسخ این بخش باید سیاست را عوض کند، وگرنه فقط توصیف است. دو سیاست imputation در "
-            "``prep.PLANS`` با هم مقایسه می‌شوند و معیارشان هزینهٔ کراس‌والید است، نه شکل توزیع."
+            "پاسخ این بخش باید سیاست را عوض کند، وگرنه فقط توصیف است. پنج سیاست گم‌شدگی در "
+            "``prep.PLANS`` (میانه یا صفر، با یا بدون پرچم، و NaN بومی برای درخت‌ها) با هر خانوادهٔ "
+            "مدل مقایسه می‌شوند و معیارشان هزینهٔ کراس‌والید است، نه شکل توزیع."
         ),
     ),
     (
         "code",
         """parity = measure.run_query(engine, "missingness_parity", sql_dir=Path("sql"))
-tables.md_table(print(parity))
+print(tables.md_table(parity))
 profile = missingness.missingness_profile(frame, tuple(columns.MODEL_FEATURE_COLUMNS))
 print(f"\\n{tables.md_table(profile)}")
 no_income = frame["income_missing"] == 1
@@ -249,72 +252,60 @@ print(f"\\nincome reported vs not: {json.dumps(test, default=str)}")""",
     (
         "code",
         """splits = split.stratified_split(frame, seed=SEED)
-tables.md_table(print(split.boundary_audit(splits)))
+print(tables.md_table(split.boundary_audit(splits)))
 feature_names = tuple(spec.name for spec in features.FEATURES)
 # prep owns the missingness flags, so the list handed to fit() is what the frame
 # already holds: raw model columns plus the engineered ones, never a flag
 fit_columns = tuple(columns.MODEL_FEATURE_COLUMNS) + feature_names
-fitted = {name: prep.fit(splits.train, plan=plan, columns=fit_columns) for name, plan in prep.PLANS.items()}
 train_y = prep.target(splits.train)
-for name, stats in fitted.items():
-    assert stats.fitted_rows == len(splits.train), f"{name} saw rows outside train"
-print(f"\\nplans compared: {sorted(fitted)}")""",
-    ),
-    (
-        "code",
-        """chosen = fitted["median+indicator"]
-tables.md_table(print(prep.audit(chosen)))
-prepared_val = prep.apply(splits.validation, chosen)
-left = prep.remaining_missing(prepared_val, list(chosen.feature_names()))
-print(f"\\nNaN left after preparation: {int(left['nan_after_prep'].sum())}")
-assert int(left["nan_after_prep"].sum()) == 0, "preparation must leave no NaN for the linear model"
-print("every number above came from the train split; apply() has no access to any other frame")""",
+plans = pd.DataFrame([{"plan": p.name, "impute": p.impute, "indicator": p.indicator} for p in prep.PLANS.values()])
+print(f"\\n{tables.md_table(plans)}")
+print("scaling and log1p are not part of a plan: models.plan_for adds them only for a family that requires scaling")""",
     ),
     (
         "markdown",
         (
-            "## ۴. فیچرهای مهندسی‌شده: هر کدام با یک فرضیه، و اندازه‌گیری با/بدون\n\n"
-            "فیچری که هزینه را کم نمی‌کند حذف می‌شود و در گزارش ذکر می‌شود؛ نگه داشتنش «بی‌ضرر» نیست، "
-            "چون یک خط ممیزی نشتی و یک ستون مرور اضافه می‌کند."
+            "## ۴. سیاست گم‌شدگی × خانوادهٔ مدل، سپس فیچرهای مهندسی‌شده با/بدون\n\n"
+            "هر خانه از جدول زیر یک کراس‌والیدیشن ۵ تکه است. درون هر تکه، prep فقط روی ردیف‌های "
+            "آموزشِ همان تکه برازش می‌شود و آستانه روی بخشِ کنار گذاشته‌شده از همان ردیف‌های آموزش "
+            "انتخاب می‌شود؛ ردیف‌هایی که نمره می‌گیرند در انتخاب آستانهٔ خودشان نقشی ندارند. "
+            "فیچری که حذفش هزینه را بالا نمی‌برد حذف می‌شود و در گزارش ذکر می‌شود."
         ),
     ),
     (
         "code",
         """k = 3 if RUN_LIGHT else 5
 folds = split.stratified_folds(splits.train, seed=SEED, k=k)
-sweep = []
-for name, stats in fitted.items():
-    X = prep.apply(splits.train, stats)[list(stats.feature_names())]
-    sweep.append(models.cross_validate_cost("logistic", X, train_y, folds, plan=name))
-print(f"k={k} folds, plan sweep on the fast family:")
-tables.md_table(print(models.compare(sweep)))
-best_plan = min(sweep, key=lambda r: r.mean_cost).plan
-print(f"\\nbest plan by mean cost: {best_plan}")""",
+grid = []
+for family in models.FAMILIES:
+    for plan in prep.PLANS.values():
+        if models.compatible(family, plan):
+            grid.append(models.cross_validate_recipe(family, splits.train, train_y, folds, plan=plan, columns=fit_columns, seed=SEED))
+print(f"k={k} folds, every (family, plan) pair the family can fit:")
+print(tables.md_table(models.compare(grid)))""",
     ),
     (
         "code",
-        """final_stats = fitted[best_plan]
-names = list(final_stats.feature_names())
-X_train = prep.apply(splits.train, final_stats)[names]
-families = []
-for family in models.FAMILIES:
-    families.append(models.cross_validate_cost(family, X_train, train_y, folds, plan=best_plan))
-table = models.compare(sweep + families)
-tables.md_table(print(table))
-best = models.pick_best(sweep + families)
-print(f"\\nselected {best.family} / {best.plan}: mean {best.mean_cost:.2f} std {best.std_cost:.2f} worst {best.worst_cost:.2f}")""",
+        """families = {family: models.pick_best([r for r in grid if r.family == family]) for family in models.FAMILIES}
+best = models.pick_best(list(families.values()))
+best_plan = prep.PLANS[best.plan]
+for family, result in families.items():
+    print(f"best plan for {family}: {result.plan} mean {result.mean_cost:.2f} std {result.std_cost:.2f} auc {result.mean_auc:.4f}")
+print(f"\\nselected {best.family} / {best.plan}: mean {best.mean_cost:.2f} std {best.std_cost:.2f} worst {best.worst_cost:.2f}")
+print(f"per-fold costs: {[round(f.cost_per_1000, 2) for f in best.folds]}")
+print(f"per-fold thresholds (chosen on each fold's own training rows): {[f.threshold for f in best.folds]}")""",
     ),
     (
         "code",
         """ablation = []
 for spec in features.FEATURES:
-    kept = [name for name in names if name != spec.name]
-    result = models.cross_validate_cost(best.family, prep.apply(splits.train, final_stats)[kept], train_y, folds, plan=f"without {spec.name}")
+    kept = tuple(name for name in fit_columns if name != spec.name)
+    result = models.cross_validate_recipe(best.family, splits.train, train_y, folds, plan=best_plan, columns=kept, seed=SEED)
     ablation.append({"feature": spec.name, "mean_cost": round(result.mean_cost, 3), "delta": round(result.mean_cost - best.mean_cost, 3)})
 ablation_frame = pd.DataFrame(ablation).sort_values("delta", ascending=False)
-full_cost = next(r.mean_cost for r in families if r.family == best.family)
-print(f"full model (all {len(names)} features): cost {full_cost:.3f}\\n")
-tables.md_table(print(ablation_frame))""",
+full_cost = round(best.mean_cost, 3)
+print(f"full model (all {len(fit_columns)} inputs): cost {full_cost:.3f}\\n")
+print(tables.md_table(ablation_frame))""",
     ),
     (
         "markdown",
@@ -327,16 +318,16 @@ tables.md_table(print(ablation_frame))""",
         """ablation_rows = int((ablation_frame["delta"] <= 0).sum())
 dropped = ablation_frame.loc[ablation_frame["delta"] <= 0, "feature"].tolist()
 print(f"\\nfeatures that did not pay and are dropped from the final matrix: {dropped or 'none'}")
-kept_names = [name for name in names if name not in dropped]
 kept_inputs = tuple(name for name in fit_columns if name not in dropped)
-X_kept = prep.apply(splits.train, final_stats)[kept_names]
-kept_cv = models.cross_validate_cost(
-    best.family, X_kept, train_y, folds, plan=f"{best_plan} without the {len(dropped)}"
-)
-print(
-    f"cv on the kept matrix ({len(kept_names)} columns): mean {kept_cv.mean_cost:.2f}"
-    f" +/- {kept_cv.std_cost:.2f}; full matrix was {best.mean_cost:.2f}"
-)""",
+kept_cv = models.cross_validate_recipe(best.family, splits.train, train_y, folds, plan=best_plan, columns=kept_inputs, seed=SEED)
+print(f"cv on the kept inputs ({len(kept_inputs)}): mean {kept_cv.mean_cost:.2f} +/- {kept_cv.std_cost:.2f}; all inputs was {best.mean_cost:.2f}")
+final_stats = prep.fit(splits.train, plan=models.plan_for(best.family, best_plan), columns=kept_inputs)
+names = list(final_stats.feature_names())
+assert final_stats.fitted_rows == len(splits.train), "prep saw rows outside train"
+print(f"\\nthe final preparation, every constant fitted on train ({final_stats.fitted_rows} rows):")
+print(tables.md_table(prep.audit(final_stats)))
+X_train = prep.apply(splits.train, final_stats)[names]
+val = prep.apply(splits.validation, final_stats)[names]""",
     ),
     (
         "markdown",
@@ -371,9 +362,8 @@ print(f"\\nfloor to beat: {floor:.2f}; 25% reduction means < {floor * 0.75:.2f}"
     (
         "code",
         """model = models.FAMILIES[best.family].make(seed=SEED)
-model.fit(X_kept, train_y)
-val = prep.apply(splits.validation, final_stats)
-val_proba = model.predict_proba(val[kept_names])[:, 1]
+model.fit(X_train, train_y)
+val_proba = model.predict_proba(val)[:, 1]
 choice = cost.select_threshold(val_y, val_proba, matrix=cost.CHALLENGE_MATRIX)
 print(json.dumps(choice.as_dict(), indent=2, default=str))
 curve = cost.cost_curve(val_y, val_proba, matrix=cost.CHALLENGE_MATRIX)
@@ -399,26 +389,29 @@ plt.show()""",
     (
         "code",
         """sensitivity = cost.matrix_sensitivity(val_y, val_proba, [cost.CHALLENGE_MATRIX, cost.FLATTER_MATRIX])
-tables.md_table(print(pd.DataFrame(sensitivity)))""",
+print(tables.md_table(pd.DataFrame(sensitivity)))
+flatter_threshold = sensitivity[1]["threshold"]
+print(f"\\nat 4:1 the validation optimum moves from {choice.threshold:.3f} to {flatter_threshold:.3f}")""",
     ),
     (
         "markdown",
         (
             "## ۷. ارزیابی کامل؛ holdout یک‌بار\n\n"
-            "مدل نهایی روی train+validation برازش می‌شود (آستانه از validation آمده) و آنگاه holdout "
-            "باز می‌شود - یک بار، بدون بازگشت برای تنظیم دوباره."
+            "مدلِ تحویلی همان مدلی است که آستانه برایش انتخاب شد: روی train برازش شده و آستانه‌اش از "
+            "validation آمده؛ دوباره روی train+validation برازش نمی‌شود، چون آن مدلِ تازه نمره‌هایی "
+            "می‌دهد که این آستانه هرگز برایشان انتخاب نشده. holdout یک بار باز می‌شود و فقط در "
+            "آستانه‌هایی قیمت‌گذاری می‌شود که روی validation انتخاب شده‌اند."
         ),
     ),
     (
         "code",
-        """combined = pd.concat([splits.train, splits.validation], ignore_index=True)
-combined_stats = prep.fit(combined, plan=prep.PLANS[best_plan], columns=kept_inputs)
-combined_X = prep.apply(combined, combined_stats)[kept_names]
-bundle = models.build_bundle(best.family, combined_X, prep.target(combined), prep_stats=combined_stats, threshold=choice.threshold, matrix=cost.CHALLENGE_MATRIX, seed=SEED, code_version=code_version())
-holdout_prepared = prep.apply(splits.holdout, combined_stats)
-holdout_proba = bundle.score(holdout_prepared)
+        """bundle = models.wrap_bundle(model, best.family, X_train, prep_stats=final_stats, threshold=choice.threshold, code_version=code_version())
+holdout_proba = bundle.score(prep.apply(splits.holdout, final_stats))
 holdout_y = prep.target(splits.holdout)
-holdout = evaluate.holdout_report(holdout_proba, holdout_y, threshold=bundle.threshold, family=bundle.family, cv=(kept_cv.mean_cost, kept_cv.std_cost))
+holdout = evaluate.holdout_report(
+    holdout_proba, holdout_y, threshold=bundle.threshold, family=bundle.family,
+    cv=(kept_cv.mean_cost, kept_cv.std_cost), fixed_points=[(cost.FLATTER_MATRIX, flatter_threshold)],
+)
 print(json.dumps(holdout.as_dict(), indent=2, default=str))""",
     ),
     (
@@ -441,8 +434,8 @@ print(f"reduction vs flag-nobody: {holdout.reduction_vs_flagging_nobody_pct:.2f}
     ),
     (
         "code",
-        """importance = models.importances(model, val[kept_names], val_y, threshold=choice.threshold, seed=SEED, n_repeats=5)
-tables.md_table(print(importance.head(5)))
+        """importance = models.importances(model, val, val_y, threshold=choice.threshold, seed=SEED, n_repeats=5)
+print(tables.md_table(importance.head(5)))
 holdout_flags = (holdout_proba >= bundle.threshold).astype("int64")
 bands = evaluate.define_bands(splits.holdout)
 fair = evaluate.subgroup_table(splits.holdout.assign(age_band=bands), holdout_y, holdout_flags, holdout_proba)
@@ -464,9 +457,9 @@ print(f"\\n{json.dumps(concentration, indent=2)}")""",
 card = evaluate.model_card(
     holdout,
     dataset_line=f"{provenance['file_name']} sha256 {str(provenance['sha256'])[:12]}",
-    preparation_line=f"{best_plan}, row-wise half in {credit_cfg.schema}.v_model_input",
+    preparation_line=f"{best.plan}, row-wise half in {credit_cfg.schema}.v_model_input",
     feature_lines=[f"`{name}`" for name in bundle.feature_names],
-    trained_rows=len(combined),
+    trained_rows=len(X_train),
     code_version=code_version(),
     intended_use="triage of applications into a human review queue",
     excluded_uses=["adverse pricing decided by the model alone", "populations the file does not represent"],
@@ -485,11 +478,11 @@ print(card)""",
         "code",
         """written = bundle.save(Path("data/curated/model"))
 print("\\n".join(f"{key}: {path}" for key, path in written.items()))
-fresh = Path("data/raw/cs-validation.csv")
+fresh = Path("data/raw/cs-test.csv")  # Kaggle's file with the label column empty
 if fresh.is_file():
     scored = score_file(engine, credit_cfg, fresh, bundle)
     print(f"\\n{scored.summary()}")
-    tables.md_table(print(scored.scored.head(5)))
+    print(tables.md_table(scored.scored.head(5)))
 else:
     print(f"\\nno fresh file to score; run: python -m credit.predict --file <csv> --bundle data/curated/model")""",
     ),
@@ -504,12 +497,13 @@ else:
     (
         "code",
         """evidence = measure.collect(engine, sql_dir=Path("sql"), schema=credit_cfg.schema, extra={
-    "splits": splits.sizes,
+    "splits": splits.sizes, "missing_income_test": test, "baselines": {name: entry["cost_per_1000"] for name, entry in entries.items()},
     "threshold": {"value": choice.threshold, "grid_size": choice.grid_size, "ties": choice.ties, "cost_per_1000": choice.cost_per_1000},
-    "plans": {r.plan: {"mean_cost_per_1000": r.mean_cost} for r in sweep},
-    "cv": {r.family: r.as_dict() for r in families},
-    "ablation": {"full_cost": full_cost, "dropped": len(dropped), "dropped_names": dropped, "rows": len(ablation_frame)},
-    "prep": {"fitted_rows": combined_stats.fitted_rows, "features": len(kept_names), "input_columns": len(kept_inputs)},
+    "grid": [r.as_dict() for r in grid], "cv": {family: r.as_dict() for family, r in families.items()},
+    "selected": {"family": best.family, "plan": best.plan, "kept": kept_cv.as_dict()},
+    "impossible": features.impossible_value_counts(view).to_dict("records"),
+    "ablation": {"full_cost": full_cost, "dropped": len(dropped), "dropped_names": dropped, "rows": ablation_frame.to_dict("records")},
+    "prep": {"fitted_rows": final_stats.fitted_rows, "features": len(names), "input_columns": len(kept_inputs), "indicators": len(final_stats.indicator_columns)},
     "holdout": holdout.as_dict(),
     "fairness": {"bands": len(band_rows), "max_band": worst_band, "min_band": best_band},
     "sensitivity": {str(row["matrix"]).replace(":", "_"): row for row in sensitivity},

@@ -46,7 +46,7 @@ class Splits:
 
 
 def _stratified_partition(
-    labels: np.ndarray, rng: np.random.Generator, fractions=tuple[float, ...]
+    labels: np.ndarray, rng: np.random.Generator, fractions: tuple[float, ...]
 ) -> list[np.ndarray]:
     """Indices of each part, each class cut in the same proportions.
 

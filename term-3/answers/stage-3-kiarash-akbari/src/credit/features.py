@@ -92,6 +92,80 @@ def sentinel_spike_counts(
     return pd.DataFrame(rows)
 
 
+#: Domain policy for values that cannot be what the column claims to be. Each rule is a
+#: declared constant, not a statistic, so it applies unchanged to a fresh file; a value
+#: it removes becomes missing, and the prep plan then decides how missing is handled
+#: (with an indicator, the model still sees that something was wrong with the row).
+#:
+#: * age below 18: nobody under 18 holds these credit lines; the file has an age of 0.
+#: * revolving utilization above 10: the ratio is balance over limit. Values just above
+#:   1 are real (over the limit) and carry a high default rate, but values in the
+#:   hundreds and thousands default *less* than the base rate - they behave like a
+#:   balance typed into a ratio field, not like a stressed borrower.
+#: * debt ratio when income is missing: the ratio has no denominator, and the file then
+#:   holds what reads like an absolute amount (a median in the thousands), so it is
+#:   not a ratio and is not used as one.
+MIN_ADULT_AGE = 18.0
+MAX_PLAUSIBLE_UTILIZATION = 10.0
+
+
+def impossible_masks(frame: pd.DataFrame) -> dict[str, pd.Series]:
+    """One boolean mask per policy rule, on the frame as the view returns it."""
+    age = numeric(frame, "age")
+    utilization = numeric(frame, "revolving_utilization_unsecured")
+    debt = numeric(frame, "debt_ratio")
+    income = numeric(frame, "monthly_income")
+    return {
+        "age below 18": age < MIN_ADULT_AGE,
+        "utilization above 10": utilization > MAX_PLAUSIBLE_UTILIZATION,
+        "debt ratio with no income": debt.notna() & income.isna(),
+    }
+
+
+#: which column each rule blanks
+POLICY_COLUMN: dict[str, str] = {
+    "age below 18": "age",
+    "utilization above 10": "revolving_utilization_unsecured",
+    "debt ratio with no income": "debt_ratio",
+}
+
+
+def apply_domain_policy(frame: pd.DataFrame) -> pd.DataFrame:
+    """Blank every value the policy calls impossible; the row itself is kept.
+
+    Dropping the row would remove a real applicant over one bad field, and clipping
+    would invent a value; missing is the honest state, and it is already a state the
+    preparation knows how to handle.
+    """
+    out = frame.copy()
+    for rule, mask in impossible_masks(frame).items():
+        column = POLICY_COLUMN[rule]
+        out[column] = numeric(out, column).where(~mask)
+    return out
+
+
+def impossible_value_counts(
+    frame: pd.DataFrame, *, target: str = TARGET
+) -> pd.DataFrame:
+    """Rows each rule touches and their default rate - the evidence for the rule."""
+    label = numeric(frame, target) if target in frame else None
+    rows = []
+    for rule, mask in impossible_masks(frame).items():
+        count = int(mask.sum())
+        rows.append(
+            {
+                "rule": rule,
+                "column": POLICY_COLUMN[rule],
+                "rows": count,
+                "default_rate": round(float(label[mask].mean()), 4)
+                if label is not None and count
+                else None,
+                "policy": "set to missing",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 @dataclass(frozen=True)
 class FeatureSpec:
     """One engineered column plus the reasoning that justifies it."""
@@ -142,6 +216,13 @@ def _exposure_total(frame: pd.DataFrame) -> pd.Series:
 
 def _income_not_reported(frame: pd.DataFrame) -> pd.Series:
     return numeric(frame, "monthly_income").isna().astype("float64")
+
+
+def _late_history_coded(frame: pd.DataFrame) -> pd.Series:
+    values = frame[list(LATE_PAYMENT_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+    # the view turns 96/98 into NULL, and the file never leaves these columns blank,
+    # so "all three buckets missing" is exactly "the bureau sent a code"
+    return values.isna().all(axis=1).astype("float64")
 
 
 FEATURES: tuple[FeatureSpec, ...] = (
@@ -212,6 +293,18 @@ FEATURES: tuple[FeatureSpec, ...] = (
         leakage_boundary="a presence indicator cannot leak an outcome, but it must not be kept "
         "if the missingness test shows a random pattern",
     ),
+    FeatureSpec(
+        name="late_history_coded",
+        hypothesis=(
+            "a 96/98 code in the late-payment buckets is a separate bureau state, not zero "
+            "lateness; keeping it as a flag stops any imputation from erasing it"
+        ),
+        source_columns=tuple(LATE_PAYMENT_COLUMNS),
+        decision_time_available=True,
+        availability_note="the code is on the bureau report at the decision",
+        transform=_late_history_coded,
+        leakage_boundary="a row-wise flag on the report as received; no outcome is involved",
+    ),
 )
 
 FEATURE_NAMES: tuple[str, ...] = tuple(spec.name for spec in FEATURES)
@@ -229,11 +322,15 @@ def build_features(
 ) -> pd.DataFrame:
     """Add every engineered column, in declaration order.
 
+    The domain policy (:func:`apply_domain_policy`) runs before any feature, so no
+    engineered column is built from a value the policy calls impossible.
+
     Idempotent: running it twice over its own output gives the same frame, which
     is what lets the notebook rebuild the matrix after re-splitting without
     keeping a second copy around.
     """
     out = mask_sentinels(frame) if mask_codes else frame.copy()
+    out = apply_domain_policy(out)
     for spec in specs:
         out[spec.name] = spec.transform(out)
     return out

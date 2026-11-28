@@ -25,7 +25,7 @@ for candidate in (
     HERE,
     ROOT / "src",
     ROOT / "scripts",
-    ROOT.parents[1] / "stage-1" / "src",
+    ROOT.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -77,22 +77,8 @@ DEFINITIONAL_NUMBERS = {
     "\u06f2\u06f0",
 }
 
-MACHINERY_TITLE = "## اجرای ماشین‌افزار"
-READING_TITLE = "## چطور این عددها را بخوانیم"
-
-
-def machinery_bounds(text: str) -> tuple[int, int]:
-    """Where the archived machinery run sits - the report's one bounded exception.
-
-    The section is exempt in both regimes because it quotes *a* run (the fixture execution this
-    stage archived), not *the* run that fills the slots. Outside it, a number in prose is a
-    number no run will ever correct.
-    """
-    start = text.index(MACHINERY_TITLE)
-    end = text.index(READING_TITLE)
-    if start >= end:
-        raise AssertionError("the machinery section must sit where the map says")
-    return start, end
+#: the guide's length band for this stage's report, in whitespace-separated words
+REPORT_WORDS = (800, 1500)
 
 
 def evidence_payload() -> dict | None:
@@ -101,7 +87,7 @@ def evidence_payload() -> dict | None:
     The run's own file wins: a machine that just executed the notebook has the freshest
     truth, and demanding the shipped report match it is how a re-run that changed a number
     without refilling the text gets caught. It only wins when it describes the *same input*
-    as the archived run, though. Re-executing this stage on the fixture while `report.md`
+    as the archived run, though. Re-executing this stage on a test file while `report.md`
     still carries the real run's numbers is a legitimate thing to do - and comparing those
     numbers to a payload generated from a different file is not a check, it is a false
     alarm. So the two files are reconciled by the one field that identifies the input:
@@ -137,13 +123,12 @@ def _input_of(evidence: dict) -> str | None:
 
 
 def report_body(text: str) -> str:
-    """The report as the number rules see it: slots and the machinery run removed, structure too.
+    """The report as the number rules see it: slots and list numbering removed.
 
     A key like ``sensitivity.12_1.threshold`` and the sixth item of a decision list are not
     measurements, and tokenising them is how a check starts shouting about nothing.
     """
-    start, end = machinery_bounds(text)
-    body = PLACEHOLDER.sub(" ", text[:start] + text[end:])
+    body = PLACEHOLDER.sub(" ", text)
     return re.sub(r"(?m)^[ \t]*\d+\.[ \t]+", "", body)
 
 
@@ -155,7 +140,8 @@ OPTIONAL_DEPENDENCY_CALLS = {
     "read_html(": "lxml",
 }
 
-#: the one pair of modules the delivery does not pin, and the one file allowed to use them
+#: the notebook-runner modules: pinned in requirements.txt (a Run All needs them), but
+#: only the runner script may import them - the package and the notebook never do
 TOOLING_UNPINNED = {"nbclient", "nbformat"}
 TOOLING_FILES = {"scripts/run_notebook.py"}
 
@@ -464,6 +450,25 @@ class ReportEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(filled, "cost: 3250, rows: 90,000.")
 
+    def test_a_small_rate_keeps_four_places(self):
+        """Two places would turn the threshold 0.075 into 0.07 - another operating point."""
+        filled = self.report.fill_placeholders(
+            "t={{t}} r={{r}} big={{b}}", {"t": 0.075, "r": 0.759601, "b": 363.6333}
+        )
+        self.assertEqual(filled, "t=0.075 r=0.7596 big=363.63")
+        self.assertEqual(
+            self.report.check_traceability(filled, {"t": 0.075, "r": 0.759601, "b": 363.6333}),
+            [],
+        )
+
+    def test_a_text_slot_takes_the_name_the_run_stored(self):
+        evidence = {"importance": {"top5": [{"feature": "age", "importance_mean": 1.5}]}}
+        filled = self.report.fill_placeholders(
+            "{{importance.top5[0].feature}} ({{importance.top5[0].importance_mean}})",
+            evidence,
+        )
+        self.assertEqual(filled, "age (1.5)")
+
     def test_an_unknown_slot_stays_visible(self):
         filled = self.report.fill_placeholders("{{does.not.exist}}", self.evidence)
         self.assertIn("missing(does.not.exist)", filled)
@@ -535,11 +540,9 @@ class ReportEvidenceTests(unittest.TestCase):
         text = (ROOT / "report.md").read_text(encoding="utf-8")
         for slot in PLACEHOLDER.findall(text):
             self.assertRegex(slot, r"^[a-z0-9_.\[\]-]+$")
-        # the template may state only the brief's own constants (DEFINITIONAL_NUMBERS) and
-        # the archived machinery run; every *result* number has to arrive through a
-        # placeholder, and once a run has filled them the exemptions stay while the rule
-        # changes shape - see the branch below.
-        start, end = machinery_bounds(text)
+        # the template may state only the brief's own constants (DEFINITIONAL_NUMBERS); every
+        # *result* number has to arrive through a placeholder, and once a run has filled them
+        # the rule changes shape - see the branch below.
         body = report_body(text)
         unexpected = sorted(
             set(self.report.numeric_tokens(body)) - DEFINITIONAL_NUMBERS
@@ -553,13 +556,9 @@ class ReportEvidenceTests(unittest.TestCase):
         else:
             # a run has filled this report, so the promise that describes it is the one the
             # notebook's last cell makes: every number here exists in the evidence that run
-            # wrote. the exemptions stay the same two - the brief's own constants, and the
-            # archived machinery section - so filling the report cannot turn the suite red
-            # over a policy constant, and cannot smuggle an invented number in either.
-            # one rule for both places that hold the payload - see evidence_payload(): the run's
-            # own file when it describes the same input, the copy archived beside the report
-            # otherwise. a fresh clone has no data/, and a check that only read the working tree
-            # of whoever ran the notebook would call that a broken delivery instead of archived.
+            # wrote. one rule for both places that hold the payload - see evidence_payload():
+            # the run's own file when it describes the same input, the copy archived beside the
+            # report otherwise. a fresh clone has no data/, so the archive is what it reads.
             evidence = evidence_payload()
             if evidence is None:
                 self.fail(
@@ -575,17 +574,13 @@ class ReportEvidenceTests(unittest.TestCase):
                 [],
                 "a number in the filled report is in no evidence payload",
             )
-        table = text[start:end]
-        for word in ("آزمایشی", "نتیجهٔ چالش", "docs/evidence/fixture/"):
-            with self.subTest(label=word):
-                self.assertIn(
-                    word,
-                    table,
-                    "the bare numbers are only allowed because the section says what they are",
-                )
-        self.assertGreater(
-            len(text.split()), 400, "the report has a length floor in the guide"
-        )
+
+    def test_the_report_stays_inside_the_length_band(self):
+        """800 to 1,500 words: long enough to argue each decision, short enough to be read."""
+        words = len((ROOT / "report.md").read_text(encoding="utf-8").split())
+        low, high = REPORT_WORDS
+        self.assertGreaterEqual(words, low, f"report.md has {words} words")
+        self.assertLessEqual(words, high, f"report.md has {words} words")
 
 
 class RuntimeDependencyTests(unittest.TestCase):
@@ -745,26 +740,20 @@ class LockClosureTests(unittest.TestCase):
             # what it is missing - so say which and stop, rather than report a gap in a
             # file that is fine.
             self.skipTest(f"install the lock first, missing: {', '.join(absent)}")
+        from packaging.requirements import Requirement
+
         gaps: list[str] = []
         for dist in sorted(pins):
-            requires = metadata.requires(dist) or []
-            for line in requires:
-                if "extra ==" in line:
+            for line in metadata.requires(dist) or []:
+                requirement = Requirement(line)
+                # a marker that is false here (an extra, another OS, PyPy) is not a
+                # dependency of this install; evaluating it beats string-matching it
+                if requirement.marker is not None and not requirement.marker.evaluate(
+                    {"extra": ""}
+                ):
                     continue
-                spec = line.split(";")[0].strip()
-                if not spec:
-                    continue
-                name = (
-                    spec.replace(" ", "")
-                    .split(">=")[0]
-                    .split("==")[0]
-                    .split("<")[0]
-                    .split("!")[0]
-                    .split("[")[0]
-                    .lower()
-                    .replace("_", "-")
-                )
-                if name and name not in pins:
+                name = requirement.name.lower().replace("_", "-")
+                if name not in pins:
                     gaps.append(f"{dist} requires {name}")
         self.assertEqual(
             gaps,
@@ -773,13 +762,24 @@ class LockClosureTests(unittest.TestCase):
         )
 
     def test_the_local_editable_dependency_is_written_down(self):
-        """`-e ../stage-1` is a dependency too, so the lock has to carry it.
+        """The stage-1 package is a dependency too, so the lock has to carry it.
 
         Without it the notebook imports `data_factory` from wherever PYTHONPATH happens
-        to point, and the delivery stops being self-describing.
+        to point, and the delivery stops being self-describing. The line must name the
+        sibling folder the delivery layout really has (`stage-1-kiarash-akbari`): the
+        old `-e ../stage-1` made pip abort before it installed a single pin.
         """
         text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-        self.assertIn("-e ../stage-1", text)
+        editable = [
+            line.split(maxsplit=1)[1]
+            for line in text.splitlines()
+            if line.startswith("-e ")
+        ]
+        self.assertEqual(editable, ["../stage-1-kiarash-akbari"])
+        # pip resolves the path against the directory it runs in, and the README runs it
+        # from this folder, so the target has to exist next to this folder
+        target = (ROOT / editable[0]).resolve()
+        self.assertTrue((target / "pyproject.toml").is_file(), target)
 
 
 class MeasureTests(unittest.TestCase):
@@ -929,26 +929,19 @@ class CellScopeTests(unittest.TestCase):
 class ArchivedEvidenceConsistencyTests(unittest.TestCase):
     """The archived files describe one run, and the report describes the same one.
 
-    ``docs/evidence/fixture/`` is the record of an execution, so its two JSONs have to agree about
-    the file that was read: the manifest counts the rows in it, the evidence counts what the
-    database ended up holding, and the difference between them is the quarantine. A pair that
-    contradicts itself is an archive someone edited, which is this stage's oldest failure mode
-    seen from the other side - a number written down separately from a run.
+    ``docs/evidence/real/`` is the record of the notebook's execution on Kaggle's
+    ``cs-training.csv``, so its two JSONs have to agree about the file that was read: the manifest
+    counts the rows in it, the evidence counts what the database ended up holding, and the
+    difference between them is the quarantine. A pair that contradicts itself is an archive
+    someone edited - a number written down separately from a run. The shipped report must not be a
+    template any more, and every number in it has to be present in the evidence beside it.
 
-    ``docs/evidence/real/`` is the same promise about *your* run. When both files are there the
-    shipped report must no longer be a template, and every number in it has to be present in the
-    evidence beside it. While the folder is empty this test says so out loud instead of pretending
-    to have checked something.
-
-    The rule is containment, not provenance, and it is worth knowing where that stops: the
-    checker accepts any legal rounding of any number in the evidence, so a value copied from a
-    neighbouring field stays green. On the fixture archive, rewriting the filled threshold as
-    0.09 passes - three fields there hold 0.085, and 0.09 is its two-place spelling. Catching
-    that would mean re-filling the template slot by slot, which needs the template's history
-    rather than the two files in front of the test. A stated limit, not a claim of correctness.
+    The rule is containment, not provenance: the checker accepts any legal rounding of any number
+    in the evidence, so a value copied from a neighbouring field stays green. Catching that would
+    mean re-filling the template slot by slot, which needs the template's history rather than the
+    two files in front of the test. A stated limit, not a claim of correctness.
     """
 
-    FIXTURE = ROOT / "docs" / "evidence" / "fixture"
     REAL = ROOT / "docs" / "evidence" / "real"
 
     def _agree(self, manifest: dict, evidence: dict) -> None:
@@ -978,14 +971,32 @@ class ArchivedEvidenceConsistencyTests(unittest.TestCase):
             "rows in the file must equal rows loaded plus rows quarantined",
         )
 
-    def test_the_fixture_archive_agrees_with_itself(self):
+    def test_the_real_archive_agrees_with_itself(self):
         manifest = json.loads(
-            (self.FIXTURE / "credit_run_manifest.json").read_text(encoding="utf-8")
+            (self.REAL / "credit_run_manifest.json").read_text(encoding="utf-8")
         )
         evidence = json.loads(
-            (self.FIXTURE / "credit_evidence.json").read_text(encoding="utf-8")
+            (self.REAL / "credit_evidence.json").read_text(encoding="utf-8")
         )
         self._agree(manifest, evidence)
+
+    def test_the_real_archive_carries_the_baselines_and_the_missingness_test(self):
+        """The report argues from the rule baseline and the income test, so the run stores both."""
+        evidence = json.loads(
+            (self.REAL / "credit_evidence.json").read_text(encoding="utf-8")
+        )
+        baselines = evidence["baselines"]
+        self.assertEqual(
+            set(baselines), {"flag-nobody", "flag-everybody", "utilization-over-limit"}
+        )
+        self.assertLess(
+            evidence["holdout"]["cost_per_1000"],
+            0.75 * baselines["flag-nobody"],
+            "the acceptance bar is a 25% reduction against the no-learning baseline",
+        )
+        test = evidence["missing_income_test"]
+        for key in ("rate_a", "rate_b", "z", "p_value"):
+            self.assertIn(key, test)
 
     def test_the_feature_names_reach_the_evidence(self):
         """A report whose only word about importance is "12 columns were checked" has not answered.
@@ -994,7 +1005,7 @@ class ArchivedEvidenceConsistencyTests(unittest.TestCase):
         the *run* has to store the names: ``importance.top5`` and ``ablation.dropped_names``. The
         generator is pinned by text - the shape of the payload lives inside a notebook cell, and a
         cell that stops emitting a key is exactly the kind of edit that leaves a report unable to
-        say anything true - and the fixture archive is pinned by value, because an archived run is
+        say anything true - and the real archive is pinned by value, because an archived run is
         the only proof that the cell emitted them and not a hand-written file.
         """
         source = (ROOT / "scripts" / "build_solution_notebook.py").read_text(
@@ -1005,7 +1016,7 @@ class ArchivedEvidenceConsistencyTests(unittest.TestCase):
                 key, source, f"the evidence cell of the notebook no longer emits {key}"
             )
         evidence = json.loads(
-            (self.FIXTURE / "credit_evidence.json").read_text(encoding="utf-8")
+            (self.REAL / "credit_evidence.json").read_text(encoding="utf-8")
         )
         ablation = evidence["ablation"]
         importance = evidence["importance"]
@@ -1072,36 +1083,58 @@ class ArchivedEvidenceConsistencyTests(unittest.TestCase):
             "the archived report states a number the archived evidence does not contain",
         )
 
-    def test_no_report_number_depends_on_the_holdout_sensitivity_row(self):
-        """``holdout.matrix_sensitivity`` re-picks its threshold on the holdout rows, so the cost
-        in that row is what the best threshold *on those rows* would have cost - a fact about the
-        matrix, not an estimate of the policy. The validation-side rows are where threshold
-        movement may be quoted. This is the guard that keeps the optimistic number out: drop that
-        block from the evidence and no number in the report may become untraceable.
-        """
-        from credit import report
+    def test_the_holdout_evidence_holds_no_re_tuned_threshold(self):
+        """Every holdout row is priced at a threshold chosen on validation.
 
+        ``holdout_report`` used to re-pick each matrix's threshold on the holdout rows - a
+        second look at them, and an optimistic number. The archived evidence must now carry
+        only fixed points, each saying where its threshold came from.
+        """
         evidence = self._evidence()
         if evidence is None:
-            self.skipTest("no evidence file: nothing to subtract from")
-        text = (ROOT / "report.md").read_text(encoding="utf-8")
-        body = report_body(text)
-        with_block = report.check_traceability(body, evidence)
-        stripped = {
-            **evidence,
-            "holdout": {
-                k: v
-                for k, v in evidence["holdout"].items()
-                if k != "matrix_sensitivity"
-            },
+            self.skipTest("no evidence file to inspect")
+        holdout = evidence["holdout"]
+        self.assertNotIn("matrix_sensitivity", holdout)
+        rows = holdout["at_validation_thresholds"]
+        self.assertGreaterEqual(len(rows), 2)
+        self.assertTrue(all(row["threshold_source"] == "validation" for row in rows))
+        self.assertEqual(rows[0]["threshold"], holdout["threshold"])
+
+
+class RunnerPathTests(unittest.TestCase):
+    """The runner refuses absolute paths in saved outputs, not only in cell sources."""
+
+    @staticmethod
+    def _notebook(source: str, output: str):
+        from types import SimpleNamespace
+
+        cell = {
+            "cell_type": "code",
+            "source": [source],
+            "execution_count": 1,
+            "outputs": [{"output_type": "stream", "name": "stderr", "text": output}],
         }
-        without_block = report.check_traceability(body, stripped)
-        only_there = sorted(set(without_block) - set(with_block) - DEFINITIONAL_NUMBERS)
-        self.assertEqual(
-            only_there,
-            [],
-            "the report quotes a number that exists only in the holdout sensitivity row",
+        return SimpleNamespace(cells=[cell])
+
+    def test_a_venv_path_in_a_warning_is_caught(self):
+        import run_notebook
+
+        hits = run_notebook.absolute_paths(
+            self._notebook("x = 1", "/tmp/v3/lib/python3.11/site-packages/sklearn/x.py:1: Warning")
         )
+        self.assertEqual(len(hits), 1)
+        self.assertIn("output", hits[0])
+
+    def test_relative_paths_and_urls_are_fine(self):
+        import run_notebook
+
+        hits = run_notebook.absolute_paths(
+            self._notebook(
+                'Path("data/curated/model")',
+                "model: data/curated/model/model.joblib\nsee https://example.org/tmp/x",
+            )
+        )
+        self.assertEqual(hits, [])
 
 
 if __name__ == "__main__":

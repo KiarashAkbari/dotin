@@ -30,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1" / "src",
+    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -175,7 +175,7 @@ class CreditConfigTests(unittest.TestCase):
         """
         import tomllib
 
-        stage1 = HERE.parents[1] / "stage-1" / "config" / "default.toml"
+        stage1 = HERE.parents[1] / "stage-1-kiarash-akbari" / "config" / "default.toml"
         if not stage1.is_file():
             self.skipTest(f"stage 1 config not on this path: {stage1}")
         plain = stage1.read_text(encoding="utf-8")

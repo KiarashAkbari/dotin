@@ -32,6 +32,7 @@ from .cost import CHALLENGE_MATRIX, CostMatrix, binary_counts, cost_per_1000
 from .db import engine_for
 from .load import application_table, collect_records, insert_records
 from .models import Bundle
+from .paths import stage1_config
 from .prep import apply as apply_prep
 from .read import load_frame
 from .source import file_fingerprint, file_sha256
@@ -92,7 +93,9 @@ def stage_file(
 ) -> tuple[int, int, str, str]:
     """Validate and insert a fresh file into ``credit.staging_application``."""
     staging_cfg = staging_config(cfg, csv_path)
-    records, report, _fetch = collect_records(staging_cfg)
+    # the outcome is unknown for a file that is being scored, which is the point of
+    # scoring it; sql/011 already declares the staging target nullable
+    records, report, _fetch = collect_records(staging_cfg, label_required=False)
     target = application_table(staging_cfg.schema, DB_STAGING_TABLE)
     with engine.begin() as connection:
         connection.execute(sa.delete(target))
@@ -175,7 +178,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--bundle", required=True, type=Path, help="directory saved by Bundle.save"
     )
-    parser.add_argument("--config", default="../stage-1/config/default.toml")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="stage 1 config; default: $CREDIT_STAGE1_CONFIG or the sibling stage-1 folder",
+    )
     parser.add_argument("--credit-config", default=None, type=Path)
     parser.add_argument(
         "--out", default=None, type=Path, help="write the scores as CSV here"
@@ -185,9 +192,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.file.is_file():
             raise DataError("no such file to score", context={"path": str(args.file)})
-        cfg = resolve(args.credit_config, Path(args.config))
+        config_path = Path(args.config) if args.config else stage1_config()
+        cfg = resolve(args.credit_config, config_path)
         bundle = Bundle.load(args.bundle)
-        engine = engine_for(Path(args.config))
+        engine = engine_for(config_path)
         try:
             result = score_file(engine, cfg, args.file, bundle)
         finally:

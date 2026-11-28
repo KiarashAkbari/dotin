@@ -265,21 +265,46 @@ def fill_placeholders(markdown: str, evidence: dict) -> str:
     rather than dropped: a silent empty slot in a report is worse than an ugly one.
     """
     flat = numbers(evidence)
+    text = _text_leaves(evidence)
 
     def replace(match: re.Match[str]) -> str:
         key = match.group(1)
         if key not in flat:
+            if key in text:
+                # a name the run measured (a feature, a plan, an age band) is evidence too
+                return text[key]
             return f"\u26a0\ufe0f missing({key})"
         value = flat[key]
         if isinstance(value, float):
+            # a rate or a threshold below 1 keeps four places: two would print the
+            # chosen threshold 0.075 as 0.07, a different operating point
+            places = 4 if abs(value) < 1 else 2
             return (
-                f"{value:.2f}".rstrip("0").rstrip(".")
+                f"{value:.{places}f}".rstrip("0").rstrip(".")
                 if abs(value) < 1_000_000
                 else f"{value:,.2f}"
             )
         return f"{value:,}" if isinstance(value, int) else str(value)
 
     return PLACEHOLDER_PATTERN.sub(replace, markdown)
+
+
+def _text_leaves(evidence: dict) -> dict[str, str]:
+    """Flatten the payload into ``dotted.path -> text`` with the same paths as ``numbers``."""
+    found: dict[str, str] = {}
+
+    def walk(prefix: str, node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(f"{prefix}.{key}" if prefix else str(key), value)
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(f"{prefix}[{index}]", value)
+        elif isinstance(node, str):
+            found[prefix] = node
+
+    walk("", evidence)
+    return found
 
 
 def apply_to_file(path: Path, evidence: dict) -> dict[str, object]:

@@ -27,8 +27,12 @@ from pathlib import Path
 CODE = "code"
 ERROR = "error"
 
-#: an absolute path in a cell is the delivery guide's explicit no (Windows or unix)
-ABSOLUTE_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|/(?:home|Users|mnt|Volumes|private)/)")
+#: an absolute path in a cell is the delivery guide's explicit no (Windows or unix); the
+#: unix roots include /tmp, /opt, /usr, /var and /workspace because a warning's stderr
+#: quotes the site-packages path of whatever venv ran it
+ABSOLUTE_PATH = re.compile(
+    r"(?:\b[A-Za-z]:[\\/]|(?<![\w.])/(?:home|Users|mnt|Volumes|private|tmp|opt|usr|var|workspace|root|srv)/)"
+)
 
 
 def code_cells(notebook) -> list:
@@ -87,32 +91,50 @@ def validate_executed(notebook) -> list[str]:
     return problems
 
 
+def _output_text(cell) -> str:
+    """Everything a code cell printed: streams, plain-text results, error tracebacks."""
+    parts: list[str] = []
+    for output in cell.get("outputs", []):
+        text = output.get("text")
+        if text:
+            parts.append(text if isinstance(text, str) else "".join(text))
+        plain = output.get("data", {}).get("text/plain")
+        if plain:
+            parts.append(plain if isinstance(plain, str) else "".join(plain))
+        parts.extend(output.get("traceback", []))
+    return "\n".join(parts)
+
+
 def absolute_paths(notebook) -> list[str]:
-    """Every absolute path a cell source contains, with its cell index."""
+    """Every absolute path a cell's source *or saved output* contains, with its index.
+
+    The outputs matter as much as the source: a warning printed from a library quotes
+    its own file path, and that path is the machine of whoever ran the notebook.
+    """
     hits: list[str] = []
     for index, cell in enumerate(notebook.cells):
         source = "".join(cell.get("source", []))
-        for match in ABSOLUTE_PATH.finditer(source):
-            hits.append(f"cell {index}: {match.group(0)}")
+        for where, text in (("source", source), ("output", _output_text(cell))):
+            for match in ABSOLUTE_PATH.finditer(text):
+                hits.append(f"cell {index} {where}: {match.group(0)}")
     return hits
 
 
 def _jupyter():
     """Import the notebook toolchain, or explain the alternative.
 
-    ``nbclient`` and ``nbformat`` arrive with Jupyter, so they are the one pair of names
-    this project does not pin: nothing graded imports them - not the package, not the
-    notebook - and an environment built from requirements.txt can deliver everything by
-    pressing Restart & Run All in the UI. Importing them here rather than at module scope
-    is what keeps that true, and a test says so.
+    ``nbclient``, ``nbformat`` and ``ipykernel`` are pinned in requirements.txt, because a
+    Run All of the delivered notebook needs them. Nothing in the package or the notebook
+    imports them; importing them here rather than at module scope keeps the runner's
+    own tooling out of the graded path, and a test says so.
     """
     try:
         import nbformat
         from nbclient import NotebookClient
     except ImportError as exc:
         raise SystemExit(
-            f"the runner needs nbclient/nbformat ({exc}); install jupyter, or run "
-            "solution.ipynb with Restart & Run All in the notebook UI"
+            f"the runner needs nbclient/nbformat ({exc}); pip install -r requirements.txt, "
+            "or run solution.ipynb with Restart & Run All in the notebook UI"
         ) from exc
     return nbformat, NotebookClient
 

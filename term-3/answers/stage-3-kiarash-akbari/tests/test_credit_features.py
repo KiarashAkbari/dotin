@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 for candidate in (
     HERE,
     HERE.parent / "src",
-    HERE.parents[1] / "stage-1" / "src",
+    HERE.parents[1] / "stage-1-kiarash-akbari" / "src",
 ):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
@@ -168,7 +168,12 @@ class FeatureMathTests(unittest.TestCase):
 
     def test_overcommitted_is_strictly_past_the_ratio_of_one(self):
         built = build_features(
-            frame([{TARGET: 1, "debt_ratio": v} for v in (1.2, 1.0, 0.5, None)])
+            frame(
+                [
+                    {TARGET: 1, "debt_ratio": v, "monthly_income": 4000.0}
+                    for v in (1.2, 1.0, 0.5, None)
+                ]
+            )
         )
         values = [built["overcommitted"].iloc[i] for i in range(4)]
         self.assertEqual(
@@ -193,6 +198,97 @@ class FeatureMathTests(unittest.TestCase):
         )
         self.assertEqual(float(built["income_not_reported"].iloc[0]), 1.0)
         self.assertEqual(float(built["income_not_reported"].iloc[1]), 0.0)
+
+
+class LateCodeFlagTests(unittest.TestCase):
+    """96/98 survive as a flag, whatever the imputation plan later does to the counts."""
+
+    def test_a_coded_row_is_flagged_and_a_clean_zero_is_not(self):
+        built = build_features(
+            frame(
+                [
+                    {TARGET: 1, "num_late_30_59": 98.0, "num_late_90": 98.0, "num_late_60_89": 98.0},
+                    {TARGET: 0, "num_late_30_59": 0.0, "num_late_90": 0.0, "num_late_60_89": 0.0},
+                ]
+            )
+        )
+        self.assertEqual(built["late_history_coded"].tolist(), [1.0, 0.0])
+
+    def test_the_view_shape_is_flagged_too(self):
+        """The view already returns the codes as NULL; the flag must still fire."""
+        built = build_features(
+            frame([{TARGET: 1, "num_late_30_59": None, "num_late_90": None, "num_late_60_89": None}])
+        )
+        self.assertEqual(float(built["late_history_coded"].iloc[0]), 1.0)
+
+    def test_one_missing_bucket_is_not_a_code(self):
+        built = build_features(
+            frame([{TARGET: 0, "num_late_30_59": None, "num_late_90": 0.0, "num_late_60_89": 0.0}])
+        )
+        self.assertEqual(float(built["late_history_coded"].iloc[0]), 0.0)
+
+
+class DomainPolicyTests(unittest.TestCase):
+    """Impossible values become missing; the row stays and nothing is clipped."""
+
+    def test_an_age_below_18_is_missing_and_an_adult_age_stays(self):
+        built = build_features(frame([{TARGET: 0, "age": 0.0}, {TARGET: 0, "age": 18.0}]))
+        self.assertTrue(math.isnan(float(built["age"].iloc[0])))
+        self.assertEqual(float(built["age"].iloc[1]), 18.0)
+
+    def test_utilization_over_ten_is_missing_but_over_one_is_kept(self):
+        rows = [
+            {TARGET: 0, "revolving_utilization_unsecured": v} for v in (1.4, 10.0, 2500.0)
+        ]
+        built = build_features(frame(rows))
+        values = built["revolving_utilization_unsecured"].tolist()
+        self.assertEqual(values[:2], [1.4, 10.0])
+        self.assertTrue(math.isnan(values[2]))
+        # the excess feature is built after the policy, so it never sees 2,500
+        self.assertTrue(math.isnan(float(built["utilization_over_limit"].iloc[2])))
+        self.assertAlmostEqual(float(built["utilization_over_limit"].iloc[0]), 0.4)
+
+    def test_a_debt_ratio_without_income_is_not_a_ratio(self):
+        built = build_features(
+            frame(
+                [
+                    {TARGET: 0, "debt_ratio": 1159.0, "monthly_income": None},
+                    {TARGET: 0, "debt_ratio": 0.3, "monthly_income": 5000.0},
+                ]
+            )
+        )
+        self.assertTrue(math.isnan(float(built["debt_ratio"].iloc[0])))
+        self.assertTrue(math.isnan(float(built["overcommitted"].iloc[0])))
+        self.assertEqual(float(built["debt_ratio"].iloc[1]), 0.3)
+
+    def test_the_counts_table_names_every_rule_with_its_rows(self):
+        from credit.features import impossible_value_counts
+
+        table = impossible_value_counts(
+            frame(
+                [
+                    {TARGET: 1, "age": 0.0, "monthly_income": 1.0},
+                    {TARGET: 0, "revolving_utilization_unsecured": 50.0},
+                    {TARGET: 0, "debt_ratio": 900.0, "monthly_income": None},
+                ]
+            )
+        )
+        self.assertEqual(
+            dict(zip(table["rule"], table["rows"], strict=True)),
+            {
+                "age below 18": 1,
+                "utilization above 10": 1,
+                "debt ratio with no income": 1,
+            },
+        )
+        self.assertEqual(float(table.loc[0, "default_rate"]), 1.0)
+
+    def test_the_input_frame_is_not_modified(self):
+        from credit.features import apply_domain_policy
+
+        original = frame([{TARGET: 0, "age": 0.0}])
+        apply_domain_policy(original)
+        self.assertEqual(float(original["age"].iloc[0]), 0.0)
 
 
 class BuildTests(unittest.TestCase):
