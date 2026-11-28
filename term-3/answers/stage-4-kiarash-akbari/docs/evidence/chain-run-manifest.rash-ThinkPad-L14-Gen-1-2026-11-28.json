@@ -1,0 +1,72 @@
+{
+  "budget_minutes": 45,
+  "budget_seconds": 2700,
+  "layers": [
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:23:48+00:00",
+      "name": "ingest",
+      "seconds": 1.28,
+      "started_at": "2026-11-28T12:23:47+00:00",
+      "status": "ok"
+    },
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:24:58+00:00",
+      "name": "load-database",
+      "seconds": 69.112,
+      "started_at": "2026-11-28T12:23:48+00:00",
+      "status": "ok"
+    },
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:24:58+00:00",
+      "name": "load-audit",
+      "seconds": 0.182,
+      "started_at": "2026-11-28T12:24:58+00:00",
+      "status": "ok"
+    },
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:25:07+00:00",
+      "name": "features",
+      "seconds": 9.041,
+      "started_at": "2026-11-28T12:24:58+00:00",
+      "status": "ok"
+    },
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:26:54+00:00",
+      "name": "external",
+      "seconds": 106.851,
+      "started_at": "2026-11-28T12:25:07+00:00",
+      "status": "ok"
+    },
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:27:43+00:00",
+      "name": "model",
+      "seconds": 49.668,
+      "started_at": "2026-11-28T12:26:54+00:00",
+      "status": "ok"
+    },
+    {
+      "detail": "",
+      "finished_at": "2026-11-28T12:27:43+00:00",
+      "name": "capacity-list",
+      "seconds": 0.092,
+      "started_at": "2026-11-28T12:27:43+00:00",
+      "status": "ok"
+    }
+  ],
+  "over_budget": false,
+  "seconds_used": 236.226,
+  "total": {
+    "detail": "budget 45 min",
+    "finished_at": "2026-11-28T12:27:43+00:00",
+    "name": "total",
+    "seconds": 236.226,
+    "started_at": "2026-11-28T12:23:47+00:00",
+    "status": "ok"
+  }
+}

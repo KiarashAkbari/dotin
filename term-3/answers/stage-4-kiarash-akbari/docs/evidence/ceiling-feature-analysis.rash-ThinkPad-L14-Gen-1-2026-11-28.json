@@ -1,0 +1,182 @@
+{
+  "config": "config/capstone.default.toml",
+  "ceiling_ms": 500.0,
+  "frame_rows": 99281,
+  "settings": {},
+  "before": {
+    "runs_ms": [
+      627.046,
+      604.729,
+      614.83,
+      621.387,
+      604.323,
+      596.498,
+      628.092,
+      607.472,
+      604.291,
+      616.248,
+      607.093,
+      559.972,
+      465.286,
+      405.322,
+      399.715
+    ],
+    "best_ms": 399.715,
+    "best_repeat": 15,
+    "below_ceiling": 3,
+    "mean_ms": 570.82,
+    "worst_ms": 628.092,
+    "spread_ms": 228.377,
+    "ceiling_ms": 500.0,
+    "ceiling_margin_ms": 100.285,
+    "passes": true,
+    "read_ms": 822.353,
+    "trend_ms": -80.669,
+    "straddles_ceiling": true
+  },
+  "after": {
+    "runs_ms": [
+      414.532,
+      412.248,
+      425.017,
+      430.026,
+      438.757,
+      445.01,
+      469.517,
+      453.025,
+      470.073,
+      485.54,
+      456.089,
+      448.238,
+      506.499,
+      530.126,
+      472.922
+    ],
+    "best_ms": 412.248,
+    "best_repeat": 2,
+    "below_ceiling": 13,
+    "mean_ms": 457.175,
+    "worst_ms": 530.126,
+    "spread_ms": 117.879,
+    "ceiling_ms": 500.0,
+    "ceiling_margin_ms": 87.752,
+    "passes": true,
+    "read_ms": 919.339,
+    "trend_ms": 44.227,
+    "straddles_ceiling": true
+  },
+  "tuned": null,
+  "control": null,
+  "gain_split": null,
+  "plan_shapes": {
+    "before_analyze": "Workers Launched: 1, no spill; execution 402.069 ms",
+    "after_analyze": "Workers Launched: 1, no spill; execution 460.429 ms",
+    "tuned": null
+  },
+  "plan_shapes_compared": {
+    "before_analyze": [
+      "Gather  (cost=16149.47..33153.09 rows=99226 width=261)",
+      "Workers Planned: 1",
+      "Workers Launched: 1",
+      "->  Hash Left Join  (cost=15149.47..22230.49 rows=58368 width=261)",
+      "->  Parallel Hash Left Join  (cost=15146.87..19293.47 rows=58368 width=289)",
+      "->  Parallel Hash Left Join  (cost=12552.85..16546.22 rows=58368 width=257)",
+      "->  Parallel Hash Left Join  (cost=9786.72..13626.86 rows=58368 width=248)",
+      "->  Parallel Hash Left Join  (cost=7190.60..10877.52 rows=58368 width=191)",
+      "->  Parallel Hash Right Join  (cost=4404.58..7938.27 rows=58368 width=175)",
+      "->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118)",
+      "->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128)",
+      "->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158)",
+      "->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36)",
+      "->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56)",
+      "->  Parallel Seq Scan on orders o  (cost=0.00..2393.95 rows=58368 width=90)",
+      "->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49)",
+      "->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57)",
+      "->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42)",
+      "->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65)",
+      "->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34)"
+    ],
+    "after_analyze": [
+      "Gather  (cost=16149.47..33153.09 rows=99226 width=261)",
+      "Workers Planned: 1",
+      "Workers Launched: 1",
+      "->  Hash Left Join  (cost=15149.47..22230.49 rows=58368 width=261)",
+      "->  Parallel Hash Left Join  (cost=15146.87..19293.47 rows=58368 width=289)",
+      "->  Parallel Hash Left Join  (cost=12552.85..16546.22 rows=58368 width=257)",
+      "->  Parallel Hash Left Join  (cost=9786.72..13626.86 rows=58368 width=248)",
+      "->  Parallel Hash Left Join  (cost=7190.60..10877.52 rows=58368 width=191)",
+      "->  Parallel Hash Right Join  (cost=4404.58..7938.27 rows=58368 width=175)",
+      "->  Hash Left Join  (cost=1281.04..4662.36 rows=58039 width=118)",
+      "->  Hash Left Join  (cost=102.64..3331.59 rows=58039 width=128)",
+      "->  Parallel Seq Scan on mv_order_item_rollup i  (cost=0.00..3076.39 rows=58039 width=158)",
+      "->  Seq Scan on sellers s  (cost=0.00..63.95 rows=3095 width=36)",
+      "->  Seq Scan on products pr  (cost=0.00..766.51 rows=32951 width=56)",
+      "->  Parallel Seq Scan on orders o  (cost=0.00..2393.95 rows=58368 width=90)",
+      "->  Parallel Seq Scan on mv_customer_order_history h  (cost=0.00..2056.01 rows=58401 width=49)",
+      "->  Parallel Seq Scan on mv_order_payment_rollup p  (cost=0.00..1864.94 rows=58494 width=57)",
+      "->  Parallel Seq Scan on customers c  (cost=0.00..2034.95 rows=58495 width=42)",
+      "->  Parallel Seq Scan on mv_order_centroids geo  (cost=0.00..1864.01 rows=58401 width=65)",
+      "->  Seq Scan on product_category_name_translation t  (cost=0.00..1.71 rows=71 width=34)"
+    ],
+    "tuned": null
+  },
+  "plans_moved": {
+    "analyze": false,
+    "setting": false
+  },
+  "parallel_cap": null,
+  "plan_estimate_drift": {
+    "estimated_rows": 99226,
+    "actual_rows": 99281,
+    "pct": 0.055398313876774
+  },
+  "statistics_provenance": {
+    "sources": 2,
+    "per_source": {
+      "external_municipio": {
+        "author": "auto",
+        "minutes_ago": 2.2,
+        "separation_minutes": null
+      },
+      "mv_external_density": {
+        "author": "auto",
+        "minutes_ago": 2.2,
+        "separation_minutes": null
+      }
+    },
+    "auto": [
+      "external_municipio",
+      "mv_external_density"
+    ],
+    "never_statted": [],
+    "newest_minutes": 2.2,
+    "separation_minutes": null
+  },
+  "witness_lines": {
+    "setting_inert": null,
+    "statistics": "  statistics already current: the *untuned* plan estimates 99,226 rows against 99,281 it actually returned (0.06% off), so there was no stale estimate for this `ANALYZE` to correct -- `ANALYZE` earns credit only on a frame rebuilt without it, and repeating this command on this database cannot change that. Read the 500 ms line as met-but-thin, and buy headroom in the query, not in the statistics",
+    "provenance": "  before was not a stale frame: autovacuum holds the newest statistics on `external_municipio` and `mv_external_density` (2 of 2; newest 2 min ago), so the `ANALYZE` step ran on numbers somebody else had already refreshed. Read the before -> after pair as the same statistics twice -- and reconcile a `before` that looks slow with that: the only state that measures the build's own statistics is a rebuild without an `ANALYZE`"
+  },
+  "attribution": {
+    "analyze": "noise",
+    "setting": "not measured"
+  },
+  "noise_bounds": {
+    "analyze": {
+      "observed_ms": -12.533,
+      "spread_ms": 228.377,
+      "spread_of": "the untuned state",
+      "first_spread_ms": 228.377,
+      "second_spread_ms": 117.878,
+      "inside_noise": true
+    },
+    "setting": null
+  },
+  "frame_rows_read": 99281,
+  "verdict": "noise: the untuned state both met and missed 500 ms -- best 399.7, worst 628.1, 3 of 15 repeats under -- so the ceiling is inside the measurement, and this run cannot write the frame off in either direction. The line is unresolved on this machine at this repeat count; say that, not `meets`, not `breaches`",
+  "verdict_tuned": null,
+  "exit": {
+    "code": 1,
+    "note": "red: no state met 500 ms outside its own interval -- the ceiling is unresolved on this machine at this repeat count, so this is not a pass to report and not a breach to fix yet: take more repeats on the same command, or carry the shortfall into section 8 of `report.md` as the unresolved line the witness already spells out"
+  }
+}
