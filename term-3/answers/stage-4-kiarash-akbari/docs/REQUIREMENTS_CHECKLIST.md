@@ -7,7 +7,8 @@
 
 **وضعیت این نسخه:** بازنویسیِ کامل روی شاخهٔ `fix/stage-4-finish` (۲۰۲۶-۱۱-۲۷). نسخهٔ قبلی این فایل
 وضعیتِ فاز ۰ تا ۴ را نگه داشته بود («`src/` وجود ندارد» و مانند آن) و دیگر با درخت نمی‌خواند. شاهدهای
-اجرایی از سندباکس‌اند: PostgreSQL 16.4، ۲ vCPU، Olistِ کاملِ عمومی، IBGEِ زنده. اگر `git log -1` چیزی
+اجرایی از سندباکس‌اند: PostgreSQL 16.4، ۲ vCPU، Olistِ کاملِ عمومی، IBGEِ زنده؛ به‌جز شاهدهای
+`*.rash-ThinkPad-L14-Gen-1-2026-11-28.*` که اجرای خودِ دانشجو روی ThinkPadش در ۲۰۲۶-۱۱-۲۸ است (بندهای ۱.۱، ۱.۳، ۱.۴، ۵.۳، ۸.۵). اگر `git log -1` چیزی
 جدیدتر از این دور می‌گوید، بندهای «انجام‌شده» باید دوباره با فایل‌شان سنجیده شوند.
 
 سه وضعیت مجاز:
@@ -27,19 +28,21 @@
 
 ## ۱. پیش‌شرط‌ها و وزن‌ها
 
-- **۱.۱** · نامشخص — `04 §پذیرش` سطر ۱ + `00 §۸`: پروژه روی ماشین ارزیاب اجرا شود.
-  شاهد: در سندباکس از دیتابیسِ خالی ۷ از ۷ گام `ok` (`docs/evidence/chain-run-manifest.json`،
-  `docs/evidence/chain-run-log.jsonl`). روی ماشین دانشجو بعد از patchهای 0048 به بعد هنوز اجرا نشده؛
-  دستورش در `README.md` بخش «راه‌اندازی».
+- **۱.۱** · انجام‌شده (ماشین دانشجو + سندباکس) — `04 §پذیرش` سطر ۱ + `00 §۸`: پروژه روی ماشین ارزیاب اجرا شود.
+  شاهد: روی ThinkPadِ دانشجو از دیتابیسِ خالی ۷ از ۷ گام `ok` و `chain exit: 0` (`docs/evidence/chain-run-manifest.rash-ThinkPad-L14-Gen-1-2026-11-28.json`،
+  `docs/evidence/chain-run-log.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`)؛ در سندباکس هم ۷ از ۷ (`docs/evidence/chain-run-manifest.json`، `docs/evidence/chain-run-log.jsonl`).
+  ماشینِ خودِ ارزیاب را هیچ‌کدام نمی‌سنجد؛ دستورش در `README.md` بخش «راه‌اندازی».
 - **۱.۲** · انجام‌شده — `04 §وزن ارزیابی`: وزن‌ها (نشت ۲۵٪، یکپارچگی ۲۰٪، مهندسی ۲۰٪، مدل ۱۵٪، گزارش ۱۵٪،
   غیرفنی ۵٪). شاهد: `ROADMAP.md` §۰.
-- **۱.۳** · انجام‌شده (سندباکس) — `04 §معماری` بند ۵: کل زنجیره ≤ ۴۵ دقیقه با زمانِ هر حلقه.
-  شاهد: `docs/evidence/chain-run-manifest.json` — ۱۲۷٫۴ ثانیه، `over_budget: false`، زمانِ جدای هر گام؛
+- **۱.۳** · انجام‌شده (ماشین دانشجو + سندباکس) — `04 §معماری` بند ۵: کل زنجیره ≤ ۴۵ دقیقه با زمانِ هر حلقه.
+  شاهد: `docs/evidence/chain-run-manifest.rash-ThinkPad-L14-Gen-1-2026-11-28.json` — ۲۳۶٫۲ ثانیه (`seconds_used` 236.226)، `over_budget: false`، زمانِ جدای هر گام؛
+  سندباکس: `docs/evidence/chain-run-manifest.json` — ۱۲۷٫۴ ثانیه؛
   سقف از `config/capstone.default.toml` (`budget.chain_minutes`).
-- **۱.۴** · نامشخص — `04 §معماری` بند ۲: کوئری ویژگی < ۵۰۰ ms با پلن. سندباکس برآورده می‌کند
-  (`docs/evidence/ceiling-feature-analysis.sandbox-2026-11-27.txt`: بهترینِ ۱۵ تکرار ۳۵۷٫۲ ms، ۱۵ از ۱۵ زیر سقف،
-  پلن کامل در همان فایل). روی ماشین دانشجو بعد از 0048 دوباره گرفته نشده — `README.md` بخش «زمانِ کوئریِ ویژگی».
-  جزئیات: بند ۵.۳.
+- **۱.۴** · انجام‌شده با آمارِ داوری‌شده؛ حاشیهٔ کم، پایدار نیست — `04 §معماری` بند ۲: کوئری ویژگی < ۵۰۰ ms با پلن.
+  ماشین دانشجو: گامِ `features` بهترین ۴۲۵٫۶ ms از ۵ تکرار (`docs/evidence/chain-run-log.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`)؛ تحلیلگرِ ۱۵ تکراری
+  بعد از `ANALYZE` بهترین ۴۱۲٫۲، بدترین ۵۳۰٫۱ ms، ۱۳ از ۱۵ زیر سقف، پلن کامل و حکمِ «unresolved» در `docs/evidence/ceiling-feature-analysis.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`.
+  سندباکس (ثانوی): `docs/evidence/ceiling-feature-analysis.sandbox-2026-11-27.txt`، بهترین ۳۵۷٫۲ ms، ۱۵ از ۱۵ زیر سقف.
+  جزئیات: بند ۵.۳ و `report.md` §۸.
 - **۱.۵** · انجام‌شده — `00 §۶`: ابزار بیرون از دامنه فقط با توضیح. شاهد: `requirements.txt` (همه `==`)؛
   ابزارها pandas/scikit-learn/psycopg/matplotlib/scipy و package مرحلهٔ ۱؛ بخش AI usage در `report.md`.
 - **۱.۶** · انجام‌شده — `00 §۳`: هیچ عددی ساخته نشود. شاهد: `report.md`، `manager_summary.md` و
@@ -122,10 +125,13 @@
 - **۵.۲** · انجام‌شده — تجمیع‌های تاریخی فقط گذشته را می‌بینند، در خودِ SQL. شاهد: `RANGE … PRECEDING` در
   `sql/003_feature_views.sql`، توابع as-of در `sql/004_as_of_functions.sql` (از جمله تاریخچهٔ فروشنده)،
   `tests/test_capstone_features.py`.
-- **۵.۳** · نامشخص — زمان‌گیریِ تکرارپذیر + `EXPLAIN (ANALYZE)`، < ۵۰۰ ms. ابزار: `scripts/analyze_ceiling_feature.py
-  --tag` (۱۵ تکرار، قبل/بعد از `ANALYZE`، پلن). شاهدِ سندباکس:
-  `docs/evidence/ceiling-feature-analysis.sandbox-2026-11-27.txt` (۳۵۷٫۲ ms). آستانه‌های این ابزار:
-  `decisions.md` §۳۹، `docs/evidence/ceiling-threshold-derivation.txt`. اندازهٔ ماشین دانشجو بعد از 0048 گرفته نشده.
+- **۵.۳** · انجام‌شده با آمارِ داوری‌شده؛ حاشیهٔ کم، پایدار نیست — زمان‌گیریِ تکرارپذیر + `EXPLAIN (ANALYZE)`، < ۵۰۰ ms.
+  ابزار: `scripts/analyze_ceiling_feature.py --tag` (۱۵ تکرار، قبل/بعد از `ANALYZE`، پلن). شاهدِ ماشین دانشجو:
+  `docs/evidence/ceiling-feature-analysis.rash-ThinkPad-L14-Gen-1-2026-11-28.txt` (`.json` کنارش) — پیش از `ANALYZE` بهترین ۳۹۹٫۷، میانگین ۵۷۰٫۸، بدترین ۶۲۸٫۱ ms و ۳ از ۱۵ زیر سقف؛
+  بعد از آن بهترین ۴۱۲٫۲، میانگین ۴۵۷٫۲، بدترین ۵۳۰٫۱ ms و ۱۳ از ۱۵ زیر سقف؛ پلن جابه‌جا نشد؛ حکمِ ابزار
+  «red: unresolved at this repeat count». آمارِ داوری‌شدهٔ زنجیره (بهترینِ ۵ تکرار) ۴۲۵٫۶ ms است (`docs/evidence/chain-run-log.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`).
+  شاهدِ سندباکس: `docs/evidence/ceiling-feature-analysis.sandbox-2026-11-27.txt` (۳۵۷٫۲ ms). آستانه‌های این ابزار:
+  `decisions.md` §۳۹، `docs/evidence/ceiling-threshold-derivation.txt`.
 - **۵.۴** · انجام‌شده — یک جملهٔ فرضیه برای هر ویژگی. شاهد: `docs/feature_hypotheses.csv`، فهرست فارسی در `decisions.md` §۴۱، نمونه‌ها در `report.md` §۵.
 - **۵.۵** · انجام‌شده — همهٔ DDL نسخه‌دار. شاهد: `sql/001`…`006`، `docs/evidence/sql-checksums.txt`.
 
@@ -160,7 +166,8 @@
   `scripts/sealed_cut_rehearsal.py`. هر snapshotِ `capstone.predict.SNAPSHOTS` دقیقاً یک بار تازه می‌شود؛ نگهبانش در
   `tests/test_capstone_sql_guards.py` است.
 - **۸.۴** · انجام‌شده — زمانِ هر حلقه در manifest. شاهد: `docs/evidence/chain-run-manifest.json`.
-- **۸.۵** · انجام‌شده (سندباکس) — آزمون روی محیط خالی. شاهد: همان manifest روی دیتابیسِ تازه‌ساخته؛
+- **۸.۵** · انجام‌شده (ماشین دانشجو + سندباکس) — آزمون روی محیط خالی. شاهد: همان manifest روی دیتابیسِ تازه‌ساخته،
+  و `docs/evidence/chain-run-manifest.rash-ThinkPad-L14-Gen-1-2026-11-28.json` روی `capstone_run`ِ تازه‌ساختهٔ ماشین دانشجو؛
   `tests/test_end_to_end.py` روی دادهٔ ساختگی.
 
 ## ۹. تحویل‌های متنی و نوتبوک‌ها
@@ -246,6 +253,8 @@
 ## آنچه هنوز باید روی ماشین دانشجو انجام شود
 
 1. چرخاندن رمز دیتابیسی که پیش‌تر در یک خروجی تست دیده شد، پیش از هر اجرا.
-2. اجرای `scripts/run_chain.py` روی دیتابیسِ تازه و ذخیرهٔ manifest.
-3. `scripts/analyze_ceiling_feature.py --tag <نام>` روی دیتابیسِ بی‌کار — بند ۱.۴ و ۵.۳ را می‌بندد یا رد می‌کند.
-4. ساختن دوبارهٔ هر دو نوتبوک و اجرای تست‌ها با و بی‌دیتابیس، و smoke/سرتاسری روی دیتابیسِ دورریختنی.
+2. ~~اجرای `scripts/run_chain.py` روی دیتابیسِ تازه و ذخیرهٔ manifest.~~ انجام شد (۲۰۲۶-۱۱-۲۸): `docs/evidence/chain-run-manifest.rash-ThinkPad-L14-Gen-1-2026-11-28.json`.
+3. ~~`scripts/analyze_ceiling_feature.py --tag <نام>` روی دیتابیسِ بی‌کار.~~ انجام شد: `docs/evidence/ceiling-feature-analysis.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`؛
+   نتیجه در بند ۵.۳. برای حاشیهٔ پایدار، کوئری باید سبک‌تر شود یا با تکرارِ بیشتر دوباره سنجیده شود.
+4. ساختن دوبارهٔ هر دو نوتبوک و اجرای تست‌ها: نوتبوک‌ها و تست‌ها با دیتابیس انجام شد (`Ran 595 tests`، `OK (skipped=16)`،
+   `docs/evidence/chain-run-log.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`؛ نوتبوک‌ها در commitِ `0943702`). بی‌دیتابیس و smoke/سرتاسری روی دیتابیسِ دورریختنی در آن جلسه ثبت نشده.

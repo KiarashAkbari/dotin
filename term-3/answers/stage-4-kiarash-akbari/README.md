@@ -39,8 +39,9 @@ python scripts/run_chain.py                      # یک فرمان: ingest → l
 
 خروجی‌ها در `data/curated/`: `followup_list.csv` (فهرست پیگیری)، `capacity_table.json` (جدول ۵/۱۰/۲۰٪)،
 `model_metrics.json`، `model.joblib`، و manifest زمان هر مرحله. کد خروج غیرصفر یعنی یک مرحله ایستاده و
-manifest می‌گوید کدام. روی ماشین سندباکس (۲ vCPU) کل زنجیره روی دیتابیسِ تازه‌ساخته ۱۲۷٫۴ ثانیه طول کشید
-(`docs/evidence/chain-run-manifest.json`؛ بودجه ۴۵ دقیقه). روی ماشین خودتان دوباره بگیرید.
+manifest می‌گوید کدام. روی ThinkPadِ دانشجو کل زنجیره روی دیتابیسِ تازه‌ساخته ۲۳۶٫۲ ثانیه طول کشید، ۷ از ۷ گام
+`ok` (`docs/evidence/chain-run-manifest.rash-ThinkPad-L14-Gen-1-2026-11-28.json`؛ بودجه ۴۵ دقیقه)؛ روی سندباکس (۲ vCPU)
+۱۲۷٫۴ ثانیه (`docs/evidence/chain-run-manifest.json`). روی ماشین خودتان دوباره بگیرید.
 
 `config/capstone.default.toml` قرارداد تصمیم‌گرفته و بی‌رمز است و همه‌چیز از آن خوانده می‌شود؛ اگر روی ماشین
 خودتان چیزی متفاوت لازم است، `config/capstone.toml` بسازید (در Git نمی‌آید).
@@ -100,6 +101,13 @@ python scripts/analyze_ceiling_feature.py --tag "$(hostname -s)-$(date +%F)" --r
 نشان می‌دهد autovacuum هنگامِ تکرارها فعال بود یا نه. اگر سقف شکسته شود، همین‌ها در پیامِ خطا هم می‌آیند. نقشِ
 دیتابیس باید مالکِ جدول‌ها باشد (همان نقشی که بارگذاری کرده)، چون `VACUUM` روی جدولِ دیگران فقط هشدار می‌دهد و
 کاری نمی‌کند.
+
+**نتیجه روی ThinkPadِ دانشجو (۲۰۲۶-۱۱-۲۸):** سقف با آمارِ داوری‌شده (بهترینِ تکرارها) برقرار است، با حاشیهٔ کم، و
+پایدار نیست. گامِ `features` در زنجیره بهترین ۴۲۵٫۶ و میانگین ۴۳۷٫۴ ms از ۵ تکرار گرفت و autovacuum در هر ۶ نمونه ۰ بود
+(`docs/evidence/chain-run-log.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`). تحلیلگرِ ۱۵ تکراری بعد از `ANALYZE` بهترین
+۴۱۲٫۲، میانگین ۴۵۷٫۲ و بدترین ۵۳۰٫۱ ms داد و ۲ از ۱۵ اجرا بالای ۵۰۰ بود؛ حکمِ خودِ ابزار «red: unresolved at this repeat
+count» است (`docs/evidence/ceiling-feature-analysis.rash-ThinkPad-L14-Gen-1-2026-11-28.txt`). عددهای سندباکس
+(`ceiling-feature-analysis.sandbox-2026-11-27.txt`، بهترین ۳۵۷٫۲ ms) ثانوی‌اند.
 
 ## ساختن نوتبوک‌ها و شاهدها (بعد از زنجیره)
 
