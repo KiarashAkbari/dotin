@@ -157,6 +157,15 @@ ORDER BY relation_name
 #: snapshots arrive from a refresh with none) the statistics the planner needs. It cannot run inside a
 #: transaction block, which is why ``build`` commits and switches to autocommit around it.
 SETTLE_STATEMENT = "VACUUM (ANALYZE) {relation}"
+#: how many autovacuum workers are busy in this database right now. Asked before the first repeat and
+#: after each one, because settling removes the autovacuum work *this frame's* relations had pending
+#: but not a worker on another table of the same load, and a breach that coincides with one should say
+#: so in the refusal rather than in a later guess. ``backend_type`` and ``datname`` are visible to any
+#: role, so no privilege is needed for the count.
+AUTOVACUUM_ACTIVE_SQL = (
+    "SELECT count(*) FROM pg_stat_activity"
+    " WHERE backend_type = 'autovacuum worker' AND datname = current_database()"
+)
 
 
 def allowed_only(audit: list[ColumnVerdict], used: list[str]) -> list[str]:
@@ -613,11 +622,16 @@ def build(
                             continue
                     cursor.execute(f"ANALYZE {target}")
             durations_ms: list[float] = []
+            autovacuum_seen: list[int] = []
+            cursor.execute(AUTOVACUUM_ACTIVE_SQL)
+            autovacuum_seen.append(int(cursor.fetchone()[0] or 0))
             for _ in range(repeat):
                 started = clock()
                 cursor.execute(FRAME_TIMING_SQL.format(frame=FRAME_VIEW))
                 cursor.fetchall()
                 durations_ms.append((clock() - started) * 1000.0)
+                cursor.execute(AUTOVACUUM_ACTIVE_SQL)
+                autovacuum_seen.append(int(cursor.fetchone()[0] or 0))
             connection.commit()
     finally:
         connection.close()
@@ -627,7 +641,24 @@ def build(
     # one is the closest reading of the query itself. Every run is still returned, so a reader can
     # see the spread the verdict was taken from (decisions.md section 16).
     best_ms = min(durations_ms)
-    check_query_cost(best_ms, config)
+    try:
+        check_query_cost(best_ms, config)
+    except BudgetError as breach:
+        # the refusal is all a failed chain keeps (the metadata below is never returned), so the
+        # state the repeats ran in travels with it: what was settled first, and whether autovacuum
+        # was busy in this database while they ran
+        raise BudgetError(
+            f"{breach} Runs: {[round(value, 1) for value in durations_ms]} ms. Before them"
+            f" {len(settled_ms)} relations were settled with VACUUM (ANALYZE) in {settle_seconds:.1f} s;"
+            f" autovacuum workers busy in this database, sampled before and after each run:"
+            f" {autovacuum_seen}.",
+            context={
+                **breach.context,
+                "query_ms_runs": [round(value, 3) for value in durations_ms],
+                "settled_relations": list(settled_ms),
+                "autovacuum_workers_seen": autovacuum_seen,
+            },
+        ) from breach
     return {
         "frame": FRAME_VIEW,
         "rows": rows,
@@ -644,4 +675,5 @@ def build(
         "settled_with": SETTLE_STATEMENT.format(relation="<relation>"),
         "settled_relations": settled_ms,
         "settle_seconds": round(settle_seconds, 3),
+        "autovacuum_workers_seen": autovacuum_seen,
     }

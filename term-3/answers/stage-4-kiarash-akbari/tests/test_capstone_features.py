@@ -59,7 +59,10 @@ class RecordingConnection:
         bridge_pairs: int = 0,
         bridge_present: bool | None = None,
         settle_relations: list[str] | None = None,
+        autovacuum_workers: list[int] | None = None,
     ) -> None:
+        #: what successive "how many autovacuum workers are busy" samples answer; 0 once exhausted
+        self.autovacuum_workers = list(autovacuum_workers or [])
         self.statements: list[str] = []
         #: the autocommit flag at the moment each statement was sent, index for index with
         #: ``statements`` -- VACUUM refuses a transaction block, so *when* the flag flips is a claim
@@ -109,6 +112,8 @@ class RecordingCursor:
         self.connection.autocommit_at.append(self.connection.autocommit)
         if "format('%I.%I', namespace.nspname, relation.relname)" in sql:
             self._rows = [(name,) for name in self.connection.settle_relations]
+        elif "backend_type = 'autovacuum worker'" in sql:
+            self._rows = [(self.connection.autovacuum_workers.pop(0) if self.connection.autovacuum_workers else 0,)]
         elif "to_regclass('capstone.external_municipio')" in sql:
             self._rows = [(self.connection.bridge_present,)]
         elif "to_regclass('capstone.mv_external_density')" in sql:
@@ -410,6 +415,7 @@ class BuildSequencingTests(_SqlFixtureMixin, unittest.TestCase):
         self.assertEqual(
             sorted(metadata),
             [
+                "autovacuum_workers_seen",
                 "ceiling_ms",
                 "cold_ms",
                 "columns",
@@ -516,6 +522,30 @@ class SettleBeforeTimingTests(_SqlFixtureMixin, unittest.TestCase):
         self.assertEqual(metadata["settled_with"], "VACUUM (ANALYZE) <relation>")
         self.assertGreaterEqual(metadata["settle_seconds"], 0.0)
         self.assertTrue(all(value >= 0.0 for value in metadata["settled_relations"].values()))
+
+    def test_autovacuum_is_sampled_around_every_repeat_and_reported(self) -> None:
+        connection = RecordingConnection(autovacuum_workers=[1, 1, 0, 0])
+        metadata = self.build(connection, repeat=3)
+        samples = self.positions(connection, lambda sql: sql == features.AUTOVACUUM_ACTIVE_SQL)
+        timed = self.positions(connection, lambda sql: "EXPLAIN (ANALYZE, TIMING OFF)" in sql)
+        self.assertEqual(len(samples), 4, msg="once before the first repeat and once after each")
+        self.assertLess(samples[0], timed[0])
+        self.assertGreater(samples[-1], timed[-1])
+        self.assertEqual(metadata["autovacuum_workers_seen"], [1, 1, 0, 0])
+
+    def test_a_breach_carries_the_runs_the_settle_and_autovacuum_in_its_message(self) -> None:
+        """A failed chain keeps only the refusal, so the refusal is where the diagnosis has to be."""
+        ticks = iter([0.0, 0.900, 0.900, 1.800])
+        connection = RecordingConnection(autovacuum_workers=[2, 1, 0])
+        with self.assertRaises(BudgetError) as caught:
+            self.build(connection, clock=lambda: next(ticks))
+        message = str(caught.exception)
+        self.assertIn("over the 500 ms", message)
+        self.assertIn("Runs: [900.0, 900.0] ms", message)
+        self.assertIn("2 relations were settled with VACUUM (ANALYZE)", message)
+        self.assertIn("[2, 1, 0]", message)
+        self.assertEqual(caught.exception.context["autovacuum_workers_seen"], [2, 1, 0])
+        self.assertEqual(caught.exception.context["ceiling_ms"], 500)
 
     def test_the_ceiling_is_not_what_moved(self) -> None:
         """Settling is the fix; a raised ceiling would be hiding the finding (decisions.md section 42)."""
