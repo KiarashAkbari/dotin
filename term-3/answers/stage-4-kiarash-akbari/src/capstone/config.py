@@ -439,7 +439,8 @@ def load_config(path: Path) -> CapstoneConfig:
         raise ConfigError(
             "these keys are student decisions and are still undecided: "
             + ", ".join(undecided)
-            + ". Write them in config/capstone.toml and record the reasoning in decisions.md "
+            + f". {path} is read as a whole file; the decided values live in "
+            "config/capstone.default.toml (copy that, not the example). Write new ones there and record the reasoning in decisions.md "
             "(ROADMAP phase 1). An undecided policy must not be replaced by a default.",
             context={"undecided": list(undecided), "config": str(path)},
         )

@@ -44,7 +44,8 @@ manifest می‌گوید کدام. روی ThinkPadِ دانشجو کل زنجی�
 ۱۲۷٫۴ ثانیه (`docs/evidence/chain-run-manifest.json`). روی ماشین خودتان دوباره بگیرید.
 
 `config/capstone.default.toml` قرارداد تصمیم‌گرفته و بی‌رمز است و همه‌چیز از آن خوانده می‌شود؛ اگر روی ماشین
-خودتان چیزی متفاوت لازم است، `config/capstone.toml` بسازید (در Git نمی‌آید).
+خودتان چیزی متفاوت لازم است، `config/capstone.toml` بسازید (در Git نمی‌آید). این فایل با default ادغام نمی‌شود و
+جای کلِ آن را می‌گیرد، پس آن را از `capstone.default.toml` کپی کنید، نه از `capstone.example.toml` (که عمداً تصمیم‌نگرفته است و seed ندارد).
 
 ## پیش‌بینی برای سفارش‌های تازه
 

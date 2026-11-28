@@ -1,7 +1,10 @@
 # Stage 4 (capstone) config — the tracked, password-free contract.
 #
-# Copy this to config/capstone.toml for machine-specific paths; that file is the
-# one .gitignore keeps out. Nothing secret belongs in either copy: the database
+# This is the *undecided* template: its decisions read "unset" and it has no
+# roster or seed, so the chain refuses it on purpose. The decided contract is
+# config/capstone.default.toml. A local config/capstone.toml (gitignored) is read
+# instead of the default as a whole file, not merged with it, so make one by
+# copying capstone.default.toml, never this file. Nothing secret belongs in either copy: the database
 # password is read from an environment variable, exactly as stage 1 does it
 # (`password_env = "OLIST_DB_PASSWORD"`), so no key below carries a credential.
 #

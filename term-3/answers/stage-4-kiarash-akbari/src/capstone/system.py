@@ -619,7 +619,9 @@ def experiment(frame, config: CapstoneConfig, *, with_drift: bool = True) -> dic
     if seed_value is None:
         raise InputError(
             "[model] random_seed is not set; a run that invents a seed is not a reproducible run "
-            f"({seed_label(config)})"
+            f"({seed_label(config)}; read from {config.source}). The recorded seed lives in "
+            "config/capstone.default.toml; a local config/capstone.toml replaces that file whole, "
+            "so copy capstone.default.toml (not the example) when you need a machine-local one"
         )
     seed = int(seed_value)
     roster = roster_of(config)
