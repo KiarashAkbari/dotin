@@ -93,6 +93,14 @@ python scripts/analyze_ceiling_feature.py --tag "$(hostname -s)-$(date +%F)" --r
 # شاهد: docs/evidence/ceiling-feature-analysis.<tag>.txt (+ .json) با پلن؛ نامِ تکراری بی --force رد می‌شود
 ```
 
+گامِ `features` پیش از پنج تکرارِ زمان‌گیری، هر جدول و snapshot را که قاب به آن وابسته است (فهرست از کاتالوگ)
+با `VACUUM (ANALYZE)` جا می‌اندازد. دلیلش این است که درست بعد از `load-database --reset`، autovacuum و
+صفحه‌های تازه‌نوشته‌شده عدد را بالا می‌بردند، بی آن‌که پلن عوض شود (`decisions.md` §۴۲). در خروجیِ گام،
+`settled_relations` و `settle_seconds` نشان می‌دهند چه چیزی جا افتاد و چقدر طول کشید، و `autovacuum_workers_seen`
+نشان می‌دهد autovacuum هنگامِ تکرارها فعال بود یا نه. اگر سقف شکسته شود، همین‌ها در پیامِ خطا هم می‌آیند. نقشِ
+دیتابیس باید مالکِ جدول‌ها باشد (همان نقشی که بارگذاری کرده)، چون `VACUUM` روی جدولِ دیگران فقط هشدار می‌دهد و
+کاری نمی‌کند.
+
 ## ساختن نوتبوک‌ها و شاهدها (بعد از زنجیره)
 
 ```bash

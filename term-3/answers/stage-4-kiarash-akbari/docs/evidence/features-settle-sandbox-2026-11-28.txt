@@ -1,0 +1,71 @@
+Feature step: settle the frame's relations before the ceiling is timed (sandbox, 2026-11-28)
+=============================================================================================
+
+Code: features.build after commits dfeecc1 (VACUUM (ANALYZE) of the catalog's list before the timing
+loop) and b01f7a9 (autovacuum samples around the repeats; the breach message carries them).
+Machine: agent sandbox, PostgreSQL 16.4 (fresh initdb, default settings: shared_buffers 128MB,
+autovacuum on, naptime 1min, max_wal_size 1GB, data_checksums off), 2 vCPU aarch64, 7.9 GB RAM.
+Data: full public Olist (9 CSVs), live IBGE fetch. Every database below was created empty for its run.
+All durations are features.build's own: EXPLAIN (ANALYZE, TIMING OFF) SELECT * FROM
+capstone.v_feature_frame, 5 repeats, judged on the best; ceiling 500 ms (unchanged).
+
+1. What this answers (the student's machine, reported by the student, witness not yet committed)
+   ThinkPad, local PG, fresh empty DB capstone_run: run_chain.py -> ingest, load-database --reset (~1 min),
+   load-audit, then features refused: 627.2 ms best of the repeats, exit 65. About a minute later,
+   analyze_ceiling_feature.py --repeats 15 on the same DB: before ANALYZE
+   [724, 635, 693, 627, 625, 625, 618, 618, 581, 478, 432, 433, 451, 436, 460] ms (best 432.5);
+   after ANALYZE best 429.4 / mean 439.1 / worst 455.5, 15/15 under; plan unchanged; estimates 0.01% off.
+   Same plan, two speeds: the state right after the bulk load, not the frame's cost.
+
+2. Final chain on a fresh empty DB (capstone_final), code at b01f7a9
+   chain: 113.774 s of 2700 s, over_budget=false, steps: ingest 1.342 s ok, load-database 52.923 s ok, load-audit 0.165 s ok, features 5.415 s ok, external 3.686 s ok, model 50.189 s ok, capacity-list 0.054 s ok
+   features step result (verbatim):
+   {"frame": "capstone.v_feature_frame", "rows": 99281, "columns": 32, "features": 29, "source_columns_read": 33, "migrations_applied": ["001_capstone_schema.sql", "002_time_guard.sql", "003_feature_views.sql", "004_as_of_functions.sql", "005_external_signal.sql", "006_external_bridge.sql"], "query_ms_mean": 368.257, "query_ms_best": 363.744, "judged_on": "best of the repeats", "query_ms_runs": [376.286, 363.744, 369.831, 364.505, 366.916], "ceiling_ms": 500, "cold_ms": 376.286, "settled_with": "VACUUM (ANALYZE) <relation>", "settled_relations": {"capstone.mv_customer_order_history": 56.27, "capstone.mv_order_centroids": 67.752, "capstone.mv_order_item_rollup": 110.862, "capstone.mv_order_payment_rollup": 57.408, "capstone.mv_zip_centroid": 15.449, "olist.customers": 72.533, "olist.geolocation": 146.875, "olist.order_items": 81.375, "olist.orders": 79.132, "olist.payments": 53.052, "olist.product_category_name_translation": 0.529, "olist.products": 58.263, "olist.sellers": 3.777}, "settle_seconds": 0.803, "autovacuum_workers_seen": [0, 0, 0, 0, 0, 0]}
+   pg_stat_user_tables after the chain: the 13 settled relations show last_vacuum/last_analyze from the
+   settle and autovacuum_count = autoanalyze_count = 0; autovacuum did reach other tables of the load
+   (order_reviews, external_municipio, the stage-2 q1/q4 snapshots) about 15 s later, after the step.
+   Model metrics of this run equal docs/evidence/model-run.json once run_id is removed.
+
+3. Other full chains on fresh empty DBs, same sandbox
+   capstone_verify (dfeecc1)          settle    runs [377.079, 367.694, 372.085, 363.233, 364.738] best 363.233 mean 368.966 settle 0.788 s (13 relations)
+   capstone_after1 (= dfeecc1 code)   settle    runs [439.102, 421.325, 394.441, 380.998, 380.342] best 380.342 mean 403.242 settle 0.843 s (13 relations)
+   capstone_before1 (0b7ba1b)         no settle runs [453.317, 468.774, 451.48, 396.658, 367.676] best 367.676 mean 427.581
+   capstone_before1 is not used as a 'before' number: my own offline test suite ran at least twice while
+   that chain was running and may have overlapped the step; the run is uncontrolled.
+
+4. Alternating fresh-DB trials, chain up to features (--skip external --skip model --skip capacity-list)
+   old = tree 0b7ba1b (no settle), new = working tree equal to dfeecc1. Order alternates per trial.
+   trial 1 old: invalid (exit 65: the extracted old tree lacked stage-2's sql/, fixed before trial 2)
+   trial 1 new: runs [379.873, 368.72, 367.99, 368.179, 365.979] best 365.979 mean 370.148 settle 0.829 s
+   trial 2 new: runs [375.581, 360.594, 367.42, 367.219, 365.842] best 360.594 mean 367.331 settle 0.833 s
+   trial 2 old: runs [391.973, 373.583, 372.762, 370.516, 370.995] best 370.516 mean 375.966
+   trial 3 old: runs [372.344, 370.314, 367.855, 366.153, 366.158] best 366.153 mean 368.565
+   trial 3 new: runs [374.473, 363.455, 373.82, 373.822, 364.271] best 363.455 mean 369.969 settle 0.827 s
+   In the two valid 'old' trials autovacuum did not reach any of the frame's relations before the step
+   ended (pg_stat_user_tables read right after: autovacuum_count 0), so both variants timed a quiet
+   machine and agree within noise.
+
+5. Same comparison on one already-loaded DB (each build re-applies sql/, so 003 refreshes every snapshot)
+   old: best per build [358.0, 363.908, 356.828, 369.182, 368.577, 360.843]
+   new: best per build [362.463, 363.951, 357.196, 420.176, 368.776, 364.129]
+   new trial 3 ran [502.5, 495.6, 498.4, 493.2, 420.2]: one slow build with the settle in place;
+   its cause was not identified (no autovacuum sampling existed in that code yet).
+
+Verdict
+- The sandbox did NOT reproduce the breach. Its post-load window was quiet: in both valid 'old' trials
+  autovacuum had not started on the frame's relations by the time the step ended, and in the alternating
+  trials the best repeat was 360.6-370.5 ms with or without the settle (363.2-380.3 ms in the three full
+  chains with the settle).
+- What the settle demonstrably does here: it costs 0.79-0.84 s for 13 relations, it leaves every relation
+  the frame depends on vacuumed and analysed before the first repeat, and autovacuum then has no pending
+  work on them (0 autovacuum/autoanalyze passes on the 13 after the full chain).
+- Whether autovacuum, unset hint bits / visibility map, or something outside the relations (a checkpoint
+  or OS writeback of the bulk load) slowed the student's run is not established. The settle removes the
+  first two; the third is not covered. The new refusal message prints every run and the autovacuum
+  samples, so the next run on that machine says which case it was.
+
+Tests on this tree (b01f7a9 code + these docs)
+- offline (no DB variables): Ran 585, OK (skipped 18)
+- with the chain-built DB (capstone_final) + smoke variables on a throwaway DB (capstone_suite,
+  CAPSTONE_SMOKE_ALLOW_DESTROY=1) + psql 16.16 on PATH: Ran 595, OK (skipped 3: CAPSTONE_EXTERNAL_LIVE
+  unset; the empty-external-table case does not apply to a loaded DB; psycopg2 not installed)
