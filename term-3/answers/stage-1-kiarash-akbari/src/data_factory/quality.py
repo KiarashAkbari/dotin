@@ -59,8 +59,17 @@ def classify_records(
         yield result
 
 
-def enforce_threshold(report: QualityReport, *, max_ratio: float, min_rows: int) -> None:
-    """Fail the run when too large a share of the data was quarantined."""
+def enforce_threshold(
+    report: QualityReport, *, max_ratio: float, min_rows: int, allow_empty: bool = False
+) -> None:
+    """Fail the run when too large a share of the data was quarantined.
+
+    An empty input fails a full run (an empty window means the scope or the source
+    is wrong) but not an increment: "nothing was created since the last run" is a
+    normal answer for --since-last-run, so allow_empty lets it publish zero rows.
+    """
+    if report.total == 0 and allow_empty:
+        return
     if report.total == 0:
         raise DataError(
             "No records to process; refusing to publish empty outputs",

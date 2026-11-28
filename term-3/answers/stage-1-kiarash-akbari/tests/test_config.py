@@ -52,9 +52,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.source.complaint_types, ("Noise - Residential",))
 
     def test_paths_use_curated_dir(self):
+        # relative paths are anchored to the config file's folder (test_config_paths)
         cfg = self._load(VALID)
-        self.assertEqual(cfg.paths.curated_dir, Path("out"))
-        self.assertEqual(cfg.paths.raw_dir, Path("raw"))
+        self.assertEqual(cfg.paths.curated_dir, cfg.root / "out")
+        self.assertEqual(cfg.paths.raw_dir, cfg.root / "raw")
 
     def test_old_processed_dir_key_rejected(self):
         bad = VALID.replace("curated_dir", "processed_dir")

@@ -15,8 +15,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
-from .quarantine import QuarantineWriter
-from .manifest import utc_now_iso, write_manifest
 
 
 
@@ -26,7 +24,14 @@ from sqlalchemy.engine import URL
 
 
 from .config import Config
-from .errors import DataError
+from .errors import (
+    ConfigError,
+    DatabaseDataError,
+    DatabaseSchemaError,
+    DatabaseUnavailableError,
+    DataError,
+    PipelineError,
+)
 from .outputs import (
     COUNT_PREFIX,
     DATASET_FILENAME,
@@ -37,6 +42,7 @@ from .outputs import (
     sha256_file,
 )
 from .profile import REPORT_FILENAME
+from .publish import verify_outputs
 
 
 
@@ -53,16 +59,17 @@ OLIST_CSV_FILES = {
     "order_reviews": "olist_order_reviews_dataset.csv",
 }
 OLIST_TABLES = tuple(OLIST_CSV_FILES)
-OLIST_DELETE_ORDER = (
-    "order_reviews",
-    "payments",
-    "order_items",
-    "orders",
-    "products",
-    "sellers",
-    "customers",
-    "geolocation",
-    "product_category_name_translation",
+# Built once from the module constants above, never from config or file content.
+# One TRUNCATE over the whole set checks the foreign keys between these tables as
+# a set, so no row-by-row referential check runs. A row-by-row DELETE fires one RI
+# check per parent row, and none of the referencing columns is indexed, so it
+# scanned the child table once per deleted parent row (quadratic on a reload).
+# A table outside this list that references one of them makes TRUNCATE fail
+# loudly instead of silently cascading into another stage's data.
+OLIST_TRUNCATE_SQL = (
+    "TRUNCATE TABLE "
+    + ", ".join(f"{OLIST_SCHEMA}.{table}" for table in OLIST_TABLES)
+    + " RESTART IDENTITY"
 )
 
 OLIST_MATERIALIZED_VIEWS = (
@@ -74,9 +81,14 @@ OLIST_MATERIALIZED_VIEWS = (
 
 
 def clear_olist_tables(connection: sa.Connection) -> None:
-    """Remove existing Olist rows in foreign-key-safe order."""
-    for table in OLIST_DELETE_ORDER:
-        connection.execute(sa.text(f"DELETE FROM {OLIST_SCHEMA}.{table}"))
+    """Empty every Olist table in one set-based statement, inside the caller's transaction.
+
+    TRUNCATE takes an ACCESS EXCLUSIVE lock on each table until the transaction
+    ends, so everything else the load does with these tables (migrations, view
+    refreshes) has to run on this same connection; a second connection would wait
+    on this one forever.
+    """
+    connection.execute(sa.text(OLIST_TRUNCATE_SQL))
 
 
 def refresh_olist_snapshots(connection: sa.Connection) -> None:
@@ -118,10 +130,53 @@ LOAD_LOCK_KEY = "data_factory:load"
 
 
 
+# SQLSTATE class 42 is "syntax error or access rule violation"; 42P01 (undefined
+# table), 3F000 (undefined schema) and 42883 (undefined function) all mean the
+# migrations that create the object were not applied, which is a setup problem.
+MISSING_OBJECT_SQLSTATES = frozenset({"42P01", "3F000", "42883", "42704"})
+
+
+def _first_line(exc: BaseException) -> str:
+    text = str(getattr(exc, "orig", None) or exc).strip()
+    return text.splitlines()[0] if text else type(exc).__name__
+
+
+def translate_database_error(exc: sa.exc.SQLAlchemyError) -> PipelineError:
+    """Map a driver error to the project hierarchy, so it gets an exit code.
+
+    Unreachable server or lost connection -> DatabaseUnavailableError (69, the
+    same class as an unreachable API); a missing table, schema or function ->
+    DatabaseSchemaError (78, migrations not applied); a rejected value or
+    constraint -> DatabaseDataError (65). Anything else stays a PipelineError
+    (1) but still prints one readable line instead of a traceback.
+    """
+    message = _first_line(exc)
+    sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+    context = {"error": message}
+    if sqlstate:
+        context["sqlstate"] = sqlstate
+    if isinstance(exc, sa.exc.NoSuchTableError):
+        return DatabaseSchemaError(
+            "Database table not found; apply the SQL migrations first",
+            context={"table": str(exc)},
+        )
+    if isinstance(exc, (sa.exc.OperationalError, sa.exc.InterfaceError)) and (
+        sqlstate is None or sqlstate.startswith("08") or sqlstate.startswith("57P")
+    ):
+        return DatabaseUnavailableError("Database is unavailable", context=context)
+    if sqlstate in MISSING_OBJECT_SQLSTATES:
+        return DatabaseSchemaError(
+            "Database object not found; apply the SQL migrations first", context=context
+        )
+    if isinstance(exc, (sa.exc.IntegrityError, sa.exc.DataError)):
+        return DatabaseDataError("Database rejected the data", context=context)
+    return PipelineError("Database error", context=context)
+
+
 def build_database_url(cfg: Config) -> URL:
     """Keep the password outside versioned configuration."""
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
     parsed = urlsplit(cfg.database.url)
     return URL.create(
         drivername=parsed.scheme,
@@ -276,7 +331,7 @@ def load_olist(
 ) -> dict[str, dict[str, int]]:
     """Replace Olist tables atomically; dispose an owned engine on every path."""
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
 
     def _load(target_connection: sa.Connection) -> dict[str, dict[str, int]]:
         clear_olist_tables(target_connection)
@@ -338,105 +393,168 @@ def _ensure_migration_history(connection: sa.Connection) -> None:
 
 
 
-def reset_migration_history(engine: sa.Engine) -> None:
-    """Clear migration history after a full schema reset."""
-    with engine.begin() as connection:
+# Which numbered migration builds what. load-database applies the groups in its
+# own order; a reset forgets exactly the ledger rows of the schema it drops.
+BASE_MIGRATIONS = frozenset({"001", "002", "003", "004"})
+SNAPSHOT_MIGRATIONS = frozenset({"005", "006", "007", "008"})
+SINK_MIGRATIONS = frozenset({"009"})
+
+
+def is_base_migration(path: Path) -> bool:
+    """001-003 build the schema, views and functions the load writes into.
+
+    004 is stage 2's index migration (the dashboard-query indexes). It belongs to
+    the base group so the indexes exist before the load, the same way on a fresh
+    and on a repeated run; the load and the index build share one transaction.
+    """
+    return Path(path).name[:3] in BASE_MIGRATIONS
+
+
+def is_snapshot_migration(path: Path) -> bool:
+    return Path(path).name[:3] in SNAPSHOT_MIGRATIONS
+
+
+def is_sink_migration(path: Path) -> bool:
+    """The factory sink schema is its own group, applied right before its data.
+
+    It is deliberately not folded into the base group: the sink is a separate
+    destination, and a run that only rebuilds Olist must not need it.
+    """
+    return Path(path).name[:3] in SINK_MIGRATIONS
+
+
+def is_olist_migration(path: Path) -> bool:
+    """Everything that lives in the olist schema: the base and snapshot groups."""
+    return is_base_migration(path) or is_snapshot_migration(path)
+
+
+def forget_migrations(connection: sa.Connection, include) -> list[str]:
+    """Delete the ledger rows of the migrations `include` selects, and only those.
+
+    The ledger is shared: stage 3 records its own 010/011 in it, and the sink
+    records 009. Dropping the whole table on an Olist reset erased their history
+    too. Names are matched in Python with the same predicates load-database
+    applies, then deleted with one bound parameter.
+    """
+    exists = connection.scalar(
+        sa.text("SELECT to_regclass(:name) IS NOT NULL"), {"name": MIGRATION_HISTORY_TABLE}
+    )
+    if not exists:
+        return []
+    names = connection.execute(
+        sa.text(f"SELECT migration_name FROM {MIGRATION_HISTORY_TABLE} ORDER BY migration_name")
+    ).scalars()
+    forgotten = [name for name in names if include(Path(name))]
+    if forgotten:
         connection.execute(
-            sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}")
+            sa.text(f"DELETE FROM {MIGRATION_HISTORY_TABLE} WHERE migration_name = ANY(:names)"),
+            {"names": forgotten},
         )
+    return forgotten
 
 
+def reset_olist_schema(connection: sa.Connection) -> list[str]:
+    """Drop the complete Olist schema so a rebuild starts from an empty database.
 
-def reset_olist_schema(engine: sa.Engine) -> None:
-    """Drop the complete Olist schema so a rebuild starts from an empty database."""
-    with engine.begin() as connection:
-        connection.execute(sa.text("DROP SCHEMA IF EXISTS olist CASCADE"))
-        connection.execute(
-            sa.text(f"DROP TABLE IF EXISTS {MIGRATION_HISTORY_TABLE}")
-        )
+    Only the ledger rows of the olist migrations (base and snapshot groups) are
+    forgotten, so 001-008 run again and every other stage keeps its history. It
+    runs in the caller's transaction, so a load that fails after the reset rolls
+    the drop back too and the previous data survives. Returns the forgotten names.
+    """
+    connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {OLIST_SCHEMA} CASCADE"))
+    return forget_migrations(connection, is_olist_migration)
 
 
 
 def apply_sql_migrations(
-    engine: sa.Engine,
+    bind: sa.Engine | sa.Connection,
     sql_dir: Path,
     include=None,
 ) -> list[str]:
     """Apply selected SQL migrations once, safely under an advisory lock.
 
-
-
     Each file is identified by name and content checksum. A previously applied
     file with the same checksum is skipped; a changed file fails explicitly.
     The advisory lock serializes concurrent CLI runs so two processes cannot
     create the same schema or table at the same time.
+
+    `bind` is an Engine or a Connection. An Engine gets a transaction of its own
+    that commits here. A Connection is used as it is: the files run inside the
+    caller's transaction, the transaction-level advisory lock lasts until the
+    caller commits or rolls back, and nothing is committed here. That is what
+    `load-database` needs: its load holds locks on the olist tables, and a
+    migration that reads them from a second connection would wait on the first
+    one forever.
     """
     files = sql_migration_files(sql_dir)
     if include is not None:
         files = [path for path in files if include(path)]
 
+    if isinstance(bind, sa.Connection):
+        return _apply_migration_files(bind, files)
+    with bind.begin() as connection:
+        return _apply_migration_files(connection, files)
 
+
+def _apply_migration_files(connection: sa.Connection, files: list[Path]) -> list[str]:
     applied: list[str] = []
+    connection.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": MIGRATION_LOCK_KEY},
+    )
+    _ensure_migration_history(connection)
 
+    raw_connection = connection.connection.driver_connection
+    for path in files:
+        sql = path.read_text(encoding="utf-8")
+        checksum = _migration_checksum(sql)
 
-    with engine.begin() as connection:
-        connection.execute(
-            sa.text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-            {"lock_key": MIGRATION_LOCK_KEY},
-        )
-        _ensure_migration_history(connection)
+        existing_checksum = connection.execute(
+            sa.text(
+                f"""
+                SELECT checksum
+                FROM {MIGRATION_HISTORY_TABLE}
+                WHERE migration_name = :name
+                """
+            ),
+            {"name": path.name},
+        ).scalar()
 
-        raw_connection = connection.connection.driver_connection
-        for path in files:
-            sql = path.read_text(encoding="utf-8")
-            checksum = _migration_checksum(sql)
-
-            existing_checksum = connection.execute(
-                sa.text(
-                    f"""
-                    SELECT checksum
-                    FROM {MIGRATION_HISTORY_TABLE}
-                    WHERE migration_name = :name
-                    """
-                ),
-                {"name": path.name},
-            ).scalar()
-
-            if existing_checksum is not None:
-                if existing_checksum != checksum:
-                    raise DataError(
-                        "SQL migration checksum mismatch",
-                        context={
-                            "file": str(path),
-                            "expected": existing_checksum,
-                            "actual": checksum,
-                        },
-                    )
-                continue
-
-            try:
-                with raw_connection.cursor() as cursor:
-                    cursor.execute(sql)
-            except Exception as exc:
+        if existing_checksum is not None:
+            if existing_checksum != checksum:
                 raise DataError(
-                    "SQL migration failed",
+                    "SQL migration checksum mismatch",
                     context={
                         "file": str(path),
-                        "error": str(exc),
+                        "expected": existing_checksum,
+                        "actual": checksum,
                     },
-                ) from exc
+                )
+            continue
 
-            connection.execute(
-                sa.text(
-                    f"""
-                    INSERT INTO {MIGRATION_HISTORY_TABLE}
-                        (migration_name, checksum)
-                    VALUES (:name, :checksum)
-                    """
-                ),
-                {"name": path.name, "checksum": checksum},
-            )
-            applied.append(path.name)
+        try:
+            with raw_connection.cursor() as cursor:
+                cursor.execute(sql)
+        except Exception as exc:
+            raise DataError(
+                "SQL migration failed",
+                context={
+                    "file": str(path),
+                    "error": str(exc),
+                },
+            ) from exc
+
+        connection.execute(
+            sa.text(
+                f"""
+                INSERT INTO {MIGRATION_HISTORY_TABLE}
+                    (migration_name, checksum)
+                VALUES (:name, :checksum)
+                """
+            ),
+            {"name": path.name, "checksum": checksum},
+        )
+        applied.append(path.name)
 
     return applied
 
@@ -885,8 +1003,18 @@ def load_stage1_sink(
     keeps the right to roll the whole thing back.
     """
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
     paths = factory_sink_paths(cfg.database.stage1_curated_dir)
+    # A set left half-published by a killed run must not reach the database.
+    verify_outputs(
+        cfg.paths.manifest_path,
+        cfg.root,
+        {
+            "dataset": paths[SINK_CASE_TABLE],
+            "wide_table": paths[SINK_WIDE_TABLE],
+            "quality_report": paths[SINK_QUALITY_TABLE],
+        },
+    )
     if connection is not None:
         truncate_factory(connection)
         return _load_sink(connection, cfg, paths)
@@ -900,98 +1028,11 @@ def load_stage1_sink(
 
 
 
-def reset_factory_schema(engine: sa.Engine) -> None:
-    """Drop the sink schema; the counterpart of reset_olist_schema."""
-    with engine.begin() as connection:
-        connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {FACTORY_SCHEMA} CASCADE"))
+def reset_factory_schema(connection: sa.Connection) -> list[str]:
+    """Drop the sink schema and forget 009, in the caller's transaction.
 
-CREDIT_SCHEMA = "credit"
-CREDIT_APPLICATION_TABLE = "application"
-CREDIT_PROVENANCE_TABLE = "load_run"
-CREDIT_QUARANTINE_FILENAME = "credit-quarantine.jsonl"
-CREDIT_MANIFEST_FILENAME = "run_manifest_credit.json"
-
-def file_sha256(path: Path) -> str:
-    """Full SHA-256 of a file, for the credit provenance record."""
-    return sha256_file(path)
-
-
-def file_fingerprint(path: Path) -> str:
-    """Short stable fingerprint (first 12 hex chars) for the credit load_run."""
-    return sha256_file(path)[:12]
-
-def load_credit(
-    cfg: Config, connection: sa.Connection | None = None
-) -> dict[str, object]:
-    """Load the credit CSV through the factory, into the credit schema, atomically."""
-    if cfg.database is None:
-        raise DataError("Database destination is not configured")
-    if cfg.database.credit_raw_path is None:
-        raise DataError("Credit raw file path is not configured")
-
-    from credit.source import CsvFileSource
-    from credit.validate import parse_row, parse_stream
-    from credit.columns import DB_COLUMNS
-
-    raw_path = cfg.database.credit_raw_path
-    source = CsvFileSource(raw_path)
-    source.validate_header()
-
-    target = sa.Table(
-        CREDIT_APPLICATION_TABLE, sa.MetaData(), schema=CREDIT_SCHEMA,
-        autoload_with=connection,
-    )
-    provenance = sa.Table(
-        CREDIT_PROVENANCE_TABLE, sa.MetaData(), schema=CREDIT_SCHEMA,
-        autoload_with=connection,
-    )
-
-    counts = {"raw": 0, "loaded": 0, "quarantined": 0}
-    reason_counts: dict[str, int] = {}
-    batch: list[dict] = []
-
-    def _flush() -> None:
-        if batch:
-            connection.execute(sa.insert(target), batch)
-            counts["loaded"] += len(batch)
-            batch.clear()
-
-    with QuarantineWriter(
-        cfg.paths.quarantine_dir, CREDIT_QUARANTINE_FILENAME
-    ) as writer:
-        for parsed, raw_row in parse_stream(source.iter_rows()):
-            counts["raw"] += 1
-            if parsed.is_valid:
-                batch.append(parsed.record)
-                if len(batch) >= cfg.database.batch_size:
-                    _flush()
-            else:
-                counts["quarantined"] += 1
-                for reason in parsed.reasons:
-                    reason_counts[reason.value] = reason_counts.get(reason.value, 0) + 1
-                writer.write(CreditClassifiedRecord(raw_row, parsed.reasons))
-        _flush()
-
-        sha = file_sha256(raw_path)
-        connection.execute(sa.insert(provenance), [{
-            "source_kind": "file",
-            "file_name": raw_path.name,
-            "sha256": sha,
-            "rows_loaded": counts["loaded"],
-            "rejected_count": counts["quarantined"],
-            "fingerprint": file_fingerprint(raw_path),
-        }])
-
-    manifest = {
-        "source_kind": "file",
-        "file_name": raw_path.name,
-        "sha256": sha,
-        "rows_raw": counts["raw"],
-        "rows_loaded": counts["loaded"],
-        "rows_quarantined": counts["quarantined"],
-        "quarantine_reasons": reason_counts,
-        "finished_at": utc_now_iso(),
-    }
-    manifest_path = cfg.paths.manifest_path.parent / CREDIT_MANIFEST_FILENAME
-    write_manifest(manifest_path, manifest)
-    return {**counts, "manifest_path": str(manifest_path)}
+    The counterpart of reset_olist_schema: without forgetting 009 the next run
+    would skip the migration and load into a schema that no longer exists.
+    """
+    connection.execute(sa.text(f"DROP SCHEMA IF EXISTS {FACTORY_SCHEMA} CASCADE"))
+    return forget_migrations(connection, is_sink_migration)

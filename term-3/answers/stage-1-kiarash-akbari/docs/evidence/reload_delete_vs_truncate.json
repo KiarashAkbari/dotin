@@ -1,0 +1,148 @@
+{
+  "measured_at_utc": "2026-11-25T08:53:03+00:00",
+  "code_version": "git:63d25f0f5657",
+  "environment": {
+    "postgresql": "16.4",
+    "python": "3.12.16",
+    "cpu_count": 2,
+    "note": "shared sandbox; other jobs ran on the same 2 vCPUs, so treat the seconds as orders of magnitude, not as a benchmark of this machine"
+  },
+  "row_counts": {
+    "product_category_name_translation": 71,
+    "customers": 99441,
+    "sellers": 3095,
+    "products": 32951,
+    "geolocation": 738332,
+    "orders": 99441,
+    "order_items": 112650,
+    "payments": 103886,
+    "order_reviews": 99224
+  },
+  "truncate": {
+    "statement": "TRUNCATE TABLE <9 olist tables> RESTART IDENTITY",
+    "runs_s": [
+      0.0095,
+      0.0033,
+      0.003
+    ],
+    "median_s": 0.0033
+  },
+  "delete_order_rows": [
+    {
+      "orders_deleted": 250,
+      "seconds": 0.527,
+      "ms_per_order": 2.108,
+      "status": "done"
+    },
+    {
+      "orders_deleted": 500,
+      "seconds": 0.906,
+      "ms_per_order": 1.812,
+      "status": "done"
+    },
+    {
+      "orders_deleted": 1000,
+      "seconds": 2.027,
+      "ms_per_order": 2.027,
+      "status": "done"
+    },
+    {
+      "orders_deleted": 2000,
+      "seconds": 3.882,
+      "ms_per_order": 1.941,
+      "status": "done"
+    }
+  ],
+  "delete_loop": {
+    "statement": "DELETE FROM olist.<table>, one per table, old order",
+    "statement_timeout_s": 600,
+    "status": "finished",
+    "per_table": [
+      {
+        "table": "order_reviews",
+        "seconds": 0.039,
+        "status": "done"
+      },
+      {
+        "table": "payments",
+        "seconds": 0.046,
+        "status": "done"
+      },
+      {
+        "table": "order_items",
+        "seconds": 0.046,
+        "status": "done"
+      },
+      {
+        "table": "orders",
+        "seconds": 205.881,
+        "status": "done"
+      },
+      {
+        "table": "products",
+        "seconds": 72.964,
+        "status": "done"
+      },
+      {
+        "table": "sellers",
+        "seconds": 6.304,
+        "status": "done"
+      },
+      {
+        "table": "customers",
+        "seconds": 268.091,
+        "status": "done"
+      },
+      {
+        "table": "geolocation",
+        "seconds": 0.356,
+        "status": "done"
+      },
+      {
+        "table": "product_category_name_translation",
+        "seconds": 0.001,
+        "status": "done"
+      }
+    ],
+    "total_s": 553.73
+  },
+  "full_reload": {
+    "command": "load-database --skip-factory-sink (no --reset: TRUNCATE, reload, refresh, commit)",
+    "seconds": 51.34,
+    "output": [
+      "sql_migrations=0 files=",
+      "table=product_category_name_translation loaded=71",
+      "table=customers loaded=99441",
+      "table=sellers loaded=3095",
+      "table=products loaded=32951",
+      "table=geolocation loaded=738332",
+      "table=orders loaded=99441",
+      "table=order_items loaded=112650",
+      "table=payments loaded=103886",
+      "table=order_reviews loaded=99224",
+      "factory_sink=skipped",
+      "sql_snapshots=0 files="
+    ]
+  },
+  "reset_load": {
+    "command": "python -m data_factory load-database --config <local toml> --reset --skip-factory-sink",
+    "seconds": 82.5,
+    "measured_by": "wall clock around the CLI process (shell date), one run, just before the measurements above",
+    "output": [
+      "schema=reset",
+      "ledger_forgotten=7 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql,005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql",
+      "sql_migrations=3 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql",
+      "table=product_category_name_translation loaded=71",
+      "table=customers loaded=99441",
+      "table=sellers loaded=3095",
+      "table=products loaded=32951",
+      "table=geolocation loaded=738332",
+      "table=orders loaded=99441",
+      "table=order_items loaded=112650",
+      "table=payments loaded=103886",
+      "table=order_reviews loaded=99224",
+      "factory_sink=skipped",
+      "sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql"
+    ]
+  }
+}

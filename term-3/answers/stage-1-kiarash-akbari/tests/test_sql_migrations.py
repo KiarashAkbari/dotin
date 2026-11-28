@@ -15,6 +15,7 @@ from unittest import mock
 
 
 
+import sqlalchemy as sa
 from config_helpers import make_config
 from data_factory.config import DatabaseConfig, parse_config
 from data_factory.database import (
@@ -118,6 +119,18 @@ class FakeEngine:
 
     def dispose(self):
         self.log.append("dispose")
+
+
+
+class FakeConnection(FakeEngine, sa.Connection):
+    """A FakeEngine that is also a Connection as far as isinstance can tell."""
+
+    def __init__(self, log, fail_on=None):
+        FakeEngine.__init__(self, log, fail_on)
+        self.commits = 0
+
+    def commit(self):
+        self.commits += 1
 
 
 
@@ -253,6 +266,18 @@ class ApplySqlMigrationsTests(unittest.TestCase):
 
 
 
+    def test_a_connection_runs_the_files_in_the_callers_transaction(self):
+        connection = FakeConnection([])
+        applied = apply_sql_migrations(
+            connection, self.sql_dir, include=lambda path: path.name[:3] in {"001", "005"}
+        )
+        self.assertEqual(applied, ["001_base.sql", "005_snap.sql"])
+        self.assertEqual(connection.begin_calls, 0, "no transaction of its own")
+        self.assertEqual(connection.commits, 0, "the caller decides when it commits")
+        self.assertIn("pg_advisory_xact_lock", connection.statements[0][0])
+
+
+
     def test_failure_names_the_script_that_broke(self):
         engine = FakeEngine(log := [], fail_on="factory")
         with self.assertRaises(DataError) as ctx:
@@ -265,6 +290,47 @@ class ApplySqlMigrationsTests(unittest.TestCase):
             "CREATE SCHEMA factory;",
         ], "the earlier scripts ran inside the transaction that is rolled back")
 
+
+
+
+class MigrationGroupTests(unittest.TestCase):
+    """Every numbered stage-2/3 migration belongs to at most one stage-1 group."""
+
+    def groups(self, name):
+        from data_factory.cli import (
+            _is_base_migration,
+            _is_sink_migration,
+            _is_snapshot_migration,
+        )
+
+        path = Path("sql") / name
+        return [
+            group
+            for group, member in (
+                ("base", _is_base_migration),
+                ("snapshot", _is_snapshot_migration),
+                ("sink", _is_sink_migration),
+            )
+            if member(path)
+        ]
+
+    def test_stage2_index_migration_004_is_applied_with_the_base_group(self):
+        self.assertEqual(self.groups("004_performance_indexes.sql"), ["base"])
+
+    def test_each_number_has_one_group(self):
+        expected = {
+            "001_create_olist_schema.sql": ["base"],
+            "002_analytical_views.sql": ["base"],
+            "003_functions_and_snapshots.sql": ["base"],
+            "004_performance_indexes.sql": ["base"],
+            "005_q4_seller_snapshot.sql": ["snapshot"],
+            "008_q3_delay_satisfaction_snapshot.sql": ["snapshot"],
+            "009_factory_sink_schema.sql": ["sink"],
+            # stage 3 applies its own 010/011 through its loader, never here
+            "010_credit_schema.sql": [],
+            "011_credit_staging.sql": [],
+        }
+        self.assertEqual({name: self.groups(name) for name in expected}, expected)
 
 
 
@@ -311,9 +377,9 @@ class CliMigrationOrderTests(unittest.TestCase):
             mock.patch("data_factory.cli.load_stage1_sink",
                                 side_effect=lambda cfg, connection=None: self.calls.append("load_stage1_sink") or {}),
             mock.patch("data_factory.cli.reset_olist_schema",
-                                side_effect=lambda engine: self.calls.append("reset_olist")),
+                                side_effect=lambda connection: self.calls.append("reset_olist")),
             mock.patch("data_factory.cli.reset_factory_schema",
-                                side_effect=lambda engine: self.calls.append("reset_factory")),
+                                side_effect=lambda connection: self.calls.append("reset_factory")),
         ]
         self.stack = contextlib.ExitStack()
         for patcher in patches:
@@ -329,7 +395,7 @@ class CliMigrationOrderTests(unittest.TestCase):
 
 
 
-    def _apply(self, engine, sql_dir, include=None):
+    def _apply(self, bind, sql_dir, include=None):
         names = sorted(path for path in (
             "001_base.sql", "005_snap.sql", "009_sink.sql"
         ) if include is None or include(Path("sql") / path))
@@ -350,14 +416,12 @@ class CliMigrationOrderTests(unittest.TestCase):
         _load_database(self.cfg)
         self.assertEqual(self.calls, [
             "create_engine",
-            "create_engine",
             "apply:001",
             "load_olist",
-            "create_engine",
             "apply:009",
             "apply:005",
             "load_stage1_sink",
-        ])
+        ], "one engine: every step runs on the connection that holds the load")
 
 
 
@@ -370,8 +434,8 @@ class CliMigrationOrderTests(unittest.TestCase):
 
         _load_database(self.cfg, reset=True)
         self.assertEqual(
-            self.calls[:4],
-            ["create_engine", "create_engine", "reset_olist", "reset_factory"],
+            self.calls[:3],
+            ["create_engine", "reset_olist", "reset_factory"],
         )
 
 
@@ -386,7 +450,7 @@ class CliMigrationOrderTests(unittest.TestCase):
         _load_database(self.cfg, apply_migrations=False)
         self.assertEqual(
             self.calls,
-            ["create_engine", "create_engine", "load_olist"],
+            ["create_engine", "load_olist"],
             "no SQL at all: neither migration group nor the sink load",
         )
 
@@ -402,10 +466,8 @@ class CliMigrationOrderTests(unittest.TestCase):
         _load_database(self.cfg, with_sink=False)
         self.assertEqual(self.calls, [
             "create_engine",
-            "create_engine",
             "apply:001",
             "load_olist",
-            "create_engine",
             "apply:005",
         ], "009 is not applied and the curated files are not loaded")
 
@@ -425,6 +487,7 @@ class CliMigrationOrderTests(unittest.TestCase):
         with self.assertRaises(DataError) as ctx:
             _load_database(self.cfg)
         self.assertEqual(ctx.exception.context["expected"], "009_factory_sink_schema.sql")
+        self.assertEqual(self.calls, [], "refused before connecting or loading anything")
 
 
 

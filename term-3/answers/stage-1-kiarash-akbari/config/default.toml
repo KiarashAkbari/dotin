@@ -27,6 +27,10 @@ backoff_factor = 2.0
 retry_statuses = [429, 500, 502, 503, 504]
 
 [paths]
+# Every relative path in this file (here, [reference] and [database]) is relative
+# to `root`, and `root` is relative to this file's folder. ".." is the stage-1
+# folder, so the CLI finds the same files whatever the current directory is.
+root = ".."
 raw_dir = "data/raw"
 curated_dir = "data/curated"
 quarantine_dir = "data/quarantine"
@@ -49,5 +53,3 @@ olist_csv_dir = "../stage-2-kiarash-akbari/data/raw/olist"
 stage1_curated_dir = "data/curated"
 batch_size = 5000
 sql_migrations_dir = "../stage-2-kiarash-akbari/sql"
-credit_sql_migrations_dir = "../stage-3-kiarash-akbari/sql"
-credit_raw_path = "../stage-3-kiarash-akbari/data/raw/cs-training.csv"

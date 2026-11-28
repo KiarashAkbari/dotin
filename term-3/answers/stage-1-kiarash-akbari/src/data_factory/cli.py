@@ -12,13 +12,16 @@ from .database import (
     MIGRATION_LOCK_KEY,
     apply_sql_migrations,
     build_database_url,
-    load_credit,
+    is_base_migration,
+    is_sink_migration,
+    is_snapshot_migration,
     load_olist,
     load_stage1_sink,
     refresh_olist_snapshots,
     reset_factory_schema,
     reset_olist_schema,
     sql_migration_files,
+    translate_database_error,
 )
 from .errors import ConfigError, DataError, PipelineError
 from .exit_codes import ExitCode
@@ -30,11 +33,17 @@ from .pipeline import process
 from .population import build_zip_index, fetch_reference, read_reference, write_reference
 from .quality import QualityReport, classify_records, enforce_threshold
 from .quarantine import VALIDATE_FILENAME, QuarantineWriter
-from .rolling import after_watermark, load_mark, load_watermark, rolling_config
+from .rolling import (
+    after_watermark,
+    load_mark,
+    load_watermark,
+    rolling_config,
+    rolling_manifest_path,
+)
 from .store import RawPageStore
 
 DEFAULT_CONFIG = "config/default.toml"
-COMMANDS = ("run", "fetch", "fetch-reference", "validate", "clean", "load-database", "load-credit")
+COMMANDS = ("run", "fetch", "fetch-reference", "validate", "clean", "load-database")
 TOP_UNMATCHED_ZIPS = 5
 
 
@@ -84,12 +93,20 @@ def _require_raw(store: RawPageStore) -> None:
         )
 
 
+def _today(cfg: Config):
+    """Today's date where the source records its timestamps."""
+    return datetime.now(cfg.source.timezone).date()
+
+
 def _fetch(cfg: Config, client: HttpClient) -> None:
     source = SocrataSource.from_env(client, cfg.source)
     store = _raw_store(cfg)
     before = client.request_count
+    # A window that has not ended yet is still being written upstream: a cached
+    # short last page is not proof that nothing more exists.
+    window_open = cfg.source.end_date >= _today(cfg)
     try:
-        result = fetch_all(source, store)
+        result = fetch_all(source, store, refresh_tail=window_open)
     finally:
         record_requests(store.directory, client.request_count - before)
     print(
@@ -133,21 +150,47 @@ def _validate(cfg: Config) -> None:
     )
 
 
-def _build(cfg: Config, requests: int, started_at: str, mark=None) -> None:
+def _build(
+    cfg: Config,
+    requests: int,
+    started_at: str,
+    mark=None,
+    rolling: bool = False,
+    latest_manifest_path: Path | None = None,
+) -> None:
     ref = _reference_config(cfg)
     zip_index = build_zip_index(read_reference(ref.path))
     store = _raw_store(cfg)
     _require_raw(store)
-    result = process(after_watermark(store.iter_rows(), mark), cfg, zip_index)
-    manifest = build_manifest(
-        cfg=cfg,
-        result=result,
-        requests=requests,
-        started_at=started_at,
-        finished_at=utc_now_iso(),
-        case_requests_total=read_requests_total(store.directory),
+    # Staged, not yet published: the manifest is computed from the staged files,
+    # the set is renamed into place, and the manifest is written last as the
+    # commit point (publish.py).
+    result = process(
+        after_watermark(store.iter_rows(), mark),
+        cfg,
+        zip_index,
+        allow_empty=rolling,
+        publish=False,
     )
+    try:
+        manifest = build_manifest(
+            cfg=cfg,
+            result=result,
+            requests=requests,
+            started_at=started_at,
+            finished_at=utc_now_iso(),
+            case_requests_total=read_requests_total(store.directory),
+            previous_mark=mark,
+        )
+    except BaseException:
+        result.staging.discard()
+        raise
+    result = result.publish()
     write_manifest(cfg.paths.manifest_path, manifest)
+    if latest_manifest_path is not None:
+        # The increment's own manifest stays in its folder; this copy only tells
+        # the next --since-last-run where the latest increment ended.
+        write_manifest(latest_manifest_path, manifest)
     report, stats = result.report, result.stats
     print(
         f"window={cfg.source.start_date}..{cfg.source.end_date} "
@@ -160,49 +203,26 @@ def _build(cfg: Config, requests: int, started_at: str, mark=None) -> None:
     )
 
 
-def _run(cfg: Config, mark=None) -> None:
+def _run(
+    cfg: Config, mark=None, rolling: bool = False, latest_manifest_path: Path | None = None
+) -> None:
     started_at = utc_now_iso()
     client = HttpClient(cfg.http)
     _fetch(cfg, client)
     ref = _reference_config(cfg)
     if not ref.path.is_file():
         _fetch_reference(cfg, client)
-    _build(cfg, client.request_count, started_at, mark)
+    _build(cfg, client.request_count, started_at, mark, rolling, latest_manifest_path)
 
 
-def _is_base_migration(path: Path) -> bool:
-    return path.name[:3] in {"001", "002", "003"}
+# The group predicates live with the ledger in database.py; these names stay
+# because stage 2 and stage 3 tests import them from here.
+_is_base_migration = is_base_migration
+_is_snapshot_migration = is_snapshot_migration
+_is_sink_migration = is_sink_migration
 
 
-def _is_snapshot_migration(path: Path) -> bool:
-    return path.name[:3] in {"005", "006", "007", "008"}
-
-
-def _is_sink_migration(path: Path) -> bool:
-    """The factory sink schema is its own group, applied right before its data.
-
-    It is deliberately not folded into the base group: the sink is a separate
-    destination, and a run that only rebuilds Olist must not need it.
-    """
-    return path.name[:3] in {"009"}
-
-
-def _refresh_after_commit(connection: sa.Connection) -> None:
-    """Repopulate the snapshot views once the load they read from is durable.
-
-    The refresh before the commits cannot do this on a fresh database: the
-    views do not exist yet there, because 005-008 create them after it, and
-    this function only knows views already listed in pg_matviews. A view
-    created from a reset, still-uncommitted olist schema is committed empty,
-    so each exit path refreshes again after its last commit.
-
-    The refresh needs a commit of its own: executing it opens a new
-    transaction on this connection, and closing a connection whose
-    transaction is still open rolls the refresh back. That is how the first
-    version of this fix undid itself on a real database.
-    """
-    refresh_olist_snapshots(connection)
-    connection.commit()
+SINK_MIGRATION_FILE = "009_factory_sink_schema.sql"
 
 
 def _load_database(
@@ -211,161 +231,124 @@ def _load_database(
     reset: bool = False,
     with_sink: bool = True,
 ) -> None:
+    """Rebuild the database in one transaction on one connection.
+
+    Reset, migrations, the Olist load, the view refresh and the factory sink all
+    run on the connection that holds the load lock, and commit once at the end:
+
+    * a failure anywhere rolls everything back, the reset included, so the
+      previous data survives a failed rebuild;
+    * the load holds ACCESS EXCLUSIVE locks on the olist tables until it
+      commits, so a migration that reads them (005-008 build views from them)
+      has to run on this connection or it would wait on it forever;
+    * a view created after the load in the same transaction already reads the
+      loaded rows, and a view that already existed is refreshed right after the
+      load, so no reader ever sees new tables beside stale or empty views.
+    """
     if cfg.database is None:
-        raise DataError("Database destination is not configured")
+        raise ConfigError("Missing config section: [database]")
+    if reset and not apply_migrations:
+        raise ConfigError(
+            "--reset drops the schema and --skip-sql-migrations would not recreate it; "
+            "use one of them"
+        )
+    sql_dir = cfg.database.sql_migrations_dir
+    if apply_migrations and with_sink and not (sql_dir / SINK_MIGRATION_FILE).is_file():
+        raise DataError(
+            "Factory sink migration is missing",
+            context={"dir": str(sql_dir), "expected": SINK_MIGRATION_FILE},
+        )
 
-    lock_engine = sa.create_engine(build_database_url(cfg))
-    lock_connection = lock_engine.connect()
-    lock_connection.execute(
-        sa.text("SELECT pg_advisory_lock(hashtext(:lock_key))"),
-        {"lock_key": LOAD_LOCK_KEY},
-    )
-
+    engine = sa.create_engine(build_database_url(cfg))
+    connection = engine.connect()
     try:
+        # A session lock: it serializes whole runs, and it is released below
+        # (or with the session) whatever happens to the transaction.
+        connection.execute(
+            sa.text("SELECT pg_advisory_lock(hashtext(:lock_key))"),
+            {"lock_key": LOAD_LOCK_KEY},
+        )
         try:
-            engine = sa.create_engine(build_database_url(cfg))
-            try:
-                if reset:
-                    reset_olist_schema(engine)
-                    print("schema=reset")
-                    if with_sink:
-                        reset_factory_schema(engine)
-                        print("factory_schema=reset")
+            if reset:
+                forgotten = list(reset_olist_schema(connection) or [])
+                print("schema=reset")
+                if with_sink:
+                    forgotten += reset_factory_schema(connection) or []
+                    print("factory_schema=reset")
+                print(f"ledger_forgotten={len(forgotten)} files={','.join(forgotten)}")
 
-                if apply_migrations:
-                    base_files = apply_sql_migrations(
-                        engine,
-                        cfg.database.sql_migrations_dir,
-                        include=_is_base_migration,
-                    )
-                    print(
-                        f"sql_migrations={len(base_files)} "
-                        f"files={','.join(base_files)}"
-                    )
-            finally:
-                engine.dispose()
+            if apply_migrations:
+                base_files = apply_sql_migrations(
+                    connection, sql_dir, include=_is_base_migration
+                )
+                print(f"sql_migrations={len(base_files)} files={','.join(base_files)}")
 
-            results = load_olist(cfg, connection=lock_connection)
+            results = load_olist(cfg, connection=connection)
             for table, result in results.items():
                 print(f"table={table} loaded={result['loaded']}")
 
-            # A no-op on a database where the views do not exist yet; it stays
-            # here so a run that only replaces data refreshes what it replaced.
-            refresh_olist_snapshots(lock_connection)
+            # Views that already exist are rebuilt from the rows just loaded; a
+            # no-op on a fresh database, where 005-008 create them below.
+            refresh_olist_snapshots(connection)
 
             if not apply_migrations:
                 print("sql_migrations=skipped")
                 if with_sink:
-                    print(
-                        "factory_sink=skipped "
-                        "(the sink needs 009 to be applied)"
-                    )
-                lock_connection.commit()
-                _refresh_after_commit(lock_connection)
+                    print("factory_sink=skipped (the sink needs 009 to be applied)")
+                connection.commit()
                 return
 
-            engine = sa.create_engine(build_database_url(cfg))
-            try:
-                sink_files = (
-                    apply_sql_migrations(
-                        engine,
-                        cfg.database.sql_migrations_dir,
-                        include=_is_sink_migration,
-                    )
-                    if with_sink
-                    else []
-                )
-                snapshot_files = apply_sql_migrations(
-                    engine,
-                    cfg.database.sql_migrations_dir,
-                    include=_is_snapshot_migration,
-                )
-            finally:
-                engine.dispose()
-
+            sink_files = (
+                apply_sql_migrations(connection, sql_dir, include=_is_sink_migration)
+                if with_sink
+                else []
+            )
+            snapshot_files = apply_sql_migrations(
+                connection, sql_dir, include=_is_snapshot_migration
+            )
             if with_sink:
-                print(
-                    f"factory_migrations={len(sink_files)} "
-                    f"files={','.join(sink_files)}"
-                )
+                print(f"factory_migrations={len(sink_files)} files={','.join(sink_files)}")
             else:
                 print("factory_sink=skipped")
-            print(
-                f"sql_snapshots={len(snapshot_files)} "
-                f"files={','.join(snapshot_files)}"
-            )
+            print(f"sql_snapshots={len(snapshot_files)} files={','.join(snapshot_files)}")
 
-            if not with_sink:
-                lock_connection.commit()
-                _refresh_after_commit(lock_connection)
-                return
+            if with_sink:
+                sink = load_stage1_sink(cfg, connection=connection)
+                for table, result in sink.items():
+                    print(f"factory_table={table} loaded={result['loaded']}")
 
-            sink_migration_exists = (
-                cfg.database.sql_migrations_dir
-                / "009_factory_sink_schema.sql"
-            ).is_file()
-            if not sink_migration_exists:
-                raise DataError(
-                    "Factory sink migration is missing",
-                    context={
-                        "dir": str(cfg.database.sql_migrations_dir),
-                        "expected": "009_factory_sink_schema.sql",
-                    },
-                )
-
-            sink = load_stage1_sink(cfg, connection=lock_connection)
-            for table, result in sink.items():
-                print(f"factory_table={table} loaded={result['loaded']}")
-
-            lock_connection.commit()
-            _refresh_after_commit(lock_connection)
+            connection.commit()
         except Exception:
-            lock_connection.rollback()
+            connection.rollback()
             raise
     finally:
-        lock_connection.execute(
-            sa.text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
-            {"lock_key": LOAD_LOCK_KEY},
-        )
-        lock_connection.close()
-        lock_engine.dispose()
-
-def _load_credit(cfg: Config) -> None:
-    if cfg.database is None:
-        raise DataError("Database destination is not configured")
-    if cfg.database.credit_sql_migrations_dir is None:
-        raise DataError("Credit SQL migrations directory is not configured")
-    if cfg.database.credit_raw_path is None:
-        raise DataError("Credit raw file path is not configured")
-
-    engine = sa.create_engine(build_database_url(cfg))
-    try:
-        applied = apply_sql_migrations(
-            engine, cfg.database.credit_sql_migrations_dir
-        )
-        print(f"credit_migrations={len(applied)} files={','.join(applied)}")
-        with engine.begin() as connection:
-            result = load_credit(cfg, connection=connection)
-        print(
-            f"credit_loaded={result['loaded']} "
-            f"credit_quarantined={result['quarantined']} "
-            f"manifest={result['manifest_path']}"
-        )
-    finally:
+        try:
+            connection.execute(
+                sa.text("SELECT pg_advisory_unlock(hashtext(:lock_key))"),
+                {"lock_key": LOAD_LOCK_KEY},
+            )
+        except sa.exc.SQLAlchemyError:
+            # A dead connection cannot unlock, and does not need to: a session
+            # lock ends with its session. Re-raising here would hide the error
+            # that actually stopped the run.
+            pass
+        connection.close()
         engine.dispose()
-        
+
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(args.config)
         mark = None
+        latest = None
         if args.since_last_run:
-            today = datetime.now(cfg.source.timezone).date()
+            today = _today(cfg)
             mark = load_mark(cfg.paths.manifest_path)
+            latest = rolling_manifest_path(cfg.paths.manifest_path)
             cfg = rolling_config(cfg, load_watermark(cfg.paths.manifest_path), today)
         if args.command == "run":
-            _run(cfg, mark)
+            _run(cfg, mark, args.since_last_run, latest)
         elif args.command == "fetch":
             _fetch(cfg, HttpClient(cfg.http))
         elif args.command == "fetch-reference":
@@ -379,16 +362,21 @@ def main(argv: list[str] | None = None) -> int:
                 reset=args.reset,
                 with_sink=not args.skip_factory_sink,
             )
-        elif args.command == "load-credit":
-            _load_credit(cfg)
         else:
-            _build(cfg, 0, utc_now_iso(), mark)
+            _build(cfg, 0, utc_now_iso(), mark, args.since_last_run, latest)
         return int(ExitCode.OK)
+    except sa.exc.SQLAlchemyError as exc:
+        return _report(translate_database_error(exc))
     except PipelineError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        if exc.context:
-            print(
-                json.dumps(exc.context, ensure_ascii=False, sort_keys=True),
-                file=sys.stderr,
-            )
-        return int(exc.exit_code)
+        return _report(exc)
+
+
+def _report(exc: PipelineError) -> int:
+    """One readable error line plus its context; the exit code names the class."""
+    print(f"error: {exc}", file=sys.stderr)
+    if exc.context:
+        print(
+            json.dumps(exc.context, ensure_ascii=False, sort_keys=True),
+            file=sys.stderr,
+        )
+    return int(exc.exit_code)

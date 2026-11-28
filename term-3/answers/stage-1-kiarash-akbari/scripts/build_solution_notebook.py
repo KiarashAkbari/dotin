@@ -42,6 +42,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+SEED = 42  # the only random step (the Spearman sample in section 7) uses this seed
+
 CASES = Path("data/curated/cases.csv")
 if not CASES.is_file():
     proc = subprocess.run(
@@ -98,7 +100,6 @@ from pathlib import Path
 
 from data_factory import analysis as a
 
-SEED = a.SEED
 df = a.load_cases(Path("data/curated/cases.csv"))
 df.shape
 """)
@@ -271,7 +272,7 @@ md("""
 """)
 
 code("""
-a.spearman(df).round(3)
+a.spearman(df, seed=SEED).round(3)
 """)
 
 md("""

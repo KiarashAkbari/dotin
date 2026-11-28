@@ -29,9 +29,27 @@ class RollingConfigTests(unittest.TestCase):
                 (rolled.source.start_date, rolled.source.end_date),
                 (date(2025, 3, 1), date(2025, 3, 20)),
             )
-            self.assertEqual(rolled.paths.curated_dir.name, "rolling")
-            self.assertEqual(rolled.paths.quarantine_dir.name, "rolling")
-            self.assertEqual(rolled.paths.manifest_path.name, "manifest.rolling.json")
+            run_id = rolled.paths.curated_dir.name
+            self.assertEqual(rolled.paths.curated_dir.parent, cfg.paths.curated_dir / "rolling")
+            self.assertEqual(
+                rolled.paths.quarantine_dir, cfg.paths.quarantine_dir / "rolling" / run_id
+            )
+            self.assertEqual(
+                rolled.paths.manifest_path, rolled.paths.curated_dir / "run_manifest.json"
+            )
+
+    def test_each_increment_gets_its_own_folder(self):
+        from datetime import datetime, timezone
+
+        from data_factory.rolling import new_run_id
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(Path(tmp))
+            now = datetime(2025, 3, 20, 12, 0, 0, tzinfo=timezone.utc)
+            first = new_run_id(cfg, now)
+            self.assertEqual(first, "20250320T120000Z")
+            (cfg.paths.curated_dir / "rolling" / first).mkdir(parents=True)
+            self.assertEqual(new_run_id(cfg, now), "20250320T120000Z-2")
 
     def test_rolling_window_never_reuses_the_full_runs_raw_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,3 +100,52 @@ class MaxCreatedTests(unittest.TestCase):
                 NY, {}, stats,
             )
         self.assertEqual(stats.max_created_at, "2025-01-09T08:00:00")
+
+class EmptyIncrementTests(unittest.TestCase):
+    """--since-last-run with nothing new succeeds with zero rows instead of exit 65."""
+
+    def test_threshold_accepts_an_empty_increment_only_when_asked(self):
+        from data_factory.quality import QualityReport, enforce_threshold
+
+        enforce_threshold(QualityReport(), max_ratio=0.01, min_rows=1, allow_empty=True)
+        with self.assertRaises(DataError):
+            enforce_threshold(QualityReport(), max_ratio=0.01, min_rows=1)
+
+    def test_an_increment_where_nothing_passed_still_fails(self):
+        from data_factory.errors import QuarantineThresholdError
+        from data_factory.quality import QualityReport, enforce_threshold
+        from data_factory.contract import ReasonCode
+
+        report = QualityReport()
+        report.add((ReasonCode.DUPLICATE_UNIQUE_KEY,))
+        with self.assertRaises(QuarantineThresholdError):
+            enforce_threshold(report, max_ratio=0.5, min_rows=1, allow_empty=True)
+
+    def test_empty_increment_publishes_zero_rows_and_keeps_the_mark(self):
+        from data_factory.manifest import build_manifest
+        from data_factory.pipeline import process
+        from data_factory.rolling import Watermark
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = make_config(Path(tmp))
+            result = process([], cfg, {}, allow_empty=True)
+            self.assertEqual(result.report.total, 0)
+            lines = (cfg.paths.curated_dir / "cases.csv").read_text("utf-8").splitlines()
+            self.assertEqual(len(lines), 1, "header only")
+            mark = Watermark("2025-03-05T10:00:00", frozenset({"a", "b"}))
+            manifest = build_manifest(
+                cfg=cfg, result=result, requests=1, started_at="s", finished_at="f",
+                previous_mark=mark,
+            )
+            self.assertEqual(manifest["records"]["raw"], 0)
+            self.assertEqual(
+                manifest["watermark"],
+                {"max_created_at": "2025-03-05T10:00:00", "keys_at_max_created_at": ["a", "b"]},
+            )
+
+    def test_a_full_run_with_no_rows_still_fails(self):
+        from data_factory.pipeline import process
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(DataError):
+                process([], make_config(Path(tmp)), {})
