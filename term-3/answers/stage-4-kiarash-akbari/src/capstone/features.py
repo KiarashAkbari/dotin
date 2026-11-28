@@ -16,7 +16,9 @@ What ``build`` does, in order, because the order is the point:
    to the number a report would quote, not only in a test suite somebody has to remember to run;
 4. it counts what the frame holds (rows, features) and refuses a frame that is too small to be
    the one the brief asked for;
-5. it times the query that generates the frame and judges the fastest repeat against the ceiling
+5. it vacuums and analyses every table and snapshot the frame depends on (the catalog's list, in
+   autocommit), so the repeats time the frame and not a database still settling after a bulk load;
+6. it times the query that generates the frame and judges the fastest repeat against the ceiling
    in config, through ``check_query_cost`` -- the statistic is ``TIMING_BASIS``, named once here
    instead of re-described in a docstring and a manifest field, which is how this sentence managed
    to disagree with the code it documents.
@@ -127,6 +129,34 @@ AUDIT_GUARD_SQL = (
     + ")\nSELECT capstone.require_allowed(array_agg(column_name ORDER BY column_name))"
     " FROM audited\n"
 )
+
+#: the relations the frame's query depends on, as quoted ``schema.relation`` names: every base table
+#: (``relkind 'r'``) and snapshot (``'m'``) referenced anywhere in the same closure the audit guard
+#: walks -- the tables and snapshots the frame scans, and the tables those snapshots are refreshed
+#: from. Read from the catalog, not listed by hand, so a join added to ``003`` is settled the day it
+#: is added and a relation that leaves the frame stops being touched.
+SETTLE_RELATIONS_SQL = (
+    DEPENDENCY_CLOSURE_SQL
+    + """
+SELECT DISTINCT format('%I.%I', namespace.nspname, relation.relname) AS relation_name
+FROM view_tree AS tree
+JOIN pg_rewrite AS rule ON rule.ev_class = tree.oid
+JOIN pg_depend AS dep
+  ON dep.classid = 'pg_rewrite'::regclass
+ AND dep.objid = rule.oid
+ AND dep.refclassid = 'pg_class'::regclass
+JOIN pg_class AS relation ON relation.oid = dep.refobjid
+JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+WHERE relation.relkind IN ('r', 'm')
+ORDER BY relation_name
+"""
+)
+#: how one relation is brought to a settled state before the judged repeats. ``VACUUM`` sets the hint
+#: bits and the visibility map a bulk ``COPY`` / ``REFRESH`` leaves unset and resets the counters that
+#: would otherwise start autovacuum *during* the timing loop; ``ANALYZE`` gives every relation (the
+#: snapshots arrive from a refresh with none) the statistics the planner needs. It cannot run inside a
+#: transaction block, which is why ``build`` commits and switches to autocommit around it.
+SETTLE_STATEMENT = "VACUUM (ANALYZE) {relation}"
 
 
 def allowed_only(audit: list[ColumnVerdict], used: list[str]) -> list[str]:
@@ -548,7 +578,33 @@ def build(
                 )
 
             # the judge reads the fastest repeat, so the state it judges has to be the state a reader
-            # can reproduce: statistics warm, on the relations this stage actually changes
+            # can reproduce. Right after a bulk load and a refresh that state is not the frame's: the
+            # pages carry no hint bits, the snapshots have no statistics, and autovacuum is about to
+            # start on all of them, concurrently with the loop below (decisions.md section 42). So
+            # every relation the frame depends on is vacuumed and analysed first, outside any
+            # transaction because VACUUM refuses one, and the loop then times a settled database.
+            cursor.execute(SETTLE_RELATIONS_SQL.format(frame=FRAME_VIEW))
+            settle_targets = [str(row[0]) for row in cursor.fetchall()]
+            if not settle_targets:
+                raise InputError(
+                    f"the catalog lists no table or snapshot under {FRAME_VIEW}, while the column walk"
+                    " found source columns; the two walks disagree and the frame cannot be settled"
+                    " before it is timed",
+                )
+            connection.commit()
+            settled_ms: dict[str, float] = {}
+            # wall time, not the injected ``clock``: this duration is reported, never judged, and the
+            # clock a test hands in is a script of the timing loop's readings
+            settle_started = time.monotonic()
+            connection.autocommit = True
+            try:
+                for relation in settle_targets:
+                    started = time.monotonic()
+                    cursor.execute(SETTLE_STATEMENT.format(relation=relation))
+                    settled_ms[relation] = round((time.monotonic() - started) * 1000.0, 3)
+            finally:
+                connection.autocommit = False
+            settle_seconds = time.monotonic() - settle_started
             if bridge_present:
                 for target in BRIDGE_ANALYZE:
                     if target == "capstone.mv_external_density":
@@ -585,4 +641,7 @@ def build(
         "query_ms_runs": [round(value, 3) for value in durations_ms],
         "ceiling_ms": config.features.feature_query_ms,
         "cold_ms": round(durations_ms[0], 3),
+        "settled_with": SETTLE_STATEMENT.format(relation="<relation>"),
+        "settled_relations": settled_ms,
+        "settle_seconds": round(settle_seconds, 3),
     }

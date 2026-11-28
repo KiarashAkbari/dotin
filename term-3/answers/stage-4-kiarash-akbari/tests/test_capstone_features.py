@@ -58,8 +58,19 @@ class RecordingConnection:
         audit_rows: int = 53,
         bridge_pairs: int = 0,
         bridge_present: bool | None = None,
+        settle_relations: list[str] | None = None,
     ) -> None:
         self.statements: list[str] = []
+        #: the autocommit flag at the moment each statement was sent, index for index with
+        #: ``statements`` -- VACUUM refuses a transaction block, so *when* the flag flips is a claim
+        self.autocommit_at: list[bool] = []
+        self.autocommit = False
+        #: what the catalog walk answers for "which tables and snapshots does the frame depend on"
+        self.settle_relations = (
+            settle_relations
+            if settle_relations is not None
+            else ["capstone.mv_order_item_rollup", "olist.orders"]
+        )
         #: how many rows ``capstone.column_audit`` holds; 0 is the fresh-database case the
         #: pre-check exists for, so a test can dial it without faking a whole parser
         self.audit_rows = audit_rows
@@ -95,7 +106,10 @@ class RecordingCursor:
 
     def execute(self, sql: str, params=None) -> None:
         self.connection.statements.append(sql)
-        if "to_regclass('capstone.external_municipio')" in sql:
+        self.connection.autocommit_at.append(self.connection.autocommit)
+        if "format('%I.%I', namespace.nspname, relation.relname)" in sql:
+            self._rows = [(name,) for name in self.connection.settle_relations]
+        elif "to_regclass('capstone.external_municipio')" in sql:
             self._rows = [(self.connection.bridge_present,)]
         elif "to_regclass('capstone.mv_external_density')" in sql:
             self._rows = [(self.connection.bridge_present,)]
@@ -407,12 +421,107 @@ class BuildSequencingTests(_SqlFixtureMixin, unittest.TestCase):
                 "query_ms_mean",
                 "query_ms_runs",
                 "rows",
+                "settle_seconds",
+                "settled_relations",
+                "settled_with",
                 "source_columns_read",
             ],
         )
         self.assertEqual(metadata["frame"], features.FRAME_VIEW)
         self.assertEqual(metadata["features"], len(FEATURE_NAMES))
         self.assertEqual(metadata["migrations_applied"], ["001_first.sql", "002_second.sql"])
+
+
+class SettleBeforeTimingTests(_SqlFixtureMixin, unittest.TestCase):
+    """The repeats time a settled database, not one autovacuum is still working through.
+
+    On a fresh database the feature step runs a minute after a ``--reset`` bulk load and right after
+    ``003`` refreshed every snapshot; a run on the student's machine judged 627.2 ms there and 432.5 ms
+    on the same database a minute later, with the same plan (decisions.md section 42). These tests pin
+    the order that removes that difference: migrations, then the catalog's list, then ``VACUUM
+    (ANALYZE)`` of exactly that list in autocommit, then the timing loop.
+    """
+
+    def positions(self, connection, predicate) -> list[int]:
+        return [i for i, sql in enumerate(connection.statements) if predicate(sql)]
+
+    def test_vacuum_runs_after_the_migrations_and_before_the_first_timing(self) -> None:
+        connection = RecordingConnection()
+        self.build(connection, repeat=3)
+        ddl = (self.root / "sql" / "001_first.sql").read_text()
+        last_ddl = max(self.positions(connection, lambda sql: sql == ddl))
+        vacuums = self.positions(connection, lambda sql: sql.startswith("VACUUM (ANALYZE) "))
+        timed = self.positions(connection, lambda sql: "EXPLAIN (ANALYZE, TIMING OFF)" in sql)
+        self.assertEqual(len(vacuums), 2, msg="one VACUUM per relation the catalog listed, once")
+        self.assertEqual(len(timed), 3)
+        self.assertLess(last_ddl, min(vacuums), msg="003 refreshes the snapshots; vacuum after that")
+        self.assertLess(max(vacuums), min(timed), msg="the judged repeats must see the settled state")
+
+    def test_the_vacuumed_relations_are_the_catalog_s_answer_not_a_hand_list(self) -> None:
+        listed = ["capstone.mv_order_centroids", "olist.\"odd name\"", "olist.sellers"]
+        connection = RecordingConnection(settle_relations=listed)
+        metadata = self.build(connection)
+        vacuumed = [sql for sql in connection.statements if sql.startswith("VACUUM")]
+        self.assertEqual(vacuumed, [features.SETTLE_STATEMENT.format(relation=name) for name in listed])
+        self.assertEqual(list(metadata["settled_relations"]), listed)
+        asked = self.positions(connection, lambda sql: sql == features.SETTLE_RELATIONS_SQL.format(frame=features.FRAME_VIEW))
+        self.assertEqual(len(asked), 1, msg="the list is asked of the database exactly once")
+        self.assertLess(asked[0], min(self.positions(connection, lambda sql: sql.startswith("VACUUM"))))
+
+    def test_the_catalog_query_walks_the_guard_s_closure_and_keeps_tables_and_snapshots(self) -> None:
+        sql = features.SETTLE_RELATIONS_SQL
+        self.assertTrue(sql.startswith(features.DEPENDENCY_CLOSURE_SQL), msg="one dependency walk, shared")
+        self.assertIn("relation.relkind IN ('r', 'm')", sql)
+        self.assertNotRegex(sql, r"olist\.|capstone\.mv_", msg="no relation is named by hand")
+
+    def test_vacuum_is_sent_in_autocommit_and_the_flag_is_restored(self) -> None:
+        connection = RecordingConnection()
+        self.build(connection)
+        for sql, autocommit in zip(connection.statements, connection.autocommit_at):
+            if sql.startswith("VACUUM"):
+                self.assertTrue(autocommit, msg="VACUUM cannot run inside a transaction block")
+            elif "EXPLAIN (ANALYZE, TIMING OFF)" in sql:
+                self.assertFalse(autocommit, msg="the timing loop runs as before")
+        self.assertFalse(connection.autocommit)
+        first_vacuum = connection.statements.index(
+            next(sql for sql in connection.statements if sql.startswith("VACUUM"))
+        )
+        self.assertFalse(connection.autocommit_at[first_vacuum - 1], msg="the switch is only around VACUUM")
+
+    def test_the_flag_is_restored_when_a_vacuum_fails(self) -> None:
+        connection = RecordingConnection()
+        original = RecordingCursor.execute
+
+        def failing(cursor, sql, params=None):
+            original(cursor, sql, params)
+            if sql.startswith("VACUUM"):
+                raise RuntimeError("lock timeout")
+
+        with mock.patch.object(RecordingCursor, "execute", failing):
+            with self.assertRaises(RuntimeError):
+                self.build(connection)
+        self.assertFalse(connection.autocommit)
+        self.assertTrue(connection.closed)
+
+    def test_a_catalog_that_lists_nothing_is_refused_before_any_timing(self) -> None:
+        connection = RecordingConnection(settle_relations=[])
+        with self.assertRaises(InputError) as caught:
+            self.build(connection)
+        self.assertIn("cannot be settled", str(caught.exception))
+        self.assertFalse([sql for sql in connection.statements if "EXPLAIN (ANALYZE" in sql])
+
+    def test_the_metadata_names_what_was_settled_and_how_long_it_took(self) -> None:
+        metadata = self.build(RecordingConnection())
+        self.assertEqual(sorted(metadata["settled_relations"]), ["capstone.mv_order_item_rollup", "olist.orders"])
+        self.assertEqual(metadata["settled_with"], "VACUUM (ANALYZE) <relation>")
+        self.assertGreaterEqual(metadata["settle_seconds"], 0.0)
+        self.assertTrue(all(value >= 0.0 for value in metadata["settled_relations"].values()))
+
+    def test_the_ceiling_is_not_what_moved(self) -> None:
+        """Settling is the fix; a raised ceiling would be hiding the finding (decisions.md section 42)."""
+        self.assertEqual(features.check_query_cost(499.9, stage_config(self.root)), 499.9)
+        with self.assertRaises(BudgetError):
+            features.check_query_cost(500.1, stage_config(self.root))
 
 
 class FramePerformanceHarnessTests(unittest.TestCase):
