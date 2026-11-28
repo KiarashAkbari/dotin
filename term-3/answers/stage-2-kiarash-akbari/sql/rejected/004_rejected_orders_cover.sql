@@ -1,3 +1,12 @@
+-- STATUS (2026-11): SUPERSEDED. This index was rejected for the old Q4
+-- (all sellers aggregated, numbers below). The rewritten Q4 reads only the
+-- top-20 sellers' ~21k orders by key, where this covering shape turns heap
+-- fetches into Index Only Scans; re-measured, it is now applied in
+-- sql/004_performance_indexes.sql as ix_orders_dispatch_cover. The evidence
+-- for that decision is data/curated/evidence/index-evidence.json. The numbers
+-- and file names below are the original October 2026 notes; those JSON files
+-- were never committed, so they cannot be checked from this repository.
+--
 -- REJECTED EXPERIMENT — DO NOT APPLY IN THE FINAL MIGRATION
 --
 -- Candidate: covering index for Q4 top-sellers order lookups.

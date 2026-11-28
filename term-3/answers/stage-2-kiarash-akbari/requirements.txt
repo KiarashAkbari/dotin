@@ -110,3 +110,5 @@ websocket-client==1.9.2
 
 # Shared package from stage 1; install from the stage-2 directory.
 -e ../stage-1-kiarash-akbari
+# This stage's own helpers (src/olist_perf), imported by the notebook.
+-e .

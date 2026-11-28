@@ -1,0 +1,244 @@
+{
+ "sizes": [
+  {
+   "table_name": "customers",
+   "index_name": "pk_customers",
+   "index_bytes": 7856128,
+   "table_bytes": 11878400,
+   "from_004": false
+  },
+  {
+   "table_name": "geolocation",
+   "index_name": "pk_geolocation",
+   "index_bytes": 16605184,
+   "table_bytes": 58286080,
+   "from_004": false
+  },
+  {
+   "table_name": "monthly_category_snapshot",
+   "index_name": "uq_monthly_category_snapshot_grain",
+   "index_bytes": 73728,
+   "table_bytes": 122880,
+   "from_004": false
+  },
+  {
+   "table_name": "order_items",
+   "index_name": "pk_order_items",
+   "index_bytes": 6668288,
+   "table_bytes": 18833408,
+   "from_004": false
+  },
+  {
+   "table_name": "order_reviews",
+   "index_name": "ix_order_reviews_order_score",
+   "index_bytes": 8019968,
+   "table_bytes": 14721024,
+   "from_004": true
+  },
+  {
+   "table_name": "order_reviews",
+   "index_name": "pk_order_reviews",
+   "index_bytes": 12197888,
+   "table_bytes": 14721024,
+   "from_004": false
+  },
+  {
+   "table_name": "orders",
+   "index_name": "ix_orders_dispatch_cover",
+   "index_bytes": 10936320,
+   "table_bytes": 14819328,
+   "from_004": true
+  },
+  {
+   "table_name": "orders",
+   "index_name": "ix_orders_inactive",
+   "index_bytes": 98304,
+   "table_bytes": 14819328,
+   "from_004": true
+  },
+  {
+   "table_name": "orders",
+   "index_name": "ix_orders_purchase_ts",
+   "index_bytes": 2662400,
+   "table_bytes": 14819328,
+   "from_004": true
+  },
+  {
+   "table_name": "orders",
+   "index_name": "pk_orders",
+   "index_bytes": 7864320,
+   "table_bytes": 14819328,
+   "from_004": false
+  },
+  {
+   "table_name": "payments",
+   "index_name": "ix_payments_order_type_inst",
+   "index_bytes": 11485184,
+   "table_bytes": 9674752,
+   "from_004": true
+  },
+  {
+   "table_name": "payments",
+   "index_name": "pk_payments",
+   "index_bytes": 8093696,
+   "table_bytes": 9674752,
+   "from_004": false
+  },
+  {
+   "table_name": "product_category_name_translation",
+   "index_name": "pk_category_translation",
+   "index_bytes": 16384,
+   "table_bytes": 8192,
+   "from_004": false
+  },
+  {
+   "table_name": "products",
+   "index_name": "pk_products",
+   "index_bytes": 2605056,
+   "table_bytes": 3579904,
+   "from_004": false
+  },
+  {
+   "table_name": "sellers",
+   "index_name": "pk_sellers",
+   "index_bytes": 262144,
+   "table_bytes": 270336,
+   "from_004": false
+  }
+ ],
+ "summary": {
+  "tables": {
+   "order_reviews": {
+    "table_bytes": 14721024,
+    "index_004_bytes": 8019968,
+    "all_index_bytes": 20217856,
+    "ratio_004_to_table": 0.5448
+   },
+   "orders": {
+    "table_bytes": 14819328,
+    "index_004_bytes": 13697024,
+    "all_index_bytes": 21561344,
+    "ratio_004_to_table": 0.9243
+   },
+   "payments": {
+    "table_bytes": 9674752,
+    "index_004_bytes": 11485184,
+    "all_index_bytes": 19578880,
+    "ratio_004_to_table": 1.1871
+   }
+  },
+  "total_004_bytes": 33202176,
+  "total_heap_bytes_of_those_tables": 39215104,
+  "ratio": 0.8467
+ },
+ "write_cost": {
+  "orders": {
+   "rows_inserted": 99441,
+   "indexes_004": [
+    "ix_orders_purchase_ts",
+    "ix_orders_inactive",
+    "ix_orders_dispatch_cover"
+   ],
+   "with_004_indexes_ms": [
+    1184.3,
+    1140.6,
+    1133.8
+   ],
+   "without_004_indexes_ms": [
+    631.4,
+    610.8,
+    629.1
+   ],
+   "median_with_ms": 1140.6,
+   "median_without_ms": 629.1,
+   "slowdown_ratio": 1.813
+  },
+  "order_items": {
+   "rows_inserted": 112650,
+   "indexes_004": [],
+   "with_004_indexes_ms": [
+    1190.7,
+    1173.1,
+    1164.5
+   ],
+   "without_004_indexes_ms": [
+    1208.0,
+    1186.1,
+    1167.4
+   ],
+   "median_with_ms": 1173.1,
+   "median_without_ms": 1186.1,
+   "slowdown_ratio": 0.989
+  },
+  "order_reviews": {
+   "rows_inserted": 99224,
+   "indexes_004": [
+    "ix_order_reviews_order_score"
+   ],
+   "with_004_indexes_ms": [
+    1215.6,
+    1223.4,
+    1248.2
+   ],
+   "without_004_indexes_ms": [
+    928.6,
+    947.5,
+    958.9
+   ],
+   "median_with_ms": 1223.4,
+   "median_without_ms": 947.5,
+   "slowdown_ratio": 1.291
+  },
+  "payments": {
+   "rows_inserted": 103886,
+   "indexes_004": [
+    "ix_payments_order_type_inst"
+   ],
+   "with_004_indexes_ms": [
+    983.3,
+    984.4,
+    986.9
+   ],
+   "without_004_indexes_ms": [
+    652.4,
+    663.8,
+    657.8
+   ],
+   "median_with_ms": 984.4,
+   "median_without_ms": 657.8,
+   "slowdown_ratio": 1.496
+  }
+ },
+ "rebuilt_sizes": [
+  {
+   "index": "ix_orders_purchase_ts",
+   "bytes_as_loaded": 2662400,
+   "bytes_after_reindex": 2244608,
+   "ratio": 1.186
+  },
+  {
+   "index": "ix_orders_inactive",
+   "bytes_as_loaded": 98304,
+   "bytes_after_reindex": 90112,
+   "ratio": 1.091
+  },
+  {
+   "index": "ix_orders_dispatch_cover",
+   "bytes_as_loaded": 10936320,
+   "bytes_after_reindex": 8585216,
+   "ratio": 1.274
+  },
+  {
+   "index": "ix_order_reviews_order_score",
+   "bytes_as_loaded": 8019968,
+   "bytes_after_reindex": 5881856,
+   "ratio": 1.364
+  },
+  {
+   "index": "ix_payments_order_type_inst",
+   "bytes_as_loaded": 11485184,
+   "bytes_after_reindex": 8732672,
+   "ratio": 1.315
+  }
+ ]
+}

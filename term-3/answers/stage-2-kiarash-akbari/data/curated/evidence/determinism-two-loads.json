@@ -1,0 +1,188 @@
+{
+  "captured_at": "2026-11-25T09:40:34+00:00",
+  "command": "python -m data_factory load-database --config <config> --reset --skip-factory-sink (cwd: stage-1), twice",
+  "identical_tables": true,
+  "identical_query_results": true,
+  "runs": [
+    {
+      "load_seconds_wall": 55.8,
+      "load_stdout": [
+        "schema=reset",
+        "sql_migrations=4 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql,004_performance_indexes.sql",
+        "table=product_category_name_translation loaded=71",
+        "table=customers loaded=99441",
+        "table=sellers loaded=3095",
+        "table=products loaded=32951",
+        "table=geolocation loaded=738332",
+        "table=orders loaded=99441",
+        "table=order_items loaded=112650",
+        "table=payments loaded=103886",
+        "table=order_reviews loaded=99224",
+        "factory_sink=skipped",
+        "sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql"
+      ],
+      "snapshot_refresh": {
+        "first_month": "2016-09-01",
+        "last_closed_month": "2018-09-01",
+        "refresh_ms": 885.4,
+        "snapshot_rows": 1282,
+        "last_month": "2018-09-01",
+        "refreshed_at": "2026-11-25 09:39:27.527180+00:00"
+      },
+      "tables": {
+        "customers": {
+          "rows": 99441,
+          "md5": "133c6dce5cc2a66e9175ef5eb6664598"
+        },
+        "sellers": {
+          "rows": 3095,
+          "md5": "f7d2dd27a2eca19d69c527ee4c5a1476"
+        },
+        "product_category_name_translation": {
+          "rows": 71,
+          "md5": "e24da5ebb16bc8a4ef7fbc18119fbed4"
+        },
+        "products": {
+          "rows": 32951,
+          "md5": "fa54b620eaaf67edf824eb27311056c5"
+        },
+        "orders": {
+          "rows": 99441,
+          "md5": "af3ccf35d20054f8d05d6248c9e31e59"
+        },
+        "order_items": {
+          "rows": 112650,
+          "md5": "6cc7b6adc4fb6dd25e4ce66e53e3ef1d"
+        },
+        "payments": {
+          "rows": 103886,
+          "md5": "c2bb4c442db8a4383347a4a5473f5c74"
+        },
+        "order_reviews": {
+          "rows": 99224,
+          "md5": "036a0d74972872d9e93c526ed8b046e5"
+        },
+        "geolocation": {
+          "rows": 738332,
+          "md5": "6dbadfb51e909e70ae2db953d1af7253"
+        },
+        "monthly_category_snapshot": {
+          "rows": 1282,
+          "md5": "5d6a2bc3e8e3f1accf05fffb111b1894"
+        }
+      },
+      "queries": {
+        "q1_monthly_category_sales.sql": {
+          "rows": 1282,
+          "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73"
+        },
+        "q2_delivery_by_state_month.sql": {
+          "rows": 556,
+          "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da"
+        },
+        "q3_delay_and_satisfaction.sql": {
+          "rows": 4,
+          "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847"
+        },
+        "q4_top_sellers.sql": {
+          "rows": 20,
+          "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967"
+        },
+        "q5_payment_distribution.sql": {
+          "rows": 27,
+          "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984"
+        }
+      }
+    },
+    {
+      "load_seconds_wall": 56.0,
+      "load_stdout": [
+        "schema=reset",
+        "sql_migrations=4 files=001_create_olist_schema.sql,002_analytical_views.sql,003_functions_and_snapshots.sql,004_performance_indexes.sql",
+        "table=product_category_name_translation loaded=71",
+        "table=customers loaded=99441",
+        "table=sellers loaded=3095",
+        "table=products loaded=32951",
+        "table=geolocation loaded=738332",
+        "table=orders loaded=99441",
+        "table=order_items loaded=112650",
+        "table=payments loaded=103886",
+        "table=order_reviews loaded=99224",
+        "factory_sink=skipped",
+        "sql_snapshots=4 files=005_q4_seller_snapshot.sql,006_q5_payment_snapshot.sql,007_q1_monthly_category_snapshot.sql,008_q3_delay_satisfaction_snapshot.sql"
+      ],
+      "snapshot_refresh": {
+        "first_month": "2016-09-01",
+        "last_closed_month": "2018-09-01",
+        "refresh_ms": 873.1,
+        "snapshot_rows": 1282,
+        "last_month": "2018-09-01",
+        "refreshed_at": "2026-11-25 09:40:29.280434+00:00"
+      },
+      "tables": {
+        "customers": {
+          "rows": 99441,
+          "md5": "133c6dce5cc2a66e9175ef5eb6664598"
+        },
+        "sellers": {
+          "rows": 3095,
+          "md5": "f7d2dd27a2eca19d69c527ee4c5a1476"
+        },
+        "product_category_name_translation": {
+          "rows": 71,
+          "md5": "e24da5ebb16bc8a4ef7fbc18119fbed4"
+        },
+        "products": {
+          "rows": 32951,
+          "md5": "fa54b620eaaf67edf824eb27311056c5"
+        },
+        "orders": {
+          "rows": 99441,
+          "md5": "af3ccf35d20054f8d05d6248c9e31e59"
+        },
+        "order_items": {
+          "rows": 112650,
+          "md5": "6cc7b6adc4fb6dd25e4ce66e53e3ef1d"
+        },
+        "payments": {
+          "rows": 103886,
+          "md5": "c2bb4c442db8a4383347a4a5473f5c74"
+        },
+        "order_reviews": {
+          "rows": 99224,
+          "md5": "036a0d74972872d9e93c526ed8b046e5"
+        },
+        "geolocation": {
+          "rows": 738332,
+          "md5": "6dbadfb51e909e70ae2db953d1af7253"
+        },
+        "monthly_category_snapshot": {
+          "rows": 1282,
+          "md5": "5d6a2bc3e8e3f1accf05fffb111b1894"
+        }
+      },
+      "queries": {
+        "q1_monthly_category_sales.sql": {
+          "rows": 1282,
+          "result_sha256": "b229b266de00f7211138d19e9398b44e811e225b1699c6445018c6b82279bd73"
+        },
+        "q2_delivery_by_state_month.sql": {
+          "rows": 556,
+          "result_sha256": "0fb5ea786a0a323e0fc80dbbdc247143e42b9dee16566aad9dbdab3976c826da"
+        },
+        "q3_delay_and_satisfaction.sql": {
+          "rows": 4,
+          "result_sha256": "4081b798251ec41fc72a4ba26fbff689c4893b17d9803aae1254cae7fc641847"
+        },
+        "q4_top_sellers.sql": {
+          "rows": 20,
+          "result_sha256": "333ddaceed600eb5add3cbf48e79b83d5b45217f2c747728858eb789a169e967"
+        },
+        "q5_payment_distribution.sql": {
+          "rows": 27,
+          "result_sha256": "d37ffa0db53f5a81f45a8041f09cf325d4c9b3675e59af0a3a2071400997e984"
+        }
+      }
+    }
+  ]
+}

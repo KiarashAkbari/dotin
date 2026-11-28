@@ -32,6 +32,54 @@ INSERT INTO olist.order_reviews
 (repeat('0',32), repeat('e',32), 5, '2018-01-13');
 """
 
+# Rows that exercise the filters the rewrites must keep: a canceled order
+# (excluded everywhere), a second month and seller, a NULL category, an order
+# without review and an order paid in two installments plans.
+SECOND_MONTH = """
+INSERT INTO olist.sellers VALUES (repeat('9',32), '00456', 'city', 'RJ');
+INSERT INTO olist.products (product_id, product_category_name)
+VALUES (repeat('8',32), NULL);
+INSERT INTO olist.orders (order_id, customer_id, order_status,
+order_purchase_timestamp, order_approved_at, order_delivered_carrier_date,
+order_delivered_customer_date, order_estimated_delivery_date) VALUES
+(repeat('1',32), repeat('a',32), 'delivered', '2018-02-03', '2018-02-03',
+ '2018-02-06', '2018-02-08', '2018-02-20'),
+(repeat('2',32), repeat('a',32), 'canceled', '2018-02-04', NULL, NULL, NULL,
+ '2018-02-20'),
+(repeat('3',32), repeat('a',32), 'shipped', '2018-03-01', '2018-03-01',
+ '2018-03-05', NULL, '2018-03-20');
+INSERT INTO olist.order_items VALUES
+(repeat('1',32), 1, repeat('8',32), repeat('9',32), '2018-02-05', 50, 5),
+(repeat('1',32), 2, repeat('d',32), repeat('c',32), '2018-02-05', 7, 1),
+(repeat('2',32), 1, repeat('d',32), repeat('9',32), '2018-02-05', 999, 9),
+(repeat('3',32), 1, repeat('d',32), repeat('9',32), '2018-03-05', 15, 3);
+INSERT INTO olist.payments VALUES
+(repeat('1',32), 1, 'credit_card', 6, 40),
+(repeat('1',32), 2, 'credit_card', 6, 23),
+(repeat('2',32), 1, 'boleto', 1, 1008),
+(repeat('3',32), 1, 'credit_card', 3, 18);
+INSERT INTO olist.order_reviews
+(review_id, order_id, review_score, review_creation_date) VALUES
+(repeat('7',32), repeat('1',32), 4, '2018-02-09');
+"""
+
+QUERIES = (
+    "q1_monthly_category_sales.sql",
+    "q2_delivery_by_state_month.sql",
+    "q3_delay_and_satisfaction.sql",
+    "q4_top_sellers.sql",
+    "q5_payment_distribution.sql",
+)
+
+
+def rounded(rows):
+    """Rows with floats rounded to 12 significant digits (CORR summation order)."""
+    return [
+        {key: float(f"{value:.12g}") if isinstance(value, float) else value
+         for key, value in row.items()}
+        for row in rows
+    ]
+
 
 @unittest.skipUnless(os.environ.get("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class PostgresIntegrationTests(unittest.TestCase):
@@ -46,7 +94,12 @@ class PostgresIntegrationTests(unittest.TestCase):
         self.addCleanup(self.tx.rollback)
         if self.conn.scalar(sa.text("SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = :name)"), {"name": "olist"}):
             self.fail("Refusing to run: olist schema already exists; use an empty disposable database")
-        for filename in ("001_create_olist_schema.sql", "002_analytical_views.sql", "003_functions_and_snapshots.sql"):
+        for filename in (
+            "001_create_olist_schema.sql",
+            "002_analytical_views.sql",
+            "003_functions_and_snapshots.sql",
+            "004_performance_indexes.sql",
+        ):
             self.conn.execute(sa.text((SQL / filename).read_text(encoding="utf-8")))
         self.conn.execute(sa.text(FIXTURE))
         for filename in (
@@ -59,9 +112,13 @@ class PostgresIntegrationTests(unittest.TestCase):
                 sa.text((SQL / filename).read_text(encoding="utf-8"))
             )
 
-    def query(self, filename):
-        statement = sa.text((SQL / "queries" / filename).read_text(encoding="utf-8"))
+    def query(self, filename, folder="queries"):
+        statement = sa.text((SQL / folder / filename).read_text(encoding="utf-8"))
         return self.conn.execute(statement).mappings().all()
+
+    def add_second_month(self):
+        """A canceled order, a second category/month and a multi-payment order."""
+        self.conn.execute(sa.text(SECOND_MONTH))
 
     def refresh(self):
         self.conn.execute(sa.text("CALL olist.refresh_monthly_category_snapshot(CAST(:month AS date))"), {"month": "2018-01-15"})
@@ -142,6 +199,69 @@ EXECUTE FUNCTION olist.reject_snapshot_insert();
             with self.conn.begin_nested():
                 self.refresh()
         self.assertEqual(self.snapshot(), before)
+
+    def test_every_optimized_query_returns_the_baseline_rows(self):
+        self.add_second_month()
+        self.conn.execute(sa.text(
+            "CALL olist.refresh_monthly_category_snapshot_range("
+            "CAST(:first AS date), CAST(:last AS date))"),
+            {"first": "2018-01-01", "last": "2018-02-01"})
+        for filename in QUERIES:
+            with self.subTest(query=filename):
+                self.assertEqual(rounded(self.query(filename)),
+                                 rounded(self.query(filename, "baseline")))
+
+    def test_q1_hybrid_is_correct_with_an_empty_partial_and_full_snapshot(self):
+        self.add_second_month()
+        expected = self.query("q1_monthly_category_sales.sql", "baseline")
+        self.assertEqual(len(expected), 4)
+        for last in (None, "2018-01-01", "2018-03-01"):
+            with self.subTest(snapshot_through=last):
+                self.conn.execute(sa.text("DELETE FROM olist.monthly_category_snapshot"))
+                if last is not None:
+                    self.conn.execute(sa.text(
+                        "CALL olist.refresh_monthly_category_snapshot_range("
+                        "CAST(:first AS date), CAST(:last AS date))"),
+                        {"first": "2018-01-01", "last": last})
+                self.assertEqual(self.query("q1_monthly_category_sales.sql"), expected)
+
+    def test_q4_and_q5_exclude_canceled_orders(self):
+        self.add_second_month()
+        sellers = {row["seller_id"]: row for row in self.query("q4_top_sellers.sql")}
+        self.assertEqual(sellers["9" * 32]["revenue"], Decimal("73"))
+        self.assertEqual(sellers["9" * 32]["seller_orders"], 2)
+        self.assertEqual(sellers["9" * 32]["reviewed_orders"], 1)
+        types = {row["payment_type"] for row in self.query("q5_payment_distribution.sql")}
+        self.assertNotIn("boleto", types)
+
+    def test_range_procedure_is_idempotent_and_validates_its_bounds(self):
+        self.add_second_month()
+        statement = sa.text(
+            "CALL olist.refresh_monthly_category_snapshot_range("
+            "CAST(:first AS date), CAST(:last AS date))")
+        self.conn.execute(statement, {"first": "2018-01-20", "last": "2018-03-02"})
+        once = self.snapshot()
+        self.conn.execute(statement, {"first": "2018-01-01", "last": "2018-03-01"})
+        self.assertEqual(self.snapshot(), once)
+        self.assertEqual(len(once), 4)
+        for first, last in ((None, "2018-01-01"), ("2018-03-01", "2018-01-01")):
+            with self.subTest(first=first, last=last):
+                with self.assertRaises(sa.exc.DBAPIError):
+                    with self.conn.begin_nested():
+                        self.conn.execute(statement, {"first": first, "last": last})
+        self.assertEqual(self.snapshot(), once)
+
+    def test_snapshot_grain_guard_rejects_a_duplicate_null_category(self):
+        self.add_second_month()
+        self.conn.execute(sa.text(
+            "CALL olist.refresh_monthly_category_snapshot(CAST(:m AS date))"),
+            {"m": "2018-02-01"})
+        with self.assertRaises(sa.exc.IntegrityError):
+            with self.conn.begin_nested():
+                self.conn.execute(sa.text(
+                    "INSERT INTO olist.monthly_category_snapshot "
+                    "SELECT * FROM olist.monthly_category_snapshot "
+                    "WHERE product_category_name IS NULL"))
 
 
 if __name__ == "__main__":

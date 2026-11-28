@@ -73,11 +73,28 @@ class MigrationDiscoveryTests(unittest.TestCase):
             self.assertFalse(sink and _is_snapshot_migration(path), path.name)
         self.assertIn("009_factory_sink_schema.sql", MIGRATION.name)
 
-    def test_rejected_experiment_keeps_its_number(self):
-        """004 belongs to sql/rejected and stays out of the applied chain."""
-        self.assertFalse((SQL_DIR / "004_factory_sink_schema.sql").exists())
-        self.assertFalse(any(path.name.startswith("004") for path in sql_migration_files(SQL_DIR)))
+    def test_004_is_the_index_migration_applied_with_the_base_group(self):
+        """004 holds the justified indexes and runs with 001-003, before the load."""
+        names = [path.name for path in sql_migration_files(SQL_DIR)]
+        self.assertIn("004_performance_indexes.sql", names)
+        self.assertEqual([name for name in names if name.startswith("004")],
+                         ["004_performance_indexes.sql"])
+        path = SQL_DIR / "004_performance_indexes.sql"
+        self.assertTrue(_is_base_migration(path))
+        self.assertFalse(_is_snapshot_migration(path) or _is_sink_migration(path))
+
+    def test_004_can_run_inside_the_load_transaction(self):
+        text = (SQL_DIR / "004_performance_indexes.sql").read_text(encoding="utf-8")
+        code = "\n".join(line.split("--", 1)[0] for line in text.splitlines())
+        for forbidden in ("CONCURRENTLY", "VACUUM", "COMMIT", "BEGIN;"):
+            with self.subTest(keyword=forbidden):
+                self.assertNotIn(forbidden, code.upper().replace("BEGIN\n", ""))
+
+    def test_rejected_experiments_stay_out_of_the_applied_chain(self):
         self.assertTrue((SQL_DIR / "rejected" / "004_rejected_orders_cover.sql").exists())
+        applied = {path.name for path in sql_migration_files(SQL_DIR)}
+        for path in (SQL_DIR / "rejected").glob("*.sql"):
+            self.assertNotIn(path.name, applied)
 
 
 class LoaderAgreementTests(unittest.TestCase):
