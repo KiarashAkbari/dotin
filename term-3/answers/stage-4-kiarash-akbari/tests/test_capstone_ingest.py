@@ -87,6 +87,46 @@ class Stage1CommandTests(unittest.TestCase):
         self.assertTrue(Path(parsed["database"]["sql_migrations_dir"]).is_absolute())
         self.assertTrue((plan.stage1_dir / "src" / "data_factory").is_dir())
 
+    def test_stage_1_reads_the_written_config_with_its_own_loader(self) -> None:
+        """The copy must be a whole stage-1 config, rooted at the stage-1 folder.
+
+        Stage 1's fixed config mentions "[database]" in a comment and resolves relative
+        paths against ``[paths] root``; a copy cut at the comment lost ``[quality]`` and the
+        chain's load step exited 78 before loading a row.
+        """
+        from data_factory.config import load_config as load_stage1_config
+
+        config = load_config(helpers.DEFAULT_CONFIG)
+        with tempfile.TemporaryDirectory() as tmp:
+            olist = Path(tmp) / "olist"
+            write_olist(olist)
+            plan = ingest.plan(
+                config,
+                {ingest.DATABASE_URI_ENV: self.URI, ingest.OLIST_DIR_ENV: str(olist)},
+            )
+            stage1 = load_stage1_config(plan.stage1_config)
+        self.assertEqual(stage1.root, plan.stage1_dir.resolve())
+        self.assertEqual(stage1.paths.manifest_path.parent, plan.stage1_dir.resolve() / "data")
+        self.assertEqual(stage1.database.olist_csv_dir, olist.resolve())
+        self.assertEqual(stage1.database.url, "postgresql+psycopg://kiarash@db.example:5433/dotin")
+
+    def test_the_head_splits_on_the_table_header_not_a_comment(self) -> None:
+        base = (
+            '[paths]\n# relative to root (here, [reference] and [database])\nroot = ".."\n'
+            'raw_dir = "data/raw"\n\n[quality]\nmax_quarantine_ratio = 0.01\n\n'
+            '[database]\nurl = "postgresql+psycopg://x@y/z"\n'
+        )
+        head = tomllib.loads(ingest._stage1_head(base, Path("/s1")))
+        self.assertEqual(head["paths"]["root"], str(Path("/s1").resolve()))
+        self.assertEqual(head["quality"]["max_quarantine_ratio"], 0.01)
+        self.assertNotIn("database", head)
+
+    def test_a_config_without_root_gets_one_in_paths(self) -> None:
+        base = '[paths]\nraw_dir = "data/raw"\n\n[quality]\nx = 1\n\n[database]\nurl = "u"\n'
+        head = tomllib.loads(ingest._stage1_head(base, Path("/s1")))
+        self.assertEqual(head["paths"], {"root": str(Path("/s1").resolve()), "raw_dir": "data/raw"})
+        self.assertEqual(head["quality"], {"x": 1})
+
     def test_the_child_gets_the_password_only_through_its_environment(self) -> None:
         config = load_config(helpers.DEFAULT_CONFIG)
         with tempfile.TemporaryDirectory() as tmp:

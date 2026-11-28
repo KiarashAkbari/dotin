@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -174,12 +175,46 @@ def _toml_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+#: a TOML table header on its own line; a "[database]" inside a comment is not one
+_DATABASE_HEADER = re.compile(r"^\[database\][ \t]*(?:#.*)?$", re.MULTILINE)
+_PATHS_HEADER = re.compile(r"^\[paths\][ \t]*(?:#.*)?$", re.MULTILINE)
+_ROOT_LINE = re.compile(r"^root[ \t]*=.*$", re.MULTILINE)
+_ANY_HEADER = re.compile(r"^\[", re.MULTILINE)
+
+
+def _stage1_head(base: str, stage1: Path) -> str:
+    """Stage 1's config up to its ``[database]`` table, anchored at the stage-1 folder.
+
+    Two things changed when stage 1's fix branch reached this tree. Its default config now
+    says "[database]" inside a comment in ``[paths]``, so splitting on the bare text cut the
+    file there and stage 1 refused the copy ("Missing config section: [quality]"). And its
+    relative paths now resolve against ``[paths] root``, itself relative to the config file's
+    folder -- which for this copy is the capstone's curated folder, not stage 1. So the split
+    is on the table header line, and ``root`` inside ``[paths]`` is pinned to the absolute
+    stage-1 folder (added when the file has none, as stage 1 on ``main`` does not).
+    """
+    match = _DATABASE_HEADER.search(base)
+    head = (base[: match.start()] if match else base).rstrip()
+    root = f"root = {_toml_string(str(stage1.resolve()))}"
+    paths = _PATHS_HEADER.search(head)
+    if paths is None:
+        return head + "\n\n[paths]\n" + root
+    following = _ANY_HEADER.search(head, paths.end())
+    end = following.start() if following else len(head)
+    body = head[paths.end():end]
+    if _ROOT_LINE.search(body):
+        body = _ROOT_LINE.sub(lambda _: root, body, count=1)
+    else:
+        body = "\n" + root + body
+    return head[: paths.end()] + body + head[end:]
+
+
 def write_stage1_config(
     stage1: Path, directory: Path, url: str, target: Path
 ) -> Path:
     """Stage 1's own config with an absolute ``[database]`` section pointing at our Olist."""
     base = (stage1 / "config" / "default.toml").read_text(encoding="utf-8")
-    head = base.split("[database]", 1)[0].rstrip()
+    head = _stage1_head(base, stage1)
     stage2 = (stage1.parent / "stage-2-kiarash-akbari").resolve()
     database = "\n".join(
         [
